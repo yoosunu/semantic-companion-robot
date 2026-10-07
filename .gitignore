@@ -1,0 +1,27 @@
+# colcon build outputs
+build/
+install/
+log/
+
+# runtime logs / recordings (keep the folder, not the contents)
+logs/*
+!logs/.gitkeep
+*.db3
+*.mcap
+rosbag*/
+
+# secrets — never commit (public repo)
+.env
+*.env
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
