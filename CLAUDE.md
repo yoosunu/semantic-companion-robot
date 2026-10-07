@@ -12,6 +12,7 @@ Jasper의 대학 마지막 프로젝트. public GitHub repo이자 포트폴리�
 - 명령 안내 시 항상 `[Mac]` / `[VM]` / `[Pi]` 표시.
 
 ## 배포 흐름
+Repo: https://github.com/yoosunu/semantic-companion-robot (public)
 Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub (`main` = 검증된 버전, `dev` = 작업 중)
 → Pi에서 clone/pull → colcon build → 로컬 독립 실행 (Mac/인터넷 없이 동작해야 함)
 
