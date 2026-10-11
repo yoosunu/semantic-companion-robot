@@ -1,0 +1,35 @@
+=== Wed Oct  7 06:24:42 PM KST 2026 ===
+[INFO] [1791365083.127221645] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791365083.686753040] [ros_gz_sim]: Entity creation successful.
+### (1) gz layout — v3wide, rows [-0.6, -0.3, 0.0] rad, bottom row should hit floor ~0.26m everywhere
+  gz total=1080
+  layout=row row0: n=360 mean=0.527 sd=0.126 min=0.120 max=0.626
+  layout=row row1: n=313 mean=1.141 sd=0.907 min=0.120 max=3.496
+  layout=row row2: n=360 mean=0.120 sd=0.000 min=0.120 max=0.120
+  layout=col row0: n=343 mean=0.569 sd=0.649 min=0.120 max=3.483
+  layout=col row1: n=344 mean=0.569 sd=0.648 min=0.120 max=3.496
+  layout=col row2: n=346 mean=0.575 sd=0.658 min=0.120 max=3.489
+
+### (2) which gz row does ros_gz_bridge pass to ROS?
+  v3wide: ROS len=360
+    vs gz layout=row row0: mean|diff|=0.6424 (n=313)
+    vs gz layout=row row1: mean|diff|=0.0002 (n=313)
+    vs gz layout=row row2: mean|diff|=1.0208 (n=313)
+    vs gz layout=col row0: mean|diff|=1.0539 (n=296)
+    vs gz layout=col row1: mean|diff|=1.0513 (n=297)
+    vs gz layout=col row2: mean|diff|=1.0552 (n=299)
+    vs gz first 360 raw elements: mean|diff|=0.6424
+  v3: ROS len=360
+    vs gz layout=row row0: mean|diff|=0.0071 (n=326)
+    vs gz layout=row row1: mean|diff|=0.0072 (n=326)
+    vs gz layout=row row2: mean|diff|=1.2172 (n=326)
+    vs gz layout=col row0: mean|diff|=1.1511 (n=307)
+    vs gz layout=col row1: mean|diff|=1.1654 (n=305)
+    vs gz layout=col row2: mean|diff|=1.1425 (n=307)
+    vs gz first 360 raw elements: mean|diff|=0.0071
+
+### (3) accuracy — v3 at (-2.0, 0.5), yaw 0. Expected nearest pillars ~0.9m near -29deg(331) and +34deg
+  ROS v3: n=326 mean=1.337 sd=0.791 min=0.120 max=3.349
+  local minima (<2m) [range, deg]: [(0.12, 359), (0.469, 89), (0.531, 148), (0.908, 331), (0.958, 31), (0.969, 267), (1.702, 299), (1.942, 345)]
+  every 30deg: ['inf', 0.96, 2.33, 0.47, 0.6, 0.53, 0.62, 1.03, 1.22, 2.2, 1.71, 0.91]
+=== done ===

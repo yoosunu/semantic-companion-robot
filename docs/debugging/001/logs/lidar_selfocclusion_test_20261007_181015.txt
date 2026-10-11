@@ -1,0 +1,25 @@
+=== Wed Oct  7 06:10:15 PM KST 2026 ===
+### spawn
+[INFO] [1791364215.557708776] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364216.173931478] [ros_gz_sim]: Entity creation successful.
+
+### gz scan topics
+/scan
+/scan/points
+/scan_novis
+/scan_novis/points
+/scan_up
+/scan_up/points
+
+### /scan
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+every 30deg: 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 
+
+### /scan_novis
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+every 30deg: 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 
+
+### /scan_up
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+every 30deg: 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 0.12 
+=== done ===

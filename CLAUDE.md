@@ -12,6 +12,7 @@ Jasper의 대학 마지막 프로젝트. public GitHub repo이자 포트폴리�
 - 명령 안내 시 항상 `[Mac]` / `[VM]` / `[Pi]` 표시.
 
 ## 배포 흐름
+Repo: https://github.com/yoosunu/semantic-companion-robot (public)
 Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub (`main` = 검증된 버전, `dev` = 작업 중)
 → Pi에서 clone/pull → colcon build → 로컬 독립 실행 (Mac/인터넷 없이 동작해야 함)
 
@@ -30,11 +31,20 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
-## 현재 상태 (2026-10-07)
-- 시뮬레이션: Gazebo + Burger spawn, /cmd_vel /odom /scan /imu /tf 정상. /scan 약 4.8Hz.
-- SLAM(Cartographer): `/map` 생성·RViz 표시까지 동작. **맵 품질은 미검증** → `docs/debugging/001-slam-map-quality.md`
-- 헬퍼 스크립트(robot-start / robot-slam / robot-drive / robot-stop, safe_teleop.py)는 아직 VM `~/robot_project/scripts`에 있음 → `scripts/`로 이전 예정.
-- 열린 결정: 하드웨어 기준 문서는 SLAM Toolbox 우선, 시뮬레이션은 현재 Cartographer 사용 중.
+## 현재 상태 (2026-10-11 종료 시점) — 시뮬레이션 v0.1 통과
+- 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
+- 실행: `robot-start` → `./scripts/robot_nav.sh` → `./scripts/nav_test.sh` (Nav2 설정: `config/nav2_burger_sim.yaml`)
+  맵 생성: `robot-start` → `robot-slam` → `robot-drive` → `./scripts/save_map.sh <name>`
+- 빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
+- 결정: 시뮬레이션 튜닝은 여기서 멈춤. Burger 파라미터는 실물 UGV02로 옮겨가지 않으므로, 실물 bring-up하며 개념을 채운다.
+  시뮬레이션은 회귀 테스트·실험용으로 유지.
+- 다음 할 일:
+  1. 하드웨어 구매 (결제 직전 체크 3가지: 18650 포함, C1 Dev Kit, Pi 5 가격/정품)
+  2. 도착 전 준비: Pi 5용 Ubuntu 24.04 + ROS 2 Jazzy, RPLIDAR C1 ROS 2 드라이버, UGV02 공식 ROS 2 패키지/통신 프로토콜 조사
+  3. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
+- 후보(나중): 자율 탐색(frontier exploration) — 로봇이 스스로 돌아다니며 맵 완성. 직접 작성 후보.
+- 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐.
+- 열린 결정: SLAM은 실물에서 SLAM Toolbox 사용 예정(시뮬레이션은 Cartographer 맵 사용 중).
 
 ## 하드웨어 (구매 전) — 상세: `docs/hardware-baseline.md`
 UGV02(내장 ESP32: 엔코더/IMU/모터 제어, Pi와 UART/JSON) · Raspberry Pi 5 8GB · RPLIDAR C1 Dev Kit(USB) · iPhone(ARKit/CoreML)
@@ -45,3 +55,17 @@ UGV02(내장 ESP32: 엔코더/IMU/모터 제어, Pi와 UART/JSON) · Raspberry P
 - 추측으로 설정 바꾸지 않기. 로그/코드/실행 순서로 원인 분리.
 - 디버깅 기록 형식: 증상 → 가설 → 실험/확인 → 로그 → 원인 → 수정 → regression test/결과
 - public repo: 비밀 정보(Wi-Fi, 토큰, IP) 커밋 금지. build/install/log, rosbag 커밋 금지.
+
+## 코드 작성 분담 (2026-10-07 결정)
+- 1단계 "먼저 돌아가게": 기반 기능(시뮬레이션, 설정, 스크립트, 실험 도구, 초기 노드)은 Claude와 함께 빠르게 작성.
+- 2단계 "내 코드로 교체": 핵심 부분은 Jasper가 직접 작성, Claude는 리뷰·질문·테스트 설계.
+  - 대상: UGV02 C++ 드라이버(hardware interface), semantic world model, task/safety manager, 카메라 거리 추정 vs LiDAR 평가.
+- 1단계 코드도 토픽/메시지 인터페이스를 명확히 해서, 2단계 코드가 같은 자리에 끼워지도록 설계.
+- 교체 전후를 수치로 비교해 기록 (예: 주기, 지연, 오차, 실패 처리).
+
+## 통합 원칙 (2026-10-07)
+- 한 번에 한 계층만 붙인다. 아래 계층이 합격 기준을 통과하고 증거가 남은 뒤에만 다음 계층을 올린다.
+  예: 센서(/scan 값) → TF/odom → SLAM 맵 → 위치추정 → Nav2 → 인식 → semantic → 작업
+- 각 계층의 합격 기준은 수치로 정하고, 점검은 스크립트로 자동화해 회귀 테스트로 재사용한다 (예: scripts/slam_check.sh).
+- 문제가 생기면 이미 통과한 계층부터 재점검해서 범위를 좁힌다.
+

@@ -1,0 +1,73 @@
+=== Wed Oct  7 05:47:36 PM KST 2026 ===
+
+### nodes (--no-daemon)
+
+
+### expected nodes
+MISSING /cartographer_node
+MISSING /cartographer_occupancy_grid_node
+MISSING /robot_state_publisher
+MISSING /ros_gz_bridge
+MISSING /rviz2
+
+### use_sim_time
+/cartographer_node                     Boolean value is: True
+/cartographer_occupancy_grid_node      Boolean value is: True
+/robot_state_publisher                 Boolean value is: True
+/ros_gz_bridge                         Boolean value is: False
+/rviz2                                 Boolean value is: True
+
+### /map publishers / subscribers
+Type: nav_msgs/msg/OccupancyGrid
+Publisher count: 1
+Subscription count: 1
+
+### /scan hz
+average rate: 5.038
+	min: 0.015s max: 0.217s std dev: 0.04326s window: 22
+
+### /odom hz
+	min: 0.000s max: 0.326s std dev: 0.02305s window: 192
+failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+
+### /scan content (one message)
+frame_id=base_scan stamp=89.200000000
+angle_min=0.000 angle_max=6.280 increment=0.0175
+range_min=0.11999999731779099 range_max=3.5
+beams=360 finite=360 valid_in_range=360 inf=0 nan=0
+valid min=0.120 max=0.120 mean=0.120
+sample every 30deg: [0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12]
+
+### /map info
+map_load_time:
+  sec: 87
+  nanosec: 796000000
+resolution: 0.05000000074505806
+width: 18
+height: 18
+origin:
+  position:
+    x: -0.4464253425598145
+    y: -0.4504588603973389
+    z: 0.0
+  orientation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 1.0
+---
+
+### tf map->odom
+At time 95.520000000
+- Translation: [0.004, -0.031, -0.078]
+- Rotation: in RPY (degree) [0.000, 0.000, -87.425]
+
+### tf odom->base_footprint
+At time 98.460000000
+- Translation: [0.000, -0.000, 0.000]
+- Rotation: in RPY (degree) [0.000, 0.000, -0.000]
+
+### tf base_link->base_scan
+At time 0.0
+- Translation: [-0.032, 0.000, 0.172]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]

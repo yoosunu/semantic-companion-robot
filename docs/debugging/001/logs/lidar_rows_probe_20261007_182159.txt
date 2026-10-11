@@ -1,0 +1,72 @@
+=== Wed Oct  7 06:21:59 PM KST 2026 ===
+### spawn
+[INFO] [1791364930.378311231] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364930.880269150] [ros_gz_sim]: Entity creation successful.
+
+### gz /scan_vert2
+angle_max: 6.28
+range_min: 0.12
+range_max: 3.5
+count: 360
+vertical_angle_min: -0.0087
+vertical_angle_max: 0.0087
+vertical_count: 2
+  total=720 rows=2 per_row=360 finite=389 min=0.120 max=3.271 distinct=30
+  mean|diff| assuming row-major=0.9474  column-major=0.0013  -> smaller one is the layout
+  first 6: [inf, inf, inf, inf, inf, inf]
+
+### gz /scan_vert3
+angle_max: 6.28
+range_min: 0.12
+range_max: 3.5
+count: 360
+vertical_angle_min: -0.0087
+vertical_angle_max: 0.0087
+vertical_count: 3
+  total=1080 rows=3 per_row=360 finite=1080 min=0.120 max=1.150 distinct=721
+  mean|diff| assuming row-major=0.3842  column-major=0.0098  -> smaller one is the layout
+  first 6: [0.415, 0.281, 0.413, 0.417, 0.399, 0.434]
+
+### ROS side via ros_gz_bridge (/scan_vert3)
+  frame_id=base_scan len(ranges)=360 len(intensities)=360
+  angle_min=0.0000 angle_max=6.2800 angle_increment=0.01749 -> implied beams=360
+
+### reference files copied
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/CMakeLists.txt
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/package.xml
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/_tree.txt
+
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref:
+CMakeLists.txt
+launch
+package.xml
+params
+_tree.txt
+urdf
+
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/launch:
+empty_world.launch.py
+__pycache__
+robot_state_publisher.launch.py
+spawn_turtlebot3.launch.py
+turtlebot3_dqn_stage1.launch.py
+turtlebot3_dqn_stage2.launch.py
+turtlebot3_dqn_stage3.launch.py
+turtlebot3_dqn_stage4.launch.py
+turtlebot3_house.launch.py
+turtlebot3_world.launch.py
+
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/params:
+turtlebot3_burger_bridge.yaml
+turtlebot3_burger_cam_bridge.yaml
+turtlebot3_waffle_bridge.yaml
+turtlebot3_waffle_pi_bridge.yaml
+
+/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/tb3_ref/urdf:
+common_properties.urdf
+turtlebot3_burger_cam.urdf
+turtlebot3_burger.urdf
+turtlebot3_waffle_pi.urdf
+turtlebot3_waffle.urdf
+./scripts/experiments/lidar_rows_probe.sh: line 109:  8187 Segmentation fault      (core dumped) gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre > "$LOG_DIR/.gz_server.log" 2>&1
+=== done ===

@@ -1,0 +1,78 @@
+=== Wed Oct  7 05:55:45 PM KST 2026 ===
+### OpenGL info
+OpenGL renderer string: virgl (ANGLE (Apple, Apple M1, OpenGL 4.1 Metal - 90.5))
+OpenGL version string: 2.1 Mesa 25.2.8-0ubuntu0.24.04.3
+### gz version: 8.15.0
+==================================================
+### CASE: 1. ogre
+cmd: gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre
+RESULT: beams=10240 finite=7440 inf=2800 nan=0 min=0.08 max=9.9974 distinct_finite_values=6432
+first 8 ranges: 2.2250308990478516 2.2209312915802 2.2261269092559814 2.2263226509094238 2.2189233303070068 2.2236113548278809 2.2182486057281494 2.2279839515686035 
+--- server log tail ---
+[1;32m[Msg] [0m[1;32mGazebo Sim Server v[0m[1;32m8.15.0[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mLoading SDF world file[[0m[1;32m/opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/worlds/gpu_lidar_sensor.sdf[0m[1;32m].[0m
+[1;33mWarning [Utils.cc:132][0m [/sdf/world[@name="gpu_lidar_sensor"]/model[@name="model_with_lidar"]/link[@name="link"]/sensor[@name="gpu_lidar"]/alwaysOn:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/worlds/gpu_lidar_sensor.sdf:L165]: XML Element[alwaysOn], child of element[sensor], not defined in SDF. Copying[alwaysOn] as children of [sensor].
+./scripts/experiments/lidar_render_test.sh: line 26:  6894 Segmentation fault      (core dumped) "$@" > "$LOG_DIR/.gz_server.log" 2>&1
+==================================================
+### CASE: 2. ogre2
+cmd: gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre2
+RESULT: server exited early (exit code 1)
+--- server log tail ---
+[1;32m[Msg] [0m[1;32mResource path resolve service on [[0m[1;32m/gazebo/resource_paths/resolve[0m[1;32m].[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mResource paths published on [[0m[1;32m/gazebo/resource_paths[0m[1;32m].[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mServer control service on [[0m[1;32m/server_control[0m[1;32m].[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mFound no publishers on /stats, adding root stats topic[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mFound no publishers on /clock, adding root clock topic[0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mLoading plugin [[0m[1;32mgz-rendering-ogre2[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mServing scene information on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mscene/info[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mServing graph information on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mscene/graph[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mServing full state on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mstate[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mServing full state (async) on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mstate_async[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mPublishing scene information on [[0m[1;32m/world/gpu_lidar_sensor/scene/info[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mPublishing entity deletions on [[0m[1;32m/world/gpu_lidar_sensor/scene/deletion[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mPublishing state changes on [[0m[1;32m/world/gpu_lidar_sensor/state[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mPublishing pose messages on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mpose/info[0m[1;32m][0m[1;32m[0m
+[1;32m[Msg] [0m[1;32mPublishing dynamic pose messages on [[0m[1;32m/world/gpu_lidar_sensor[0m[1;32m/[0m[1;32mdynamic_pose/info[0m[1;32m][0m[1;32m[0m
+==================================================
+### CASE: 3. ogre2 + software GL
+cmd: env LIBGL_ALWAYS_SOFTWARE=1 gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre2
+./scripts/experiments/lidar_render_test.sh: line 26:  6960 Segmentation fault      (core dumped) "$@" > "$LOG_DIR/.gz_server.log" 2>&1
+RESULT: server exited early (exit code 139)
+--- server log tail ---
+#13   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/gz-rendering-8/engine-plugins/libgz-rendering-ogre2.so", at 0xe6306e6818ab, in gz::rendering::v8::Ogre2RenderEngine::LoadImpl(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&)
+#12   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/gz-rendering-8/engine-plugins/libgz-rendering-ogre2.so", at 0xe6306e680d2b, in gz::rendering::v8::Ogre2RenderEngine::LoadAttempt()
+#11   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/gz-rendering-8/engine-plugins/libgz-rendering-ogre2.so", at 0xe6306e67d98b, in gz::rendering::v8::Ogre2RenderEngine::LoadPlugins()
+#10   Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe6306e20032f, in Ogre::Root::loadPlugin(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bool, Ogre::StdMap<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::STLAllocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > const*)
+#9    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe6306e1fe93f, in Ogre::Root::installPlugin(Ogre::Plugin*, Ogre::StdMap<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::STLAllocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > const*)
+#8    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/OGRE-Next/RenderSystem_GL3Plus.so", at 0xe6306c3d23ff, in Ogre::GL3PlusPlugin::install(Ogre::StdMap<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::STLAllocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > const*)
+#7    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/OGRE-Next/RenderSystem_GL3Plus.so", at 0xe6306c3d5307, in Ogre::GL3PlusRenderSystem::GL3PlusRenderSystem(Ogre::StdMap<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::STLAllocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > const*)
+#6    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/OGRE-Next/RenderSystem_GL3Plus.so", at 0xe6306c3ca70f, in 
+#5    Object "/lib/aarch64-linux-gnu/libEGL_mesa.so.0", at 0xe6306c314a4b, in 
+#4    Object "/lib/aarch64-linux-gnu/libEGL_mesa.so.0", at 0xe6306c3264db, in 
+#3    Object "/lib/aarch64-linux-gnu/libEGL_mesa.so.0", at 0xe6306c3271b7, in 
+#2    Object "/lib/aarch64-linux-gnu/libEGL_mesa.so.0", at 0xe6306c325c77, in 
+#1    Object "/lib/aarch64-linux-gnu/libgallium-25.2.8-0ubuntu0.24.04.3.so", at 0xe630592875c7, in driCreateNewScreen3
+#0    Object "/lib/aarch64-linux-gnu/libgallium-25.2.8-0ubuntu0.24.04.3.so", at 0xe6305928c570, in 
+Segmentation fault (Address not mapped to object [0x8])
+==================================================
+### CASE: 4. ogre2 + headless rendering
+cmd: gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre2 --headless-rendering
+./scripts/experiments/lidar_render_test.sh: line 26:  6991 Segmentation fault      (core dumped) "$@" > "$LOG_DIR/.gz_server.log" 2>&1
+RESULT: server exited early (exit code 139)
+--- server log tail ---
+#13   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/libgz-rendering8.so.8", at 0xe37b0d0c6a5b, in gz::rendering::v8::BaseRenderEngine::Init()
+#12   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/gz-rendering-8/engine-plugins/libgz-rendering-ogre2.so", at 0xe37b0c58f117, in gz::rendering::v8::Ogre2RenderEngine::InitImpl()
+#11   Object "/opt/ros/jazzy/opt/gz_rendering_vendor/lib/gz-rendering-8/engine-plugins/libgz-rendering-ogre2.so", at 0xe37b0c592d53, in gz::rendering::v8::Ogre2RenderEngine::InitAttempt()
+#10   Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d407bb, in Ogre::ResourceGroupManager::initialiseAllResourceGroups(bool)
+#9    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d3fc9f, in Ogre::ResourceGroupManager::parseResourceGroupScripts(Ogre::ResourceGroupManager::ResourceGroup*)
+#8    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d8c453, in Ogre::ScriptCompilerManager::parseScript(Ogre::SharedPtr<Ogre::DataStream>&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+#7    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d7f533, in Ogre::ScriptCompiler::compile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+#6    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d7f24f, in Ogre::ScriptCompiler::compile(Ogre::SharedPtr<std::__cxx11::list<Ogre::SharedPtr<Ogre::ConcreteNode>, Ogre::STLAllocator<Ogre::SharedPtr<Ogre::ConcreteNode>, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+#5    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d96423, in Ogre::MaterialTranslator::translate(Ogre::ScriptCompiler*, Ogre::SharedPtr<Ogre::AbstractNode> const&)
+#4    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d972a3, in Ogre::TechniqueTranslator::translate(Ogre::ScriptCompiler*, Ogre::SharedPtr<Ogre::AbstractNode> const&)
+#3    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02d9a1e3, in Ogre::PassTranslator::translate(Ogre::ScriptCompiler*, Ogre::SharedPtr<Ogre::AbstractNode> const&)
+#2    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02e03a2b, in Ogre::Technique::createPass()
+#1    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02cfed67, in Ogre::Pass::Pass(Ogre::Technique*, unsigned short)
+#0    Object "/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib/libOgreNextMain.so.2.3.3", at 0xe37b02c30030, in Ogre::Hlms::createDatablock(Ogre::IdString, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Ogre::HlmsMacroblock const&, Ogre::HlmsBlendblock const&, std::vector<std::pair<Ogre::IdString, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::STLAllocator<std::pair<Ogre::IdString, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, Ogre::CategorisedAllocPolicy<(Ogre::MemoryCategory)0> > > const&, bool, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+Segmentation fault (Address not mapped to object [0x220])
+=== done ===

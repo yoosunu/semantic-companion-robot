@@ -1,0 +1,27 @@
+=== Wed Oct  7 06:12:14 PM KST 2026 ===
+### spawn
+[INFO] [1791364335.048905118] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364335.609474575] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364336.175003713] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364337.031800312] [ros_gz_sim]: Entity creation successful.
+
+### /scan
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+first 10: 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 
+
+### /scan_fov180
+beams=180 finite=180 inf=0 min=0.12 max=0.12 distinct=1
+first 10: 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 
+
+### /scan_fov90
+beams=90 finite=90 inf=0 min=0.12 max=0.12 distinct=1
+first 10: 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 
+
+### /scan_nonoise
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+first 10: 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 
+
+### /scan_min008
+beams=360 finite=360 inf=0 min=0.08 max=0.08 distinct=1
+first 10: 0.080 0.080 0.080 0.080 0.080 0.080 0.080 0.080 0.080 0.080 
+=== done ===

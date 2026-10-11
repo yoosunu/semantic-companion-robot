@@ -1,5 +1,6 @@
 #!/bin/bash
-
+# Gazebo(turtlebot3_world) + scr_burger 를 tmux 세션 "robot"에서 실행.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="robot"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -9,11 +10,7 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 tmux new-session -d -s "$SESSION" -n gazebo
-
 tmux send-keys -t "$SESSION:gazebo" \
-"source /opt/ros/jazzy/setup.bash && \
-source ~/turtlebot3_ws/install/setup.bash && \
-export TURTLEBOT3_MODEL=burger && \
-ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py" C-m
+"source $SCRIPT_DIR/env.sh && ros2 launch scr_gazebo sim_world.launch.py" C-m
 
 tmux attach -t "$SESSION"
