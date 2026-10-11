@@ -42,6 +42,9 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   1. 하드웨어 구매 (결제 직전 체크 3가지: 18650 포함, C1 Dev Kit, Pi 5 가격/정품)
   2. 도착 전 준비: Pi 5용 Ubuntu 24.04 + ROS 2 Jazzy, RPLIDAR C1 ROS 2 드라이버, UGV02 공식 ROS 2 패키지/통신 프로토콜 조사
   3. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
+- iPhone: iPhone 16 (일반 모델, LiDAR 스캐너 없음) → 기하(갈 수 있는 공간)는 RPLIDAR + costmap, iPhone은 의미(YOLO) 담당.
+- 보류 실험: iPhone 높이별(20/30/40cm) YOLO 탐지율 비교 → 거치 높이 결정 근거. 공간 확보 후 진행.
+- 구매 기준서: docs/hardware-purchase-checklist.md (배터리 미포함 가능성, UGV02 5V 출력 전류 미표기 등)
 - 후보(나중): 자율 탐색(frontier exploration) — 로봇이 스스로 돌아다니며 맵 완성. 직접 작성 후보.
 - 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐.
 - 열린 결정: SLAM은 실물에서 SLAM Toolbox 사용 예정(시뮬레이션은 Cartographer 맵 사용 중).
