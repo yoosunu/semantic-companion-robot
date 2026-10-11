@@ -135,5 +135,16 @@ SLAM/Cartographer 설정 문제가 아니었음.
 | 정지 상태 map→odom yaw | -68.2° / -87.4° (임의) | **0.28°** |
 | RViz | 로봇 주변 작은 회색 사각형 | 육각형 외벽 일부 + 기둥 3열이 월드 배치대로 표시 |
 
-### 2) 주행 후 전체 맵
-- [ ] 월드 한 바퀴 주행 후 맵이 육각형 + 3×3 기둥과 일치하는지
+### 2) 주행 후 전체 맵 (maps/tb3_world_cartographer.pgm, 2026-10-11)
+teleop 개선(누르는 동안만 이동, 가감속 제한, 0.20 m/s) 후 육각형 내부 한 바퀴 + 기둥 사이 주행.
+- 육각형 외벽이 닫힌 단일 선으로 표시, 겹침(ghosting)·번짐 없음
+- 기둥 9개 모두 검출. 맵에서 추출한 기둥 중심 간격: 행 1.10m / 1.10m, 열 약 1.08~1.10m
+  (turtlebot3_world 기둥 간격 1.1m와 일치)
+- 가운데 기둥 위치: map 좌표 (2.04, 0.46) → 출발점 (-2.0, -0.5) 보정 시 월드 (0.04, -0.04), 월드 원점 기둥과 약 4~6cm 차이
+- **계층 판정: SLAM 맵(주행 전체) ✅ 통과**
+
+### 부수 이슈: map_saver 실패
+- 증상: `map_saver_cli` → "Failed to spin map subscription"
+- 원인: map_saver 기본 구독 QoS = transient_local, Cartographer /map 발행 QoS = volatile → ROS 2에서 호환 불가로 연결 안 됨
+- 수정: `map_subscribe_transient_local:=false`, `save_map_timeout:=10.0` → `scripts/save_map.sh`로 고정
+- 참고: 첫 `ros2 topic info /map`의 "Unknown topic"은 새 터미널에서 ros2 daemon 탐색이 끝나기 전 조회해서 생긴 것 (재조회 시 정상)

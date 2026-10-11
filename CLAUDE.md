@@ -37,7 +37,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 디버깅 001: sim LiDAR가 전부 range_min(0.12) → 원인: VM(Ogre1+GL2.1)에서 gpu_lidar 맨 위 행 깊이 읽기 실패.
   수정: scr_burger 모델 LiDAR 수직 3줄(±0.5°), bridge가 가운데 행 사용. 정지 상태 회귀 테스트 통과.
   turtlebot3_ws launch 수정은 원복 완료.
-- 계층 상태: 센서 ✅ / SLAM 맵(정지) ✅ / SLAM 맵(주행 전체) ⏳
+- 계층 상태: 센서 ✅ / SLAM 맵(정지) ✅ / SLAM 맵(주행 전체) ✅ (maps/tb3_world_cartographer)
 - 다음 할 일:
   1. safe_teleop 개선 (키 누르는 동안만 이동, 입력 누적 방지, 가감속, 속도 0.20 이하) — 0.30 m/s + 펄스 방식으로 주행 중 로봇 전복
   2. 한 바퀴 주행 후 맵이 육각형 + 기둥 9개와 일치하는지 검증, map_saver로 저장
