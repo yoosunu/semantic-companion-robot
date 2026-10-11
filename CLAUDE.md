@@ -38,11 +38,12 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   수정: scr_burger 모델 LiDAR 수직 3줄(±0.5°), bridge가 가운데 행 사용. 정지 상태 회귀 테스트 통과.
   turtlebot3_ws launch 수정은 원복 완료.
 - 계층 상태: 센서 ✅ / SLAM 맵(정지) ✅ / SLAM 맵(주행 전체) ✅ (maps/tb3_world_cartographer)
+- 완료(2026-10-11): teleop 재작성(누르는 동안만 이동, 가감속, 0.20 m/s), 전체 주행 맵 검증, maps/tb3_world_cartographer 저장,
+  001 기록 정리(docs/debugging/001-slam-map-quality.md + 001/ 증거, docs/debugging/README.md 목록)
 - 다음 할 일:
-  1. safe_teleop 개선 (키 누르는 동안만 이동, 입력 누적 방지, 가감속, 속도 0.20 이하) — 0.30 m/s + 펄스 방식으로 주행 중 로봇 전복
-  2. 한 바퀴 주행 후 맵이 육각형 + 기둥 9개와 일치하는지 검증, map_saver로 저장
-  3. 001 기록 정리 (증거 파일 docs/debugging/001/로 보존, docs/debugging/README.md 목록)
-  4. SLAM 도구 결정 (Cartographer vs SLAM Toolbox) → Nav2
+  1. SLAM 도구 결정 (Cartographer vs SLAM Toolbox)
+  2. Nav2: 저장 맵 위에서 위치 추정 → RViz 목표 → 자율주행 end-to-end
+  3. dev → main 병합, v0.1 태그 → 하드웨어 구매
 - 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐 → 개선 예정
 - 열린 결정: 하드웨어 기준 문서는 SLAM Toolbox 우선, 시뮬레이션은 현재 Cartographer.
 

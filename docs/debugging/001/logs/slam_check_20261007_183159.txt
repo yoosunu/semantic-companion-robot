@@ -1,0 +1,80 @@
+=== Wed Oct  7 06:32:00 PM KST 2026 ===
+
+### nodes (--no-daemon)
+/cartographer_node
+/cartographer_occupancy_grid_node
+/robot_state_publisher
+/ros_gz_bridge
+/ros_gz_bridge
+/rviz2
+/transform_listener_impl_bc262339ed70
+/transform_listener_impl_c3f76a4d3f40
+
+### expected nodes
+OK      /cartographer_node
+OK      /cartographer_occupancy_grid_node
+OK      /robot_state_publisher
+OK      /ros_gz_bridge
+OK      /rviz2
+
+### use_sim_time
+/cartographer_node                     Boolean value is: True
+/cartographer_occupancy_grid_node      Boolean value is: True
+/robot_state_publisher                 Boolean value is: True
+/ros_gz_bridge                         Boolean value is: False
+/rviz2                                 Boolean value is: True
+
+### /map publishers / subscribers
+Type: nav_msgs/msg/OccupancyGrid
+Publisher count: 1
+Subscription count: 1
+
+### /scan hz
+average rate: 4.523
+	min: 0.101s max: 0.335s std dev: 0.04438s window: 21
+
+### /odom hz
+average rate: 47.135
+	min: 0.017s max: 0.026s std dev: 0.00183s window: 96
+
+### /scan content (one message)
+frame_id=base_scan stamp=63.200000000
+angle_min=0.000 angle_max=6.280 increment=0.0175
+range_min=0.11999999731779099 range_max=3.5
+beams=360 finite=327 valid_in_range=327 inf=33 nan=0
+valid min=0.120 max=3.405 mean=1.365
+sample every 30deg: [inf, 0.94, 1.74, 2.0, 1.16, 0.98, 0.6, 0.5, 0.59, 1.1, 2.4, 0.98]
+
+### /map info
+A message was lost!!!
+	total count change:1
+	total count: 1---
+map_load_time:
+  sec: 62
+  nanosec: 238000000
+resolution: 0.05000000074505806
+width: 91
+height: 113
+origin:
+  position:
+    x: -1.1500000000000001
+    y: -2.35
+    z: 0.0
+  orientation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 1.0
+---
+
+### tf map->odom
+At time 67.310000000
+- Translation: [0.037, -0.012, -0.078]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.280]
+
+### tf odom->base_footprint
+
+### tf base_link->base_scan
+At time 0.0
+- Translation: [-0.032, 0.000, 0.172]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]

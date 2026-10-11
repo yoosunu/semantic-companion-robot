@@ -1,0 +1,23 @@
+=== Wed Oct  7 06:14:32 PM KST 2026 ===
+### spawn
+[INFO] [1791364482.427366515] [ros_gz_sim]: Entity creation successful.
+[INFO] [1791364482.958365861] [ros_gz_sim]: Entity creation successful.
+
+### /lidar
+beams=10240 finite=7501 inf=2739 min=0.08 max=9.9974 distinct=6482
+first 10: 2.203 2.190 2.168 2.140 2.126 2.103 2.083 2.056 2.030 2.008 
+
+### /scan_stock
+beams=360 finite=360 inf=0 min=0.12 max=0.12 distinct=1
+first 10: 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 0.120 
+
+### /scan_vert16
+beams=5760 finite=4790 inf=970 min=0.12 max=3.3369 distinct=4411
+first 10: 0.423 0.372 0.240 0.441 0.420 0.434 0.437 0.486 0.497 0.514 
+
+--- server log (warnings/errors) ---
+[1;33mWarning [Utils.cc:132][0m [/sdf/world[@name="gpu_lidar_sensor"]/model[@name="model_with_lidar"]/link[@name="link"]/sensor[@name="gpu_lidar"]/alwaysOn:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/worlds/gpu_lidar_sensor.sdf:L165]: XML Element[alwaysOn], child of element[sensor], not defined in SDF. Copying[alwaysOn] as children of [sensor].
+[1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="burger_stock"]/link[@name="base_scan"]/sensor[@name="hls_lfcd_lds"]/gz_frame_id:/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/lidar_world_models/stock.sdf:L140]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+[1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="burger_vert16"]/link[@name="base_scan"]/sensor[@name="hls_lfcd_lds"]/gz_frame_id:/home/jasper/semantic-companion-robot/scripts/experiments/../../logs/lidar_world_models/vert16.sdf:L140]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+./scripts/experiments/lidar_world_test.sh: line 89:  7998 Segmentation fault      (core dumped) gz sim -s -r -v 3 gpu_lidar_sensor.sdf --render-engine-server ogre > "$LOG_DIR/.gz_server.log" 2>&1
+=== done ===
