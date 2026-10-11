@@ -1,0 +1,747 @@
+[INFO] [launch]: All log files can be found below /home/jasper/.ros/log/2026-10-11-19-21-28-202773-jasper-QEMU-Virtual-Machine-9560
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [component_container_isolated-1]: process started with pid [9583]
+[INFO] [rviz2-2]: process started with pid [9584]
+[rviz2-2] [INFO] [1791714091.976252445] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-2] [INFO] [1791714091.976468162] [rviz2]: OpenGl version: 2.1 (GLSL 1.2)
+[rviz2-2] [INFO] [1791714092.019586509] [rviz2]: Stereo is NOT SUPPORTED
+[component_container_isolated-1] [INFO] [1791714092.661429050] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libamcl_core.so
+[component_container_isolated-1] [INFO] [1791714092.686988303] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_amcl::AmclNode>
+[component_container_isolated-1] [INFO] [1791714092.687254689] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_amcl::AmclNode>
+[component_container_isolated-1] [INFO] [1791714092.748919003] [amcl]: 
+[component_container_isolated-1] 	amcl lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714092.752594945] [amcl]: Creating
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/amcl' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714092.758501978] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libcontroller_server_core.so
+[component_container_isolated-1] [INFO] [1791714092.765326299] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_controller::ControllerServer>
+[component_container_isolated-1] [INFO] [1791714092.765592601] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_controller::ControllerServer>
+[component_container_isolated-1] [INFO] [1791714092.797196185] [controller_server]: 
+[component_container_isolated-1] 	controller_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714092.805965836] [controller_server]: Creating controller server
+[component_container_isolated-1] [INFO] [1791714092.855958797] [local_costmap.local_costmap]: 
+[component_container_isolated-1] 	local_costmap lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714092.857950087] [local_costmap.local_costmap]: Creating Costmap
+[component_container_isolated-1] [INFO] [1791714092.859839122] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libmap_server_core.so
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/controller_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714092.889670967] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_map_server::CostmapFilterInfoServer>
+[component_container_isolated-1] [INFO] [1791714092.890264992] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_map_server::MapSaver>
+[component_container_isolated-1] [INFO] [1791714092.890273617] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_map_server::MapServer>
+[component_container_isolated-1] [INFO] [1791714092.890278325] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_map_server::MapServer>
+[component_container_isolated-1] [INFO] [1791714092.939584634] [map_server]: 
+[component_container_isolated-1] 	map_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714092.939637094] [map_server]: Creating
+[component_container_isolated-1] [INFO] [1791714092.940826559] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libnav2_lifecycle_manager_core.so
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/map_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714092.953648209] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_lifecycle_manager::LifecycleManager>
+[component_container_isolated-1] [INFO] [1791714092.954051809] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_lifecycle_manager::LifecycleManager>
+[component_container_isolated-1] [INFO] [1791714093.007457868] [lifecycle_manager_localization]: Creating
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/lifecycle_manager_localization' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714093.030565104] [lifecycle_manager_localization]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.030652566] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libsmoother_server_core.so
+[component_container_isolated-1] [INFO] [1791714093.037506346] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_smoother::SmootherServer>
+[component_container_isolated-1] [INFO] [1791714093.037576058] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_smoother::SmootherServer>
+[component_container_isolated-1] [INFO] [1791714093.052312452] [lifecycle_manager_localization]: [34m[1mStarting managed nodes bringup...[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.052374496] [lifecycle_manager_localization]: [34m[1mConfiguring map_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.053311868] [map_server]: Configuring
+[component_container_isolated-1] [INFO] [1791714093.053649715] [map_io]: Loading yaml file: /home/jasper/semantic-companion-robot/maps/tb3_world_cartographer.yaml
+[component_container_isolated-1] [INFO] [1791714093.097036031] [map_io]: resolution: 0.05
+[component_container_isolated-1] [INFO] [1791714093.097187329] [map_io]: origin[0]: -1.2
+[component_container_isolated-1] [INFO] [1791714093.097195663] [map_io]: origin[1]: -2.458
+[component_container_isolated-1] [INFO] [1791714093.097199996] [map_io]: origin[2]: 0
+[component_container_isolated-1] [INFO] [1791714093.097261249] [map_io]: free_thresh: 0.196
+[component_container_isolated-1] [INFO] [1791714093.097268207] [map_io]: occupied_thresh: 0.65
+[component_container_isolated-1] [INFO] [1791714093.097275082] [map_io]: mode: trinary
+[component_container_isolated-1] [INFO] [1791714093.097280874] [map_io]: negate: 0
+[component_container_isolated-1] [INFO] [1791714093.097842397] [map_io]: Loading image_file: /home/jasper/semantic-companion-robot/maps/tb3_world_cartographer.pgm
+[component_container_isolated-1] [INFO] [1791714093.153033154] [map_io]: Read map /home/jasper/semantic-companion-robot/maps/tb3_world_cartographer.pgm: 124 X 116 map @ 0.05 m/cell
+[rviz2-2] [INFO] [1791714093.179783498] [rviz2]: Subscribing to: /mobile_base/sensors/bumper_pointcloud
+[rviz2-2] 
+[rviz2-2] [INFO] [1791714093.185990586] [rviz2]: Subscribing to: /mobile_base/sensors/bumper_pointcloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.192457975] [lifecycle_manager_localization]: [34m[1mConfiguring amcl[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.193885200] [amcl]: Configuring
+[component_container_isolated-1] [INFO] [1791714093.194036498] [amcl]: initTransforms
+[component_container_isolated-1] [INFO] [1791714093.215994729] [smoother_server]: 
+[component_container_isolated-1] 	smoother_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714093.220514164] [smoother_server]: Creating smoother server
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/smoother_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714093.246414390] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libplanner_server_core.so
+[component_container_isolated-1] [INFO] [1791714093.255903028] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_planner::PlannerServer>
+[component_container_isolated-1] [INFO] [1791714093.256709061] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_planner::PlannerServer>
+[component_container_isolated-1] [INFO] [1791714093.256363422] [amcl]: initPubSub
+[rviz2-2] [INFO] [1791714093.281550577] [rviz2]: Subscribing to: /local_costmap/voxel_marked_cloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.339865253] [amcl]: Subscribed to map topic.
+[rviz2-2] [INFO] [1791714093.393812418] [rviz2]: Subscribing to: /global_costmap/voxel_marked_cloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.403948457] [lifecycle_manager_localization]: [34m[1mActivating map_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.404401309] [map_server]: Activating
+[component_container_isolated-1] [INFO] [1791714093.404628444] [amcl]: Received a 124 X 116 map @ 0.050 m/pix
+[component_container_isolated-1] [INFO] [1791714093.405427976] [map_server]: Creating bond (map_server) to lifecycle manager.
+[rviz2-2] [INFO] [1791714093.469478179] [rviz2]: Subscribing to: /mobile_base/sensors/bumper_pointcloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.481898729] [planner_server]: 
+[component_container_isolated-1] 	planner_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[rviz2-2] [INFO] [1791714093.506451774] [rviz2]: Subscribing to: /local_costmap/voxel_marked_cloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.507211847] [planner_server]: Creating
+[rviz2-2] [INFO] [1791714093.551266441] [rviz2]: Subscribing to: /global_costmap/voxel_marked_cloud
+[rviz2-2] 
+[component_container_isolated-1] [INFO] [1791714093.557931713] [lifecycle_manager_localization]: Server map_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714093.558011675] [lifecycle_manager_localization]: [34m[1mActivating amcl[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.558696869] [amcl]: Activating
+[component_container_isolated-1] [INFO] [1791714093.558741121] [amcl]: initialPoseReceived
+[component_container_isolated-1] [INFO] [1791714093.558892961] [amcl]: Setting pose (1090.408000): 0.000 0.000 0.000
+[component_container_isolated-1] [INFO] [1791714093.559941212] [amcl]: Creating bond (amcl) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714093.691224664] [lifecycle_manager_localization]: Server amcl connected with bond.
+[component_container_isolated-1] [INFO] [1791714093.691281958] [lifecycle_manager_localization]: [34m[1mManaged nodes are active[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.691298167] [lifecycle_manager_localization]: [34m[1mCreating bond timer...[0m[0m
+[component_container_isolated-1] [INFO] [1791714093.698551047] [global_costmap.global_costmap]: 
+[component_container_isolated-1] 	global_costmap lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714093.704499874] [global_costmap.global_costmap]: Creating Costmap
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/planner_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714093.743745770] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libroute_server_core.so
+[rviz2-2] [WARN] [1791714093.756698384] [rcl.logging_rosout]: Publisher already registered for node name: 'rviz2'. If this is due to multiple nodes with the same name then all logs for the logger named 'rviz2' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[component_container_isolated-1] [INFO] [1791714093.767053307] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_route::RouteServer>
+[component_container_isolated-1] [INFO] [1791714093.767696375] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_route::RouteServer>
+[rviz2-2] [INFO] [1791714093.824719082] [rviz2]: Trying to load plugins...
+[rviz2-2] [WARN] [1791714093.833334643] [rcl.logging_rosout]: Publisher already registered for node name: 'rviz2'. If this is due to multiple nodes with the same name then all logs for the logger named 'rviz2' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[component_container_isolated-1] [INFO] [1791714093.911723890] [route_server]: 
+[component_container_isolated-1] 	route_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/route_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714093.938562863] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libbehavior_server_core.so
+[component_container_isolated-1] [INFO] [1791714093.944851162] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<behavior_server::BehaviorServer>
+[component_container_isolated-1] [INFO] [1791714093.944890496] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<behavior_server::BehaviorServer>
+[component_container_isolated-1] [INFO] [1791714094.038251065] [amcl]: createLaserObject
+[component_container_isolated-1] [INFO] [1791714094.099507528] [behavior_server]: 
+[component_container_isolated-1] 	behavior_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/behavior_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.147782211] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libbt_navigator_core.so
+[component_container_isolated-1] [INFO] [1791714094.166774904] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_bt_navigator::BtNavigator>
+[component_container_isolated-1] [INFO] [1791714094.166836407] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_bt_navigator::BtNavigator>
+[component_container_isolated-1] [INFO] [1791714094.277839779] [bt_navigator]: 
+[component_container_isolated-1] 	bt_navigator lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714094.290161783] [bt_navigator]: Creating
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/bt_navigator' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.300683505] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libwaypoint_follower_core.so
+[rviz2-2] [INFO] [1791714094.322274388] [rviz2]: Trying to create a map of size 124 x 116 using 1 swatches
+[component_container_isolated-1] [INFO] [1791714094.323254845] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_waypoint_follower::WaypointFollower>
+[component_container_isolated-1] [INFO] [1791714094.323296305] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_waypoint_follower::WaypointFollower>
+[rviz2-2]  GLSL link result : 
+[rviz2-2] active samplers with a different type refer to the same texture image unit
+[component_container_isolated-1] [INFO] [1791714094.511860725] [waypoint_follower]: 
+[component_container_isolated-1] 	waypoint_follower lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714094.515609087] [waypoint_follower]: Creating
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/waypoint_follower' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.532716078] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libvelocity_smoother_core.so
+[component_container_isolated-1] [INFO] [1791714094.538245929] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_velocity_smoother::VelocitySmoother>
+[component_container_isolated-1] [INFO] [1791714094.538292222] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_velocity_smoother::VelocitySmoother>
+[component_container_isolated-1] [INFO] [1791714094.678585043] [velocity_smoother]: 
+[component_container_isolated-1] 	velocity_smoother lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/velocity_smoother' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.685518243] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libcollision_monitor_core.so
+[component_container_isolated-1] [INFO] [1791714094.704732613] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_collision_monitor::CollisionMonitor>
+[component_container_isolated-1] [INFO] [1791714094.706013290] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_collision_monitor::CollisionMonitor>
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/collision_monitor' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.826618306] [collision_monitor]: 
+[component_container_isolated-1] 	collision_monitor lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714094.832617843] [nav2_container]: Load Library: /opt/ros/jazzy/lib/libopennav_docking_core.so
+[component_container_isolated-1] [INFO] [1791714094.839007812] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<opennav_docking::DockingServer>
+[component_container_isolated-1] [INFO] [1791714094.839051981] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<opennav_docking::DockingServer>
+[component_container_isolated-1] [INFO] [1791714094.946757052] [docking_server]: 
+[component_container_isolated-1] 	docking_server lifecycle node launched. 
+[component_container_isolated-1] 	Waiting on external lifecycle transitions to activate
+[component_container_isolated-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[component_container_isolated-1] [INFO] [1791714094.946815554] [docking_server]: Creating docking_server
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/docking_server' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714094.963361814] [nav2_container]: Found class: rclcpp_components::NodeFactoryTemplate<nav2_lifecycle_manager::LifecycleManager>
+[component_container_isolated-1] [INFO] [1791714094.963408358] [nav2_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<nav2_lifecycle_manager::LifecycleManager>
+[component_container_isolated-1] [INFO] [1791714095.038973865] [lifecycle_manager_navigation]: Creating
+[component_container_isolated-1] [INFO] [1791714095.061661251] [lifecycle_manager_navigation]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/lifecycle_manager_navigation' in container '/nav2_container'
+[component_container_isolated-1] [INFO] [1791714095.233561364] [lifecycle_manager_navigation]: [34m[1mStarting managed nodes bringup...[0m[0m
+[component_container_isolated-1] [INFO] [1791714095.233641076] [lifecycle_manager_navigation]: [34m[1mConfiguring controller_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714095.235974088] [controller_server]: Configuring controller interface
+[component_container_isolated-1] [INFO] [1791714095.236027049] [controller_server]: getting progress checker plugins..
+[component_container_isolated-1] [INFO] [1791714095.241312848] [controller_server]: getting goal checker plugins..
+[component_container_isolated-1] [INFO] [1791714095.247524644] [controller_server]: Controller frequency set to 10.0000Hz
+[component_container_isolated-1] [INFO] [1791714095.247685150] [local_costmap.local_costmap]: Configuring
+[component_container_isolated-1] [INFO] [1791714095.298797657] [local_costmap.local_costmap]: Using plugin "obstacle_layer"
+[component_container_isolated-1] [INFO] [1791714095.328688380] [local_costmap.local_costmap]: Subscribed to Topics: scan
+[component_container_isolated-1] [INFO] [1791714095.372530006] [local_costmap.local_costmap]: Initialized plugin "obstacle_layer"
+[component_container_isolated-1] [INFO] [1791714095.372624510] [local_costmap.local_costmap]: Using plugin "voxel_layer"
+[component_container_isolated-1] [INFO] [1791714095.387021015] [local_costmap.local_costmap]: Subscribed to Topics: scan
+[component_container_isolated-1] [INFO] [1791714095.452795163] [local_costmap.local_costmap]: Initialized plugin "voxel_layer"
+[component_container_isolated-1] [INFO] [1791714095.454790995] [local_costmap.local_costmap]: Using plugin "inflation_layer"
+[component_container_isolated-1] [INFO] [1791714095.470721730] [local_costmap.local_costmap]: Initialized plugin "inflation_layer"
+[component_container_isolated-1] [INFO] [1791714095.624817032] [controller_server]: Created progress_checker : progress_checker of type nav2_controller::SimpleProgressChecker
+[component_container_isolated-1] [INFO] [1791714095.631851278] [controller_server]: Controller Server has progress_checker  progress checkers available.
+[component_container_isolated-1] [INFO] [1791714095.638037989] [controller_server]: Created goal checker : goal_checker of type nav2_controller::SimpleGoalChecker
+[component_container_isolated-1] [INFO] [1791714095.639970485] [controller_server]: Controller Server has goal_checker  goal checkers available.
+[component_container_isolated-1] [INFO] [1791714095.647473417] [controller_server]: Created controller : FollowPath of type dwb_core::DWBLocalPlanner
+[component_container_isolated-1] [INFO] [1791714095.670939501] [controller_server]: Setting transform_tolerance to 0.200000
+[component_container_isolated-1] [INFO] [1791714095.788963370] [controller_server]: Using critic "RotateToGoal" (dwb_critics::RotateToGoalCritic)
+[component_container_isolated-1] [INFO] [1791714095.795033785] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.796685144] [controller_server]: Using critic "Oscillation" (dwb_critics::OscillationCritic)
+[component_container_isolated-1] [INFO] [1791714095.801228705] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.801972318] [controller_server]: Using critic "BaseObstacle" (dwb_critics::BaseObstacleCritic)
+[component_container_isolated-1] [INFO] [1791714095.803758225] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.806773223] [controller_server]: Using critic "GoalAlign" (dwb_critics::GoalAlignCritic)
+[component_container_isolated-1] [INFO] [1791714095.811668382] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.812883140] [controller_server]: Using critic "PathAlign" (dwb_critics::PathAlignCritic)
+[component_container_isolated-1] [INFO] [1791714095.825648787] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.825826086] [controller_server]: Using critic "PathDist" (dwb_critics::PathDistCritic)
+[component_container_isolated-1] [INFO] [1791714095.826256478] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.826377233] [controller_server]: Using critic "GoalDist" (dwb_critics::GoalDistCritic)
+[component_container_isolated-1] [INFO] [1791714095.826607117] [controller_server]: Critic plugin initialized
+[component_container_isolated-1] [INFO] [1791714095.826623535] [controller_server]: Controller Server has FollowPath  controllers available.
+[component_container_isolated-1] [INFO] [1791714095.905193040] [lifecycle_manager_navigation]: [34m[1mConfiguring smoother_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714095.905522928] [smoother_server]: Configuring smoother server
+[component_container_isolated-1] [INFO] [1791714095.975914098] [smoother_server]: Created smoother : simple_smoother of type nav2_smoother::SimpleSmoother
+[component_container_isolated-1] [INFO] [1791714095.986304982] [smoother_server]: Smoother Server has simple_smoother  smoothers available.
+[component_container_isolated-1] [INFO] [1791714096.051825120] [lifecycle_manager_navigation]: [34m[1mConfiguring planner_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714096.052041878] [planner_server]: Configuring
+[component_container_isolated-1] [INFO] [1791714096.052214552] [global_costmap.global_costmap]: Configuring
+[component_container_isolated-1] [INFO] [1791714096.128641719] [global_costmap.global_costmap]: Using plugin "static_layer"
+[component_container_isolated-1] [INFO] [1791714096.136303158] [global_costmap.global_costmap]: Subscribing to the map topic (/map) with transient local durability
+[component_container_isolated-1] [INFO] [1791714096.143458950] [global_costmap.global_costmap]: Initialized plugin "static_layer"
+[component_container_isolated-1] [INFO] [1791714096.143543204] [global_costmap.global_costmap]: Using plugin "obstacle_layer"
+[component_container_isolated-1] [INFO] [1791714096.177186121] [global_costmap.global_costmap]: Subscribed to Topics: scan
+[component_container_isolated-1] [INFO] [1791714096.215009460] [global_costmap.global_costmap]: Initialized plugin "obstacle_layer"
+[component_container_isolated-1] [INFO] [1791714096.215048336] [global_costmap.global_costmap]: Using plugin "voxel_layer"
+[component_container_isolated-1] [INFO] [1791714096.233523675] [global_costmap.global_costmap]: Subscribed to Topics: scan
+[component_container_isolated-1] [INFO] [1791714096.289027653] [global_costmap.global_costmap]: Initialized plugin "voxel_layer"
+[component_container_isolated-1] [INFO] [1791714096.289124782] [global_costmap.global_costmap]: Using plugin "inflation_layer"
+[component_container_isolated-1] [INFO] [1791714096.295793180] [global_costmap.global_costmap]: Initialized plugin "inflation_layer"
+[component_container_isolated-1] [INFO] [1791714096.480698367] [global_costmap.global_costmap]: StaticLayer: Resizing costmap to 124 X 116 at 0.050000 m/pix
+[component_container_isolated-1] [INFO] [1791714096.482043214] [planner_server]: Created global planner plugin GridBased of type nav2_navfn_planner::NavfnPlanner
+[component_container_isolated-1] [INFO] [1791714096.482141468] [planner_server]: Configuring plugin GridBased of type NavfnPlanner
+[component_container_isolated-1] [INFO] [1791714096.487720071] [planner_server]: Planner Server has GridBased  planners available.
+[component_container_isolated-1] [INFO] [1791714096.594634026] [lifecycle_manager_navigation]: [34m[1mConfiguring route_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714096.595800491] [route_server]: Configuring
+[component_container_isolated-1] [INFO] [1791714096.877835483] [route_server]: Created GraphFileLoader GeoJsonGraphFileLoader of type nav2_route::GeoJsonGraphFileLoader
+[component_container_isolated-1] [INFO] [1791714096.877902819] [route_server]: Configuring geojson graph file loader
+[component_container_isolated-1] [INFO] [1791714096.879040116] [route_server]: No graph file provided to load yet.
+[component_container_isolated-1] [INFO] [1791714096.913163636] [route_server]: Created edge cost function plugin DistanceScorer of type nav2_route::DistanceScorer
+[component_container_isolated-1] [INFO] [1791714096.913223555] [route_server]: Configuring distance scorer.
+[component_container_isolated-1] [INFO] [1791714096.918936581] [route_server]: Created edge cost function plugin DynamicEdgesScorer of type nav2_route::DynamicEdgesScorer
+[component_container_isolated-1] [INFO] [1791714096.919007917] [route_server]: Configuring adjust edges scorer.
+[component_container_isolated-1] [INFO] [1791714096.967751244] [route_server]: Created route operation AdjustSpeedLimit of type nav2_route::AdjustSpeedLimit
+[component_container_isolated-1] [INFO] [1791714096.971993084] [route_server]: Configuring Adjust speed limit operation.
+[component_container_isolated-1] [INFO] [1791714096.983317547] [route_server]: Created route operation ReroutingService of type nav2_route::ReroutingService
+[component_container_isolated-1] [INFO] [1791714096.983858319] [route_server]: Configuring Rerouting service operation.
+[component_container_isolated-1] [INFO] [1791714097.017338563] [lifecycle_manager_navigation]: [34m[1mConfiguring behavior_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714097.017554030] [behavior_server]: Configuring
+[component_container_isolated-1] [INFO] [1791714097.050644342] [behavior_server]: Creating behavior plugin spin of type nav2_behaviors::Spin
+[component_container_isolated-1] [INFO] [1791714097.056502373] [behavior_server]: Creating behavior plugin backup of type nav2_behaviors::BackUp
+[component_container_isolated-1] [INFO] [1791714097.060699878] [behavior_server]: Creating behavior plugin drive_on_heading of type nav2_behaviors::DriveOnHeading
+[component_container_isolated-1] [INFO] [1791714097.065302566] [behavior_server]: Creating behavior plugin wait of type nav2_behaviors::Wait
+[component_container_isolated-1] [INFO] [1791714097.069868086] [behavior_server]: Creating behavior plugin assisted_teleop of type nav2_behaviors::AssistedTeleop
+[component_container_isolated-1] [INFO] [1791714097.122777042] [behavior_server]: Configuring spin
+[component_container_isolated-1] [INFO] [1791714097.180985881] [behavior_server]: Configuring backup
+[component_container_isolated-1] [INFO] [1791714097.220934056] [behavior_server]: Configuring drive_on_heading
+[component_container_isolated-1] [INFO] [1791714097.254748897] [behavior_server]: Configuring wait
+[component_container_isolated-1] [INFO] [1791714097.294384601] [behavior_server]: Configuring assisted_teleop
+[component_container_isolated-1] [INFO] [1791714097.363350130] [lifecycle_manager_navigation]: [34m[1mConfiguring velocity_smoother[0m[0m
+[component_container_isolated-1] [INFO] [1791714097.363643309] [velocity_smoother]: Configuring velocity smoother
+[component_container_isolated-1] [INFO] [1791714097.431323785] [lifecycle_manager_navigation]: [34m[1mConfiguring collision_monitor[0m[0m
+[component_container_isolated-1] [INFO] [1791714097.434003228] [collision_monitor]: Configuring
+[component_container_isolated-1] [INFO] [1791714097.468906572] [collision_monitor]: [scan]: Creating Scan
+[component_container_isolated-1] [INFO] [1791714097.483615007] [collision_monitor]: [PolygonStop]: Creating Polygon
+[component_container_isolated-1] [INFO] [1791714097.483798098] [collision_monitor]: [PolygonStop]: Creating Circle
+[component_container_isolated-1] [INFO] [1791714097.515399682] [collision_monitor]: [PolygonSlow]: Creating Polygon
+[component_container_isolated-1] [INFO] [1791714097.551511825] [collision_monitor]: [FootprintApproach]: Creating Polygon
+[component_container_isolated-1] [INFO] [1791714097.554873213] [collision_monitor]: [FootprintApproach]: Polygon points are not defined. Using dynamic subscription instead.
+[component_container_isolated-1] [INFO] [1791714097.605918092] [collision_monitor]: [FootprintApproach]: Making footprint subscriber on /local_costmap/published_footprint topic
+[component_container_isolated-1] [INFO] [1791714097.655576914] [lifecycle_manager_navigation]: [34m[1mConfiguring bt_navigator[0m[0m
+[component_container_isolated-1] [INFO] [1791714097.657469492] [bt_navigator]: Configuring
+[component_container_isolated-1] [INFO] [1791714097.708709504] [bt_navigator]: Creating navigator id navigate_to_pose of type nav2_bt_navigator::NavigateToPoseNavigator
+[component_container_isolated-1] [WARN] [1791714097.730903120] [bt_navigator]: Error_code parameters were not set. Using default values of: follow_path_error_code compute_path_error_code
+[component_container_isolated-1] Make sure these match your BT and there are not other sources of error codes youreported to your application
+[component_container_isolated-1] [INFO] [1791714098.216317513] [bt_navigator]: Creating navigator id navigate_through_poses of type nav2_bt_navigator::NavigateThroughPosesNavigator
+[component_container_isolated-1] [INFO] [1791714098.463886387] [lifecycle_manager_navigation]: [34m[1mConfiguring waypoint_follower[0m[0m
+[component_container_isolated-1] [INFO] [1791714098.464536914] [waypoint_follower]: Configuring
+[component_container_isolated-1] [INFO] [1791714098.639703202] [waypoint_follower]: Created waypoint_task_executor : wait_at_waypoint of type nav2_waypoint_follower::WaitAtWaypoint
+[component_container_isolated-1] [INFO] [1791714098.649051209] [lifecycle_manager_navigation]: [34m[1mConfiguring docking_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714098.650033625] [docking_server]: Configuring docking_server
+[component_container_isolated-1] [INFO] [1791714098.650254759] [docking_server]: Controller frequency set to 50.0000Hz
+[rviz2-2] [INFO] [1791714098.760394221] [rviz2]: Loading dock plugins
+[component_container_isolated-1] [INFO] [1791714098.914746742] [docking_server]: Created charging dock plugin nova_carter_dock of type opennav_docking::SimpleChargingDock
+[component_container_isolated-1] [INFO] [1791714098.982391675] [docking_server]: Loading docks from parameter file.
+[component_container_isolated-1] [INFO] [1791714098.996790389] [docking_server]: Docking Server has 1 dock types and 3 dock instances available.
+[component_container_isolated-1] [INFO] [1791714099.013668620] [lifecycle_manager_navigation]: [34m[1mActivating controller_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714099.014283354] [controller_server]: Activating
+[component_container_isolated-1] [INFO] [1791714099.014323522] [local_costmap.local_costmap]: Activating
+[component_container_isolated-1] [INFO] [1791714099.014331731] [local_costmap.local_costmap]: Checking transform
+[component_container_isolated-1] [INFO] [1791714099.014487529] [local_costmap.local_costmap]: start
+[component_container_isolated-1] [INFO] [1791714099.224448365] [controller_server]: Creating bond (controller_server) to lifecycle manager.
+[rviz2-2] [INFO] [1791714099.257039907] [rviz2]: Trying to create a map of size 60 x 60 using 1 swatches
+[component_container_isolated-1] [INFO] [1791714099.353042458] [lifecycle_manager_navigation]: Server controller_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714099.353238507] [lifecycle_manager_navigation]: [34m[1mActivating smoother_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714099.353840532] [smoother_server]: Activating
+[component_container_isolated-1] [INFO] [1791714099.353872450] [smoother_server]: Creating bond (smoother_server) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714099.483649007] [lifecycle_manager_navigation]: Server smoother_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714099.483690509] [lifecycle_manager_navigation]: [34m[1mActivating planner_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714099.484684424] [planner_server]: Activating
+[component_container_isolated-1] [INFO] [1791714099.484721801] [global_costmap.global_costmap]: Activating
+[component_container_isolated-1] [INFO] [1791714099.484728801] [global_costmap.global_costmap]: Checking transform
+[component_container_isolated-1] [INFO] [1791714099.484848264] [global_costmap.global_costmap]: start
+[component_container_isolated-1] [INFO] [1791714100.511188403] [planner_server]: Activating plugin GridBased of type NavfnPlanner
+[component_container_isolated-1] [INFO] [1791714100.517951388] [planner_server]: Creating bond (planner_server) to lifecycle manager.
+[rviz2-2] [INFO] [1791714100.538724113] [rviz2]: Trying to create a map of size 124 x 116 using 1 swatches
+[component_container_isolated-1] [INFO] [1791714100.640129302] [lifecycle_manager_navigation]: Server planner_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714100.640186929] [lifecycle_manager_navigation]: [34m[1mActivating route_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714100.640578778] [route_server]: Activating
+[component_container_isolated-1] [INFO] [1791714100.640800246] [route_server]: Creating bond (route_server) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714100.781198154] [lifecycle_manager_navigation]: Server route_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714100.781247781] [lifecycle_manager_navigation]: [34m[1mActivating behavior_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714100.783750633] [behavior_server]: Activating
+[component_container_isolated-1] [INFO] [1791714100.783782968] [behavior_server]: Activating spin
+[component_container_isolated-1] [INFO] [1791714100.783827720] [behavior_server]: Activating backup
+[component_container_isolated-1] [INFO] [1791714100.783867263] [behavior_server]: Activating drive_on_heading
+[component_container_isolated-1] [INFO] [1791714100.783878597] [behavior_server]: Activating wait
+[component_container_isolated-1] [INFO] [1791714100.783921932] [behavior_server]: Activating assisted_teleop
+[component_container_isolated-1] [INFO] [1791714100.783973309] [behavior_server]: Creating bond (behavior_server) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714100.923557684] [lifecycle_manager_navigation]: Server behavior_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714100.923601477] [lifecycle_manager_navigation]: [34m[1mActivating velocity_smoother[0m[0m
+[component_container_isolated-1] [INFO] [1791714100.923907115] [velocity_smoother]: Activating
+[component_container_isolated-1] [INFO] [1791714100.923959825] [velocity_smoother]: Creating bond (velocity_smoother) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714101.062887007] [lifecycle_manager_navigation]: Server velocity_smoother connected with bond.
+[component_container_isolated-1] [INFO] [1791714101.062937259] [lifecycle_manager_navigation]: [34m[1mActivating collision_monitor[0m[0m
+[component_container_isolated-1] [INFO] [1791714101.067565032] [collision_monitor]: Activating
+[component_container_isolated-1] [INFO] [1791714101.067706871] [collision_monitor]: Creating bond (collision_monitor) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714101.197411800] [lifecycle_manager_navigation]: Server collision_monitor connected with bond.
+[component_container_isolated-1] [INFO] [1791714101.197481886] [lifecycle_manager_navigation]: [34m[1mActivating bt_navigator[0m[0m
+[component_container_isolated-1] [INFO] [1791714101.199287293] [bt_navigator]: Activating
+[component_container_isolated-1] [INFO] [1791714102.052538562] [bt_navigator]: Creating bond (bt_navigator) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714102.177010236] [lifecycle_manager_navigation]: Server bt_navigator connected with bond.
+[component_container_isolated-1] [INFO] [1791714102.177136866] [lifecycle_manager_navigation]: [34m[1mActivating waypoint_follower[0m[0m
+[component_container_isolated-1] [INFO] [1791714102.179810142] [waypoint_follower]: Activating
+[component_container_isolated-1] [INFO] [1791714102.180724971] [waypoint_follower]: Creating bond (waypoint_follower) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714102.353867343] [lifecycle_manager_navigation]: Server waypoint_follower connected with bond.
+[component_container_isolated-1] [INFO] [1791714102.354018433] [lifecycle_manager_navigation]: [34m[1mActivating docking_server[0m[0m
+[component_container_isolated-1] [INFO] [1791714102.360433695] [docking_server]: Activating docking_server
+[component_container_isolated-1] [INFO] [1791714102.717905230] [docking_server]: Creating bond (docking_server) to lifecycle manager.
+[component_container_isolated-1] [INFO] [1791714102.872056534] [lifecycle_manager_navigation]: Server docking_server connected with bond.
+[component_container_isolated-1] [INFO] [1791714102.872211416] [lifecycle_manager_navigation]: [34m[1mManaged nodes are active[0m[0m
+[component_container_isolated-1] [INFO] [1791714102.872219916] [lifecycle_manager_navigation]: [34m[1mCreating bond timer...[0m[0m
+[rviz2-2] [INFO] [1791714113.134602296] [rviz2]: Message Filter dropping message: frame 'base_scan' at time 1090.400 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[component_container_isolated-1] [INFO] [1791714142.511527236] [amcl]: initialPoseReceived
+[component_container_isolated-1] [WARN] [1791714142.512369229] [amcl]: Failed to transform initial pose in time (Lookup would require extrapolation into the future.  Requested time 1112.536000 but the latest data is at time 1112.520000, when looking up transform from frame [base_footprint] to frame [odom])
+[component_container_isolated-1] [INFO] [1791714142.512423022] [amcl]: Setting pose (1112.536000): -0.014 0.000 0.000
+[component_container_isolated-1] [INFO] [1791714160.636040995] [bt_navigator]: Begin navigating from current location (-0.00, 0.02) to (3.60, 0.00)
+[component_container_isolated-1] [INFO] [1791714160.659034393] [controller_server]: Received a goal, begin computing control effort.
+[component_container_isolated-1] [WARN] [1791714160.659281528] [controller_server]: No goal checker was specified in parameter 'current_goal_checker'. Server will use only plugin loaded goal_checker . This warning will appear once.
+[component_container_isolated-1] [WARN] [1791714160.659300654] [controller_server]: No progress checker was specified in parameter 'current_progress_checker'. Server will use only plugin loaded progress_checker . This warning will appear once.
+[component_container_isolated-1] [WARN] [1791714161.402581420] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714161.405697589] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714161.443769188] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714162.072841826] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 83.3333 Hz.
+[component_container_isolated-1] [INFO] [1791714162.073027167] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714162.186457471] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 166.6667 Hz.
+[component_container_isolated-1] [WARN] [1791714162.408171745] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 52.6316 Hz.
+[component_container_isolated-1] [INFO] [1791714163.011779717] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714163.257790859] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714163.257847361] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714163.398043094] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714164.011627265] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714164.184569294] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714164.184623297] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714164.275044785] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714165.112572571] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714165.278858370] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714165.278930165] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714165.389998956] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714165.975514230] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714165.975569149] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714166.036016829] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714166.111564209] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714166.786579309] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714166.786857153] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714166.871865129] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714167.211547768] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714167.526441560] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714167.526496895] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714167.623928671] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714168.213044091] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714168.213294143] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714168.261955133] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 35.7143 Hz.
+[component_container_isolated-1] [INFO] [1791714168.262049678] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714168.401342040] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 83.3333 Hz.
+[component_container_isolated-1] [INFO] [1791714168.402499087] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714168.822438883] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 47.6190 Hz.
+[component_container_isolated-1] [WARN] [1791714168.937837018] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 27.0270 Hz.
+[component_container_isolated-1] [WARN] [1791714169.056611374] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 19.6078 Hz.
+[component_container_isolated-1] [INFO] [1791714169.157375285] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714169.566753399] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 62.5000 Hz.
+[component_container_isolated-1] [WARN] [1791714170.087690948] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 250.0000 Hz.
+[component_container_isolated-1] [INFO] [1791714170.189372147] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714170.477473302] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714170.477539680] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714170.514388853] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.212000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714170.586306710] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714171.287934147] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714171.518572702] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714171.518629580] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714171.597795567] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714172.288636563] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714172.328441690] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714172.328536777] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714172.411775764] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714173.199667187] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714173.199748565] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714173.287893669] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714173.316980400] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714174.019547459] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714174.019612920] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714174.092364353] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 43.4783 Hz.
+[component_container_isolated-1] [INFO] [1791714174.097974082] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714174.394473080] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714175.108556151] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714175.108618737] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714175.167447517] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714175.309406446] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 28.5714 Hz.
+[component_container_isolated-1] [INFO] [1791714175.429940375] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714176.033328878] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714176.033787772] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714176.039044862] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 50.0000 Hz.
+[component_container_isolated-1] [INFO] [1791714176.160460951] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714176.441593362] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714176.500711238] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.222000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714176.500764115] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714176.573509339] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714177.210276249] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714177.210339127] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714177.274966727] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714177.439747090] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714177.941244135] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714177.941306971] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714178.057296922] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714178.440305082] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714178.655867353] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714178.655917981] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714178.734722494] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714179.239292499] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714179.239373211] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714179.296035361] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714179.539729283] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714180.226911379] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714180.226960714] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714180.331754249] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714180.540540160] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714181.543018522] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714182.539899905] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714182.597314002] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714182.597653850] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714182.672677250] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714183.240048073] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714183.240147285] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714183.392019203] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714183.643962587] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714183.991030568] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714183.991137865] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714184.038033032] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714184.442387397] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 34.4828 Hz.
+[component_container_isolated-1] [INFO] [1791714184.642562290] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714184.719866034] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714184.719936162] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714184.826022957] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714184.876650236] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 35.7143 Hz.
+[component_container_isolated-1] [INFO] [1791714185.681249507] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714186.677380609] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714187.067034873] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714187.074770898] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714187.080930400] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714187.177877697] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714187.682201483] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714187.682253026] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714187.778972814] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714187.786276988] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714188.779457094] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714189.091519061] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714189.091574230] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714189.174406575] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714189.779768283] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714189.963593174] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714189.963657593] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714190.112584932] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714190.329713559] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 37.0370 Hz.
+[component_container_isolated-1] [INFO] [1791714190.838695577] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714191.041914302] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714191.061574231] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714191.136730679] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714191.881530963] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714191.881599091] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714191.931287455] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714192.003249606] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714192.492955169] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714192.494492607] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714192.539007718] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714192.929908159] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714193.294292223] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714193.294346058] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714193.336877756] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714193.934342641] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714194.040953750] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 58.8235 Hz.
+[component_container_isolated-1] [INFO] [1791714194.941178096] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714194.953792737] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714194.953861865] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714194.981765256] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714195.055477519] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714195.717620840] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.208000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714195.717683135] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714195.758553722] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714195.941321070] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714196.286642688] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714196.286683523] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714196.369407030] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714196.937632928] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714196.939524505] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714197.041766185] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714197.054746341] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714197.543862671] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714197.543911298] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714197.602552862] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714198.043327341] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714198.548573998] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.215000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714198.548624791] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714198.619506064] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714198.955946194] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 37.0370 Hz.
+[component_container_isolated-1] [INFO] [1791714199.067697221] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714199.344267612] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.211000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714199.344340948] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714199.395410953] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714200.032331368] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714200.032384536] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714200.066510682] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714200.129530591] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714200.802308472] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714200.802366891] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714200.917281048] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714201.073331969] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714201.384913499] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714201.384960085] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714201.476794047] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714202.085431764] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714202.085479641] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714202.149824938] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714202.164644002] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714202.976482693] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714202.976524820] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714203.070226192] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714203.174766758] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714204.165981199] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714205.265210431] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714205.957508025] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714205.957563028] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714206.037515588] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714206.265880258] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714207.239653152] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714207.239701737] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714207.266184195] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714207.300491306] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714207.916639204] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714207.917685247] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714207.924571403] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714208.038488477] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714208.366693645] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714208.440514163] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714208.440564498] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714208.532038363] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714208.856627592] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.208000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714208.856690552] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714208.910603382] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714209.367216132] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714209.380881691] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.212000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714209.380940860] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714209.466057590] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714210.370507150] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714211.482664201] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 100.0000 Hz.
+[component_container_isolated-1] [INFO] [1791714211.582952718] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714212.582918182] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714212.678013986] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714212.683454917] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714212.761397729] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714213.587024690] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714213.740280414] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714213.743578382] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714213.929672615] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714214.356700948] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714214.356749825] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714214.403923712] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714214.682880908] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714214.937398105] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714214.937446690] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714214.998036334] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714215.545258039] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714215.545610595] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714215.616434532] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714215.684228970] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714216.658381171] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714216.659802604] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714216.674416035] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714216.682884548] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714216.762042284] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714217.260047351] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714217.260220400] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714217.290552807] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714217.684255777] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714217.763955869] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714217.764003829] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714217.832379583] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714218.285460772] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 18.8679 Hz.
+[component_container_isolated-1] [INFO] [1791714218.690172859] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714218.936355674] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714218.936521514] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714219.015048474] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714219.590534751] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714219.592820678] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714219.657638078] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714219.790317168] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714220.176919848] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714220.176986851] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714220.312898407] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714220.777387521] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714220.777519027] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714220.788359678] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714220.840592355] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714221.324056912] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714221.330964777] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714221.332752101] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714221.406797794] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714221.788291682] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714222.790679828] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714223.778592382] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714223.778664051] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714223.848540949] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714223.891564333] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714224.890344998] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714225.183394728] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714225.183443897] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714225.294278678] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714225.798782053] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714225.798840763] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714225.892492467] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714225.897541632] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714226.516385431] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714226.516436683] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714226.528527802] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [INFO] [1791714226.661808626] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714226.890386137] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714227.264189127] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.204000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714227.264235337] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714227.386325536] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714227.988476778] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714228.524656239] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714228.524704366] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714228.570613826] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714228.989346944] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714229.084239615] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714229.084294159] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714229.212453565] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714229.684693204] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714229.684738831] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714229.763461674] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714229.988497873] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714230.988619051] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714231.732410499] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714231.732491210] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714231.857675911] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714232.087886031] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714232.396566275] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714232.396673488] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714232.485898343] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714232.506814490] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 40.0000 Hz.
+[component_container_isolated-1] [WARN] [1791714232.909569288] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 29.4118 Hz.
+[component_container_isolated-1] [INFO] [1791714233.110054109] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714233.218342494] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714233.218399872] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714233.313429382] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 62.5000 Hz.
+[component_container_isolated-1] [INFO] [1791714233.333895052] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714233.443894048] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 31.2500 Hz.
+[component_container_isolated-1] [WARN] [1791714233.911648754] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714233.911697964] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714234.001403464] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714234.044927535] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714234.549825301] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714234.549877595] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714234.670932002] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714235.106699566] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714235.106751318] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714235.151819285] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714235.174757598] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714235.735016793] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714235.735199926] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714235.797580517] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714236.144857131] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714236.305347650] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714236.305423236] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714236.394298953] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714237.144803175] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714238.145544919] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714238.456890522] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714238.456939982] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714238.515687467] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714238.976653436] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.202000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714238.976713522] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714239.055466616] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714239.145141532] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714239.536827336] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714239.536870504] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714239.582911220] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714240.245473055] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714241.192405890] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 166.6667 Hz.
+[component_container_isolated-1] [INFO] [1791714241.292761659] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714241.350813949] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.201000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714241.350877327] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [WARN] [1791714241.376249197] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714241.486052394] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 47.6190 Hz.
+[component_container_isolated-1] [INFO] [1791714241.493549243] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714242.291284354] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714242.374274371] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.206000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714242.376327705] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714242.469935865] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714243.289512744] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714243.898644645] [controller_server]: Control loop missed its desired rate of 10.0000 Hz. Current loop rate is 200.0000 Hz.
+[component_container_isolated-1] [INFO] [1791714244.298982010] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [WARN] [1791714244.608395742] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.207000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714244.608474037] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714244.626831288] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [INFO] [1791714245.299695377] [controller_server]: Passing new path to controller.
+[component_container_isolated-1] [INFO] [1791714246.098879339] [controller_server]: Reached the goal!
+[component_container_isolated-1] [INFO] [1791714246.127744560] [bt_navigator]: Goal succeeded
+[component_container_isolated-1] [WARN] [1791714247.310594372] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.203000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714247.310695085] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714247.401861520] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714248.027637101] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.209000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714248.031512051] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714248.079912238] [collision_monitor]: Robot to continue normal operation
+[component_container_isolated-1] [WARN] [1791714248.556410133] [collision_monitor]: [scan]: Latest source and current collision monitor node timestamps differ on 0.205000 seconds. Ignoring the source.
+[component_container_isolated-1] [WARN] [1791714248.556607475] [collision_monitor]: Robot to stop due to invalid source. Either due to data not published yet, or to lack of new data received within the sensor timeout, or if impossible to transform data to base frame
+[component_container_isolated-1] [INFO] [1791714248.577884761] [collision_monitor]: Robot to continue normal operation

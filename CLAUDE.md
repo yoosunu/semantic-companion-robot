@@ -31,21 +31,20 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
-## 현재 상태 (2026-10-07 종료 시점)
-- 시뮬레이션은 repo의 `scr_gazebo` 패키지로 실행: `ros2 launch scr_gazebo sim_world.launch.py` (robot-start가 사용).
-  빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
-- 디버깅 001: sim LiDAR가 전부 range_min(0.12) → 원인: VM(Ogre1+GL2.1)에서 gpu_lidar 맨 위 행 깊이 읽기 실패.
-  수정: scr_burger 모델 LiDAR 수직 3줄(±0.5°), bridge가 가운데 행 사용. 정지 상태 회귀 테스트 통과.
-  turtlebot3_ws launch 수정은 원복 완료.
-- 계층 상태: 센서 ✅ / SLAM 맵(정지) ✅ / SLAM 맵(주행 전체) ✅ (maps/tb3_world_cartographer)
-- 완료(2026-10-11): teleop 재작성(누르는 동안만 이동, 가감속, 0.20 m/s), 전체 주행 맵 검증, maps/tb3_world_cartographer 저장,
-  001 기록 정리(docs/debugging/001-slam-map-quality.md + 001/ 증거, docs/debugging/README.md 목록)
+## 현재 상태 (2026-10-11 종료 시점) — 시뮬레이션 v0.1 통과
+- 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
+- 실행: `robot-start` → `./scripts/robot_nav.sh` → `./scripts/nav_test.sh` (Nav2 설정: `config/nav2_burger_sim.yaml`)
+  맵 생성: `robot-start` → `robot-slam` → `robot-drive` → `./scripts/save_map.sh <name>`
+- 빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
+- 결정: 시뮬레이션 튜닝은 여기서 멈춤. Burger 파라미터는 실물 UGV02로 옮겨가지 않으므로, 실물 bring-up하며 개념을 채운다.
+  시뮬레이션은 회귀 테스트·실험용으로 유지.
 - 다음 할 일:
-  1. SLAM 도구 결정 (Cartographer vs SLAM Toolbox)
-  2. Nav2: 저장 맵 위에서 위치 추정 → RViz 목표 → 자율주행 end-to-end
-  3. dev → main 병합, v0.1 태그 → 하드웨어 구매
-- 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐 → 개선 예정
-- 열린 결정: 하드웨어 기준 문서는 SLAM Toolbox 우선, 시뮬레이션은 현재 Cartographer.
+  1. 하드웨어 구매 (결제 직전 체크 3가지: 18650 포함, C1 Dev Kit, Pi 5 가격/정품)
+  2. 도착 전 준비: Pi 5용 Ubuntu 24.04 + ROS 2 Jazzy, RPLIDAR C1 ROS 2 드라이버, UGV02 공식 ROS 2 패키지/통신 프로토콜 조사
+  3. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
+- 후보(나중): 자율 탐색(frontier exploration) — 로봇이 스스로 돌아다니며 맵 완성. 직접 작성 후보.
+- 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐.
+- 열린 결정: SLAM은 실물에서 SLAM Toolbox 사용 예정(시뮬레이션은 Cartographer 맵 사용 중).
 
 ## 하드웨어 (구매 전) — 상세: `docs/hardware-baseline.md`
 UGV02(내장 ESP32: 엔코더/IMU/모터 제어, Pi와 UART/JSON) · Raspberry Pi 5 8GB · RPLIDAR C1 Dev Kit(USB) · iPhone(ARKit/CoreML)

@@ -1,0 +1,33 @@
+=== Sun Oct 11 07:21:51 PM KST 2026 ===  goal(map)=(3.6, 0.0)
+
+### 1) wait for Nav2 bringup (bt_navigator active, max 180 s)
+waited 0 s
+map_server           active [3]
+amcl                 active [3]
+planner_server       active [3]
+controller_server    active [3]
+bt_navigator         
+### 2) set /initialpose from ground truth
+ground truth (map frame): -0.014 0.000 -0.000
+
+### 3) AMCL estimate vs ground truth (before moving)
+amcl:  -0.004 0.017 0.016
+truth: -0.014 0.000 -0.000
+position error 0.020 m, yaw error 0.9 deg
+
+### 4) send goal /navigate_to_pose
+Goal accepted with ID: 3734cc599c65457294e6852088bfb9ae
+    error_code: 0
+error_msg: ''
+Goal finished with status: SUCCEEDED
+wall time: 91.4 s
+
+### 5) arrival
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+TypeError: 'NoneType' object is not subscriptable
+goal:  3.6 0.0
+truth: 3.548 0.050 0.274
+amcl:  none
+truth vs goal: position error 0.072 m, yaw error 0.0 deg
+=== done ===
