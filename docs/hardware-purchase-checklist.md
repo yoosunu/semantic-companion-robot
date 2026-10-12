@@ -90,3 +90,19 @@
 - RPLIDAR C1 Wiki: https://waveshare.com/wiki/RPLIDAR_C1
 - Slamtec sllidar_ros2: https://github.com/Slamtec/sllidar_ros2
 - Raspberry Pi, "USB power delivery on Raspberry Pi 5" (RP-009856-WP): https://pip-assets.raspberrypi.com/categories/685-app-notes-guides-whitepapers/documents/RP-009856-WP-1-USB%20Power%20delivery%20on%20Raspberry%20Pi%205.pdf
+
+## 5. 결정 기록: UGV02 vs TurtleBot3 Burger (2026-10-12)
+가격이 거의 같아져(UGV02 구성 약 80만원+, TurtleBot3 Burger 약 82만원) 선택을 다시 검토함.
+
+| | TurtleBot3 Burger | UGV02 구성 |
+|---|---|---|
+| 강점 | 위험 낮음, ROS 2 공식 지원, 배터리 포함, 시뮬레이션과 동일 로봇, Dynamixel로 odom 정확 | Pi 5 8GB + RPLIDAR C1, 견고한 6륜 섀시와 레일(확장성), 하드웨어 계층을 C++로 직접 구현할 여지 |
+| 약점 | 표준 교육용 로봇이라 차별점 약함, 2륜·소형으로 확장성 낮음, Pi 4 | ROS 2 미지원(직접 브리지), 배터리·5V 출력 불명확, 해외 주문(취소·A/S 불가), odom 오차 큼 |
+
+**결정: UGV02.** 근거 = 프로젝트 목표.
+- 채용 공고와 겹치는 C++/Linux 역량을 하드웨어–ROS 2 브리지에서 직접 증명
+- "직접 구현한 부분"과 "차별점"을 분명히 말할 수 있는 구조
+- 스키드 스티어 odom 오차 보정 같은 측정 가능한 엔지니어링 과제
+- 견고한 섀시와 확장성 (카메라 교체, 실외 테스트 등 이후 확장)
+
+감수하는 위험과 대응: 배터리 포함 여부는 결제 전 판매처 문의, 전원은 27W 어댑터로 벤치 개발 후 실측, 일정은 Pi 먼저 받아 소프트웨어 준비로 상쇄.
