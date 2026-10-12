@@ -38,10 +38,12 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
 - 결정: 시뮬레이션 튜닝은 여기서 멈춤. Burger 파라미터는 실물 UGV02로 옮겨가지 않으므로, 실물 bring-up하며 개념을 채운다.
   시뮬레이션은 회귀 테스트·실험용으로 유지.
-- 다음 할 일:
-  1. 하드웨어 구매 (결제 직전 체크 3가지: 18650 포함, C1 Dev Kit, Pi 5 가격/정품)
-  2. 도착 전 준비: Pi 5용 Ubuntu 24.04 + ROS 2 Jazzy, RPLIDAR C1 ROS 2 드라이버, UGV02 공식 ROS 2 패키지/통신 프로토콜 조사
-  3. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
+- 하드웨어 주문 완료(2026-10-12): 엘레파츠 품목(Pi 5 포함)은 합배송으로 10/26 발송 예정. microSD(쿠팡)만 먼저 도착.
+- 다음 할 일 (하드웨어 도착 전):
+  1. 로봇의 임무("단순히 돌아다니는 게 아니라 ~를 수행") 정의 → semantic 계층 인터페이스 설계
+  2. UGV02 JSON/UART 프로토콜 정리 → 브리지 설계(Jasper 직접 작성) + 가짜 ESP32(시리얼 에뮬레이터)로 하드웨어 없이 테스트
+  3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
+  4. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
 - iPhone: iPhone 16 (일반 모델, LiDAR 스캐너 없음) → 기하(갈 수 있는 공간)는 RPLIDAR + costmap, iPhone은 의미(YOLO) 담당.
 - 보류 실험: iPhone 높이별(20/30/40cm) YOLO 탐지율 비교 → 거치 높이 결정 근거. 공간 확보 후 진행.
 - 구매 기준서: docs/hardware-purchase-checklist.md (배터리 미포함 가능성, UGV02 5V 출력 전류 미표기 등)
