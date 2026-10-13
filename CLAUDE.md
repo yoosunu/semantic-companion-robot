@@ -10,6 +10,8 @@ Jasper의 대학 마지막 프로젝트. public GitHub repo이자 포트폴리�
 - Claude는 Mac 쪽에서 파일을 읽고 수정. ROS/Gazebo 실행은 VM에서 Jasper가 함.
 - 실행 결과는 가능하면 `logs/`에 파일로 남겨 Claude가 직접 읽게 함.
 - 명령 안내 시 항상 `[Mac]` / `[VM]` / `[Pi]` 표시.
+- 편집: Mac VS Code + Remote-SSH (`ssh scr-vm` = jasper@192.168.64.2, 키 인증). VS Code 터미널 = VM 터미널.
+  GUI(Gazebo/RViz)는 SSH 터미널에 화면이 없으므로 VM 창에서 실행하거나 `DISPLAY=:0`을 붙여 VM 화면에 띄운다.
 
 ## 배포 흐름
 Repo: https://github.com/yoosunu/semantic-companion-robot (public)
@@ -40,8 +42,9 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   시뮬레이션은 회귀 테스트·실험용으로 유지.
 - 하드웨어 주문 완료(2026-10-12): 엘레파츠 품목(Pi 5 포함)은 합배송으로 10/26 발송 예정. microSD(쿠팡)만 먼저 도착.
 - 다음 할 일 (하드웨어 도착 전):
-  1. 로봇의 임무("단순히 돌아다니는 게 아니라 ~를 수행") 정의 → semantic 계층 인터페이스 설계
-  2. UGV02 JSON/UART 프로토콜 정리 → 브리지 설계(Jasper 직접 작성) + 가짜 ESP32(시리얼 에뮬레이터)로 하드웨어 없이 테스트
+  1. ✅ 로봇의 임무 정의 (2026-10-13) → 아래 "로봇 임무" 섹션
+  2. **(진행 중)** UGV02 JSON/UART 프로토콜 정리 → `ugv02_bridge` baseline(Claude) → Jasper 고도화 + 가짜 ESP32(시리얼 에뮬레이터)로 하드웨어 없이 테스트
+     브리지 요구사항: /cmd_vel→T:13, /odom 발행, /battery_state 발행, /cmd_vel 0.5s 타임아웃 시 정지, 종료(SIGINT) 시 정지 명령, launch respawn
   3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
   4. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
 - iPhone: iPhone 16 (일반 모델, LiDAR 스캐너 없음) → 기하(갈 수 있는 공간)는 RPLIDAR + costmap, iPhone은 의미(YOLO) 담당.
@@ -50,6 +53,19 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 후보(나중): 자율 탐색(frontier exploration) — 로봇이 스스로 돌아다니며 맵 완성. 직접 작성 후보.
 - 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐.
 - 열린 결정: SLAM은 실물에서 SLAM Toolbox 사용 예정(시뮬레이션은 Cartographer 맵 사용 중).
+
+## 로봇 임무 (2026-10-13 결정)
+- 면접 문장: "SLAM으로 맵을 그리고, Nav2로 이동하면서, 비전과 직접 짠 알고리즘으로 어디로 갈지 스스로 판단합니다.
+  그리고 단순히 돌아다니는 게 아니라, **배터리를 스스로 관리하며 사람 손 없이 집(방)에서 상시 운용**됩니다."
+- 구성: 상시 운용(Pi = 리눅스 서버, systemd) + 방 SLAM + 시맨틱 맵(물건 위치를 계속 최신으로 기억) + 자동 충전 귀환 + LLM 인터페이스.
+- **자동 충전은 필수 목표** (Jasper: 손이 가면 매력 없음). 단계:
+  1) 브리지가 /battery_state 발행 2) task_manager가 저전압 판단 → 귀환 3) Nav2로 독 앞까지
+  4) 정밀 접근(Nav2 opennav_docking + AprilTag 등) 5) 실제 충전(접점/무선 — 방식 미정, 실측 후 결정)
+  - 안전: 리튬 3S 무인 충전은 화재 위험. 핵심은 충전 제어(균형·과충전·온도), 접점 방식이 아님. 검증된 보호회로 사용.
+  - 하드웨어 도착 후 확인: UGV02 충전 포트 사양, 켜진 채 충전 가능 여부, 전압 피드백 필드, 실측 배터리 소모.
+- LLM 원칙: LLM은 자연어 → 정해진 형식의 명령 번역만. /cmd_vel 직접 제어 금지. task_manager가 검증(시맨틱 맵에 있나, 배터리 충분한가) 후 Nav2에 전달.
+  "end-to-end는 믿을 수 없으니 task_manager가 통제한다"가 포트폴리오 핵심 설계 철학. 순서: 시맨틱 맵 → LLM.
+- 연습용 simple_mover P제어/액션화는 보류 (필요해지면).
 
 ## 하드웨어 (구매 전) — 상세: `docs/hardware-baseline.md`
 UGV02(내장 ESP32: 엔코더/IMU/모터 제어, Pi와 UART/JSON) · Raspberry Pi 5 8GB · RPLIDAR C1 Dev Kit(USB) · iPhone(ARKit/CoreML)
