@@ -16,6 +16,15 @@ fi
 source /opt/ros/jazzy/setup.bash
 [ -f ~/turtlebot3_ws/install/setup.bash ] && source ~/turtlebot3_ws/install/setup.bash
 cd "$WS"
-colcon build --symlink-install
+colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+# compile_commands.json 하나로 합쳐 VS Code C/C++ 확장이 ROS 2 헤더를 찾게 한다
+python3 - <<'PY'
+import json, glob, os
+entries = []
+for f in glob.glob(os.path.expanduser('~/scr_ws/build/*/compile_commands.json')):
+    entries += json.load(open(f))
+json.dump(entries, open(os.path.expanduser('~/scr_ws/build/compile_commands.json'), 'w'), indent=1)
+print(f'compile_commands.json: {len(entries)} entries')
+PY
 echo
 echo "built. packages:"; source "$WS/install/setup.bash"; ros2 pkg list | grep '^scr_' || true
