@@ -21,6 +21,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "scr_ugv02/serial_port.hpp"
 
+using namespace std;
+
 class Ugv02Bridge : public rclcpp::Node
 {
 public:
@@ -28,14 +30,14 @@ public:
   Ugv02Bridge()
   : Node("ugv02_bridge")
   {
-    port_ = declare_parameter<std::string>("port", "/tmp/ugv02_bridge");
+    port_ = declare_parameter<string>("port", "/tmp/ugv02_bridge");
     baud_ = declare_parameter<int>("baud", 115200);
 
     // A bridge without a port must not pretend to run -> stop the program with a clear reason.
     if (!serial_.open(port_, baud_)) {
       RCLCPP_ERROR(get_logger(), "failed to open serial port %s at %d baud: %s",
         port_.c_str(), baud_, serial_.error().c_str());
-      throw std::runtime_error("failed to open serial port");
+      throw runtime_error("failed to open serial port");
     }
 
     // "When a /cmd_vel message arrives, call on_cmd_vel with it."
@@ -56,7 +58,7 @@ private:
     const double z = msg->twist.angular.z;   // turn speed, rad/s (+ = left)
 
     char json[64];
-    std::snprintf(json, sizeof(json), "{\"T\":13,\"X\":%.3f,\"Z\":%.3f}", x, z);
+    snprintf(json, sizeof(json), "{\"T\":13,\"X\":%.3f,\"Z\":%.3f}", x, z);
 
     if (!serial_.write_line(json)) {
       RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
@@ -68,7 +70,7 @@ private:
 
   // ===== zone 3: member variables (the node's memory) =====
   // [fix] types: port is just text, baud is just a number, the subscription matches TwistStamped
-  std::string port_;
+  string port_;
   int baud_{115200};
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_sub_;
   scr_ugv02::SerialPort serial_;
@@ -77,7 +79,7 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Ugv02Bridge>());
+  rclcpp::spin(make_shared<Ugv02Bridge>());
   rclcpp::shutdown();
   return 0;
 }
