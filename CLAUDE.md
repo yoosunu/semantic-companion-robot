@@ -33,7 +33,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
-## 현재 상태 (2026-10-11 종료 시점) — 시뮬레이션 v0.1 통과
+## 현재 상태 (2026-10-14) — 시뮬 v0.1 통과, 브리지 v0 통과. 전체 계획·일정·목표 Lv: `docs/roadmap.md`
 - 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
 - 실행: `robot-start` → `./scripts/robot_nav.sh` → `./scripts/nav_test.sh` (Nav2 설정: `config/nav2_burger_sim.yaml`)
   맵 생성: `robot-start` → `robot-slam` → `robot-drive` → `./scripts/save_map.sh <name>`
@@ -43,8 +43,10 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 하드웨어 주문 완료(2026-10-12): 엘레파츠 품목(Pi 5 포함)은 합배송으로 10/26 발송 예정. microSD(쿠팡)만 먼저 도착.
 - 다음 할 일 (하드웨어 도착 전):
   1. ✅ 로봇의 임무 정의 (2026-10-13) → 아래 "로봇 임무" 섹션
-  2. **(진행 중)** UGV02 JSON/UART 프로토콜 정리 → `ugv02_bridge` baseline(Claude) → Jasper 고도화 + 가짜 ESP32(시리얼 에뮬레이터)로 하드웨어 없이 테스트
-     브리지 요구사항: /cmd_vel→T:13, /odom 발행, /battery_state 발행, /cmd_vel 0.5s 타임아웃 시 정지, 종료(SIGINT) 시 정지 명령, launch respawn
+  2. **(진행 중)** `ugv02_bridge` (src/scr_ugv02): v0 ✅ 2026-10-14 (/cmd_vel→T:13 JSON, teleop으로 TB3 주행 확인, 브리지 죽으면 3 s 폭주 측정)
+     다음: v2 안전 정지(Jasper, 목표 <0.5 s) → v1 odom(T:1001 → /odom). 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
+     실행: `./scripts/ugv02_sim.sh`(UGV02 모드 시뮬, robot-start 아님) → `ros2 run scr_ugv02 ugv02_bridge` → `robot-drive`
+     폭주 테스트는 teleop 대신 `ros2 topic pub -r 10 /cmd_vel ...` (teleop은 포커스 잃으면 스스로 정지)
   3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
   4. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
 - iPhone: iPhone 16 (일반 모델, LiDAR 스캐너 없음) → 기하(갈 수 있는 공간)는 RPLIDAR + costmap, iPhone은 의미(YOLO) 담당.
