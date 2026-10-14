@@ -21,21 +21,29 @@ LLM은 자연어 → 정해진 명령 형식 번역만 하고, 실행 여부는 
 | 6. LLM | 자연어 → `task_manager` 검증 → 실행 | "책상 가봐" 동작, 잘못된 명령 거부 | |
 | 7. 상시 운용 | systemd 자동 실행/재시작, 장시간 무인 테스트, 문서 정리 | 며칠 연속 무인 운용 기록 | |
 
-## 1단계 세부 (현재)
+## 1단계 세부 (현재) — "TB3를 UGV02라고 가정하고 내 브리지로 움직이기"
+
+```
+teleop / Nav2 ── /cmd_vel ──→ ugv02_bridge (Jasper) ──JSON over 가상 시리얼──→ fake_esp32 ──→ Gazebo TB3 가 움직임
+                 /odom   ←──      (번역기)          ←──JSON 피드백(바퀴·IMU·전압)──     ←── Gazebo
+```
+- fake_esp32: UGV02 펌웨어인 척하는 프로그램. JSON을 받아 Gazebo 로봇을 움직이고, Gazebo 상태를 UGV02 형식 JSON으로 돌려준다.
+- 브리지 입장에서는 실제 UGV02와 구분되지 않는다 → 10/26엔 포트 경로만 바꾼다.
+- 차이(정직하게): TB3 최고속도 0.22 m/s vs UGV02 0.5 m/s, 물리 특성 다름. 프로토콜·안전 로직 검증용이지 튜닝용 아님.
 
 | # | 할 일 | 담당 | 상태 |
 |---|---|---|---|
-| 1-1 | UGV02 프로토콜 정리 (`docs/ugv02-protocol.md`) | Claude | |
-| 1-2 | 브리지 v0: `/cmd_vel` → T:13 JSON 문자열 로그 출력 (시리얼 없음) | **Jasper** (simple_mover 복사 후 수정) | |
-| 1-3 | mock UGV02: 가상 시리얼로 JSON 받고 가짜 바퀴/IMU/전압 응답 | Claude | |
-| 1-4 | 브리지 v1: 실제 시리얼(가상 포트)로 mock과 통신, `/odom` 발행 | 함께 | |
-| 1-5 | 브리지 v2: `/cmd_vel` 0.5 s 타임아웃 정지, 종료 시 정지, `/battery_state` | **Jasper** | |
-| 1-6 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | |
+| 1-1 | UGV02 프로토콜 정리 (`docs/ugv02-protocol.md`) | Claude | ✅ (피드백 형식은 [가정]) |
+| 1-2 | fake_esp32 + 가상 시리얼 + 시뮬 "UGV02 모드" 실행 스크립트 | Claude | ✅ (2026-10-14) |
+| 1-3 | 브리지 v0: `/cmd_vel` → T:13 JSON → 시리얼. **합격: teleop으로 TB3가 내 브리지를 거쳐 움직인다** | **Jasper** (시리얼 헬퍼는 Claude 제공, `src/scr_ugv02`) | ✅ (2026-10-14) |
+| 1-4 | 브리지 v1: 피드백 JSON → `/odom` (+TF). 합격: RViz에서 내 odom으로 로봇이 따라 움직임 | 함께 | |
+| 1-5 | 브리지 v2: `/cmd_vel` 0.5 s 타임아웃 정지, 종료 시 정지, `/battery_state`. 합격: teleop 끊으면 0.5 s 안에 정지 | **Jasper** | |
+| 1-6 | 내 브리지를 거쳐 시뮬 SLAM·Nav2 재실행 (sim v0.1 회귀) | 함께 | |
+| 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | |
 
 ## 시뮬(TB3)과의 관계
-- 브리지 개발에는 TB3/Gazebo가 필요 없다. 브리지의 상대는 UGV02(실물) 또는 mock이다.
-- Gazebo는 이미 ROS로 말하므로(ros_gz_bridge가 브리지 역할) 시뮬에는 우리 브리지가 끼지 않는다.
-- 시뮬은 Nav2/task_manager 로직의 회귀 테스트·실험용으로 유지.
+- 평소 시뮬: Gazebo가 ROS로 직접 말함(ros_gz_bridge). 우리 브리지 없음.
+- UGV02 모드 시뮬: Gazebo 토픽 이름을 바꿔 숨기고, fake_esp32가 그 사이를 맡는다 → 전체 스택이 내 브리지를 통과.
 
 ## 노드별 소유 (점점 Jasper 비중 증가)
 | 노드 | Claude | Jasper |

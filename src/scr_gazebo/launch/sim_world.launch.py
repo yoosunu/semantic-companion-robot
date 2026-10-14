@@ -6,13 +6,19 @@ the upstream TurtleBot3 sources. Differences from upstream:
     (OpenGL 2.1 via virgl), see docs/debugging/001-slam-map-quality.md.
   - Spawns models/scr_burger (3-row LiDAR workaround) instead of turtlebot3_burger.
   - Does not depend on the TURTLEBOT3_MODEL environment variable.
+  - cmd_vel_topic argument: "UGV02 mode" (scripts/ugv02_sim.sh) renames the ROS side of the
+    Gazebo cmd_vel bridge to /sim/cmd_vel, so the robot only moves through our ugv02_bridge
+    + scripts/fake_esp32.py, exactly like the real UGV02.
 World, meshes, URDF and bridge config are reused from turtlebot3_gazebo.
 """
 import os
+import tempfile
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription,
+                            OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -40,6 +46,9 @@ def generate_launch_description():
         DeclareLaunchArgument('gui', default_value='true', description='Start the Gazebo GUI'),
         DeclareLaunchArgument('x_pose', default_value='-2.0'),
         DeclareLaunchArgument('y_pose', default_value='-0.5'),
+        DeclareLaunchArgument('cmd_vel_topic', default_value='cmd_vel',
+                              description='ROS topic Gazebo listens to for velocity. '
+                                          '/sim/cmd_vel = UGV02 mode (only fake_esp32 drives the robot)'),
     ]
 
     # Resource paths must be set before Gazebo starts.
@@ -92,13 +101,28 @@ def generate_launch_description():
     )
 
     # Same topics as upstream burger (clock, joint_states, odom, tf, cmd_vel[TwistStamped], imu, scan).
-    bridge = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        arguments=['--ros-args', '-p',
-                   'config_file:=' + os.path.join(tb3, 'params', 'turtlebot3_burger_bridge.yaml')],
-        output='screen',
-    )
+    def make_bridge(context):
+        config = os.path.join(tb3, 'params', 'turtlebot3_burger_bridge.yaml')
+        cmd_vel_topic = LaunchConfiguration('cmd_vel_topic').perform(context)
+        if cmd_vel_topic not in ('cmd_vel', '/cmd_vel'):
+            # UGV02 mode: same config, only the ROS name of the cmd_vel entry changes.
+            with open(config, 'r') as f:
+                entries = yaml.safe_load(f)
+            hits = [e for e in entries if e.get('ros_topic_name') in ('cmd_vel', '/cmd_vel')]
+            if len(hits) != 1:
+                raise RuntimeError(f'expected exactly one cmd_vel entry in {config}, found {len(hits)}')
+            hits[0]['ros_topic_name'] = cmd_vel_topic
+            config = os.path.join(tempfile.gettempdir(), 'scr_gz_bridge_ugv02_mode.yaml')
+            with open(config, 'w') as f:
+                yaml.safe_dump(entries, f)
+        return [Node(
+            package='ros_gz_bridge',
+            executable='parameter_bridge',
+            arguments=['--ros-args', '-p', 'config_file:=' + config],
+            output='screen',
+        )]
+
+    bridge = OpaqueFunction(function=make_bridge)
 
     return LaunchDescription(
         declare_args + resource_paths + [gz_server, gz_client, robot_state_publisher, spawn_robot, bridge]

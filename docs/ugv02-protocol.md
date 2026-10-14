@@ -1,0 +1,53 @@
+# UGV02 Serial Protocol (what our bridge speaks)
+
+Source: Waveshare wiki https://www.waveshare.com/wiki/UGV02 (read 2026-10-13).
+Every line is marked **[확인됨]** (stated in the wiki) or **[가정]** (not documented — must be verified on the real robot, day 1).
+
+## Physical link
+- UART on the 40-pin header (to Pi) or the driver board USB (CP2102). [확인됨]
+- 115200 baud (Waveshare Python demo uses `baudrate=115200`). [확인됨]
+- One JSON object per line, terminated by `\n`. [가정 — demo writes JSON + newline; verify]
+
+## Commands we send (Pi → UGV02)
+
+| T | Name | Example | Meaning | |
+|---|---|---|---|---|
+| 13 | ROS control | `{"T":13,"X":0.1,"Z":0.3}` | X = linear m/s, Z = angular rad/s. **We use this.** | [확인됨] |
+| 1 | Wheel speed | `{"T":1,"L":0.5,"R":0.5}` | each wheel m/s, −0.5 … +0.5, closed loop (encoders) | [확인됨] |
+| 130 | Feedback once | `{"T":130}` | request one feedback message | [확인됨, 응답 형식 미기재] |
+| 131 | Feedback stream | `{"T":131,"cmd":1}` | 1 = chassis sends feedback continuously, 0 = off (default) | [확인됨] |
+| 142 | Feedback interval | `{"T":142,"cmd":50}` | feedback period (probably ms) | [가정, Waveshare app 사용] |
+| 143 | Serial echo | `{"T":143,"cmd":0}` | echo received commands back (default off) | [확인됨] |
+
+Sign convention: Z > 0 = turn left (counter-clockwise) — matches ROS REP 103. [가정 — verify with a slow left turn]
+
+## Feedback we receive (UGV02 → Pi)
+Not documented in the wiki. **Best evidence so far**: Waveshare's own Raspberry Pi app
+(github.com/waveshareteam/ugv_rpi, `app.py`) has this comment and reads `v` as battery voltage:
+```
+{'T':1001,'L':0,'R':0,'r':0,'p':0,'v': 11,'pan':0,'tilt':0}
+```
+and turns the stream on at boot with:
+```
+{"T":142,"cmd":50}    # feedback interval (probably ms)  [가정]
+{"T":131,"cmd":1}     # continuous serial feedback on    [확인됨]
+```
+| key | our reading | status |
+|---|---|---|
+| T | 1001 = base feedback | [근거 있음: Waveshare app] |
+| L, R | left/right wheel speed (unit unknown, probably m/s) | [가정] |
+| r, p | roll, pitch from IMU (unit unknown, probably degrees) | [가정] |
+| v | battery voltage, V | [근거 있음: app shows it as base_voltage] |
+| pan, tilt | gimbal (we have none) | ignore |
+- No yaw and no encoder counts in this sample → odom must integrate L/R wheel speeds (yaw drift expected). [가정]
+- The fake ESP32 uses this format. Keep parsing in **one function** in the bridge so day-1 changes stay local.
+
+## Safety behavior
+- Firmware stops the motors if no movement command arrives for **3 s**. [확인됨]
+- 3 s at 0.5 m/s = 1.5 m → too long indoors. **Our bridge stops after 0.5 s without /cmd_vel** (bridge v2).
+
+## Day-1 checklist (real robot)
+1. `{"T":131,"cmd":1}` → record 10 s of raw feedback to `docs/ugv02-feedback-sample.txt`. Update the [가정] lines above.
+2. Slow left turn `{"T":13,"X":0,"Z":0.3}` → confirm counter-clockwise.
+3. Stop sending → confirm stop after ~3 s.
+4. Charging port spec / charge while powered on / voltage field (mission requirement).
