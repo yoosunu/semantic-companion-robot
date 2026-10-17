@@ -44,7 +44,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 다음 할 일 (하드웨어 도착 전):
   1. ✅ 로봇의 임무 정의 (2026-10-13) → 아래 "로봇 임무" 섹션
   2. **(진행 중)** `ugv02_bridge` (src/scr_ugv02): v0 ✅ 2026-10-14 (/cmd_vel→T:13 JSON, teleop으로 TB3 주행 확인, 브리지 죽으면 3 s 폭주 측정)
-     다음: v2 안전 정지(Jasper, 목표 <0.5 s) → v1 odom(T:1001 → /odom). 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
+     v2 ✅ 2026-10-18 (Jasper 작성): 명령 끊김 3 s → 0.505 s, 종료 시 즉시 정지. 다음: v1 odom(T:1001 → /odom). 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
      실행: `./scripts/ugv02_sim.sh`(UGV02 모드 시뮬, robot-start 아님) → `ros2 run scr_ugv02 ugv02_bridge` → `robot-drive`
      폭주 테스트는 teleop 대신 `ros2 topic pub -r 10 /cmd_vel ...` (teleop은 포커스 잃으면 스스로 정지)
   3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행

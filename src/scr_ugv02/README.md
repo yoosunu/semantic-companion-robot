@@ -38,6 +38,21 @@ Ownership: serial I/O (`include/scr_ugv02/serial_port.hpp`) and the sim harness 
 - Test tip: teleop can't be used for this test — focusing another terminal stops key input and safe_teleop
   sends zero after 0.5 s by itself. Use `ros2 topic pub -r 10` as a source that never stops.
 
+## v2 result (2026-10-18, UGV02 mode sim) — written by Jasper
+Dead-man rule: no /cmd_vel for `cmd_timeout` (param, 0.5 s) -> send `{"T":13,"X":0,"Z":0}` once; also on shutdown.
+Source: `ros2 topic pub -r 10 /cmd_vel ... x: 0.1` (teleop can't be used: it stops itself when it loses focus).
+
+| test | log evidence | result |
+|---|---|---|
+| command source killed (pub Ctrl+C) | bridge: `sent stop (cmd_vel timeout), 0.505 s after last /cmd_vel` | ✅ stop 0.505 s after last command (was ~3 s) |
+| bridge Ctrl+C while driving | bridge SIGINT 1792262783.928 → fake_esp32 `recv X:0.000` 1792262783.948 | ✅ stop sent ~20 ms after Ctrl+C |
+| restart after stop | pub again → `recv X:0.100` at 1792262783.012 | ✅ |
+| no stop spam | one `sent stop` line per stop | ✅ |
+
+Limit (by design): if the bridge itself is killed hard (`kill -9`, crash) it can't send anything →
+only the firmware 3 s timeout remains. Defense in depth: teleop 0.5 s → bridge 0.5 s → firmware 3 s.
+Note: after a stop the fake firmware still logs "no command for 3 s (already stopped)" — harmless.
+
 ## Run (UGV02 mode sim)
 ```bash
 # [VM] once:   sudo apt install socat python3-serial

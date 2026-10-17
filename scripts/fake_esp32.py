@@ -92,7 +92,12 @@ class FakeEsp32(Node):
 
     def drive(self):
         if not self.stopped and time.monotonic() - self.last_cmd > FIRMWARE_TIMEOUT:
-            self.get_logger().warn('no movement command for 3 s -> firmware stop')
+            if self.x == 0.0 and self.z == 0.0:
+                # Already standing still (the bridge sent a stop): nothing to rescue, stay quiet.
+                self.get_logger().info('no command for 3 s (already stopped)')
+            else:
+                # Robot was MOVING and commands vanished: this is the dangerous case the bridge should prevent.
+                self.get_logger().warn('no movement command for 3 s while MOVING -> firmware stop')
             self.x = self.z = 0.0
             self.stopped = True
         out = TwistStamped()
