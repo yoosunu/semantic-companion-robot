@@ -81,7 +81,7 @@ print(f'position error {math.hypot(a[0]-b[0],a[1]-b[1]):.3f} m, yaw error {math.
   echo; echo "### 5) arrival"
   T1="$(truth)"; A1="$(amcl)"
   echo "goal:  $GX $GY"; echo "truth: $T1"; echo "amcl:  ${A1:-none}"
-  echo -n "truth vs goal: "; err "$GX $GY" "$T1"
+  echo -n "truth vs goal: "; err "$GX $GY 0.0" "$T1"   # goal yaw = 0 (goal orientation w=1). Was missing -> always printed 0.0 deg
   [ -n "$A1" ] && { echo -n "amcl vs truth: "; err "$A1" "$T1"; }
   echo "=== done ==="
 } > "$OUT" 2>&1

@@ -53,6 +53,24 @@ Limit (by design): if the bridge itself is killed hard (`kill -9`, crash) it can
 only the firmware 3 s timeout remains. Defense in depth: teleop 0.5 s → bridge 0.5 s → firmware 3 s.
 Note: after a stop the fake firmware still logs "no command for 3 s (already stopped)" — harmless.
 
+## v1 plan — feedback → /odom, TF, battery (Jasper writes the odom math)
+```
+fake_esp32 ─{"T":1001,"L":..,"R":..,"v":..}\n─▶ read_lines ─▶ parse_feedback ─▶ integrate_odom ─▶ /odom + TF odom→base_footprint
+                                                                            └──────────────▶ /battery_state
+```
+- UGV02 mode now hides Gazebo's `/odom` and `/tf` (→ `/sim/odom`, `/sim/tf`). Without the bridge v1 there is NO `/odom`,
+  so simple_mover won't work in UGV02 mode until v1 is done. That's expected.
+- fake_esp32 only streams feedback after `{"T":131,"cmd":1}` (like the real board). L/R are what Gazebo actually did.
+- Build needs: `sudo apt install nlohmann-json3-dev`
+
+| # | check | pass |
+|---|---|---|
+| 1 | `ros2 topic hz /odom` | ≈ 20 Hz |
+| 2 | `move.sh forward 1.0` (simple_mover now runs on MY /odom) → compare `/odom` vs `/sim/odom` position | difference < 2 cm |
+| 3 | `move.sh left 90` → yaw of `/odom` vs `/sim/odom` | difference < 2° |
+| 4 | `ros2 run tf2_ros tf2_echo odom base_footprint` + RViz (fixed frame `odom`) | robot follows, no flicker (only one TF publisher) |
+| 5 | `ros2 topic echo /battery_state --field voltage` | ≈ 12.3 V, slowly dropping |
+
 ## Run (UGV02 mode sim)
 ```bash
 # [VM] once:   sudo apt install socat python3-serial

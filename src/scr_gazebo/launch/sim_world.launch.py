@@ -6,9 +6,10 @@ the upstream TurtleBot3 sources. Differences from upstream:
     (OpenGL 2.1 via virgl), see docs/debugging/001-slam-map-quality.md.
   - Spawns models/scr_burger (3-row LiDAR workaround) instead of turtlebot3_burger.
   - Does not depend on the TURTLEBOT3_MODEL environment variable.
-  - cmd_vel_topic argument: "UGV02 mode" (scripts/ugv02_sim.sh) renames the ROS side of the
-    Gazebo cmd_vel bridge to /sim/cmd_vel, so the robot only moves through our ugv02_bridge
-    + scripts/fake_esp32.py, exactly like the real UGV02.
+  - ugv02_mode argument (scripts/ugv02_sim.sh): hides Gazebo's own robot interface from ROS by renaming
+    cmd_vel -> /sim/cmd_vel, odom -> /sim/odom, tf -> /sim/tf. Only scripts/fake_esp32.py talks to them,
+    so the robot moves through our ugv02_bridge, and /odom + odom->base_footprint TF come only from
+    the bridge -- exactly like the real UGV02.
 World, meshes, URDF and bridge config are reused from turtlebot3_gazebo.
 """
 import os
@@ -46,9 +47,9 @@ def generate_launch_description():
         DeclareLaunchArgument('gui', default_value='true', description='Start the Gazebo GUI'),
         DeclareLaunchArgument('x_pose', default_value='-2.0'),
         DeclareLaunchArgument('y_pose', default_value='-0.5'),
-        DeclareLaunchArgument('cmd_vel_topic', default_value='cmd_vel',
-                              description='ROS topic Gazebo listens to for velocity. '
-                                          '/sim/cmd_vel = UGV02 mode (only fake_esp32 drives the robot)'),
+        DeclareLaunchArgument('ugv02_mode', default_value='false',
+                              description='true: Gazebo cmd_vel/odom/tf renamed to /sim/*, '
+                                          'robot driven only via ugv02_bridge + fake_esp32'),
     ]
 
     # Resource paths must be set before Gazebo starts.
@@ -103,15 +104,16 @@ def generate_launch_description():
     # Same topics as upstream burger (clock, joint_states, odom, tf, cmd_vel[TwistStamped], imu, scan).
     def make_bridge(context):
         config = os.path.join(tb3, 'params', 'turtlebot3_burger_bridge.yaml')
-        cmd_vel_topic = LaunchConfiguration('cmd_vel_topic').perform(context)
-        if cmd_vel_topic not in ('cmd_vel', '/cmd_vel'):
-            # UGV02 mode: same config, only the ROS name of the cmd_vel entry changes.
+        if LaunchConfiguration('ugv02_mode').perform(context).lower() in ('true', '1'):
+            # UGV02 mode: same config, only the ROS names of these entries change.
             with open(config, 'r') as f:
                 entries = yaml.safe_load(f)
-            hits = [e for e in entries if e.get('ros_topic_name') in ('cmd_vel', '/cmd_vel')]
-            if len(hits) != 1:
-                raise RuntimeError(f'expected exactly one cmd_vel entry in {config}, found {len(hits)}')
-            hits[0]['ros_topic_name'] = cmd_vel_topic
+            renames = {'cmd_vel': '/sim/cmd_vel', 'odom': '/sim/odom', 'tf': '/sim/tf'}
+            for name, new_name in renames.items():
+                hits = [e for e in entries if e.get('ros_topic_name', '').lstrip('/') == name]
+                if len(hits) != 1:
+                    raise RuntimeError(f'expected exactly one "{name}" entry in {config}, found {len(hits)}')
+                hits[0]['ros_topic_name'] = new_name
             config = os.path.join(tempfile.gettempdir(), 'scr_gz_bridge_ugv02_mode.yaml')
             with open(config, 'w') as f:
                 yaml.safe_dump(entries, f)

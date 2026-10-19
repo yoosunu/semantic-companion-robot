@@ -34,16 +34,16 @@ using namespace std::chrono_literals;
 class SimpleMover : public rclcpp::Node
 {
 public:
-  SimpleMover()
-  : Node("simple_mover")
-  {
+  SimpleMover() : Node("simple_mover") {
     // Parameters can be changed at launch: --ros-args -p linear_speed:=0.1
-    linear_speed_ = declare_parameter("linear_speed", 0.15);    // m/s   (Burger max 0.22)
-    angular_speed_ = declare_parameter("angular_speed", 0.5);   // rad/s
-    odom_timeout_ = declare_parameter("odom_timeout", 0.5);     // s, stop if odom goes silent
+    linear_speed_ = declare_parameter<double>("linear_speed", 0.15);    // m/s   (Burger max 0.22)
+    angular_speed_ = declare_parameter<double>("angular_speed", 0.5);   // rad/s
+    odom_timeout_ = declare_parameter<double>("odom_timeout", 0.5);     // s, stop if odom goes silent
 
-    cmd_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("cmd_vel", 10);
+    // Publish /cmd_vel (gonna be subscribed by the ugv02_bridge)
+    cmd_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("cmd_vel", 10); // 10 means size of Queue
 
+    // Subscribe /odom (gonna be published by the ugv02_bridge)
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "odom", 10,
       [this](const nav_msgs::msg::Odometry::SharedPtr msg) {on_odom(msg);});
@@ -61,13 +61,13 @@ public:
   }
 
 private:
+  // define Mode of operation for the robot by enum
   enum class Mode { kIdle, kStraight, kTurn };
 
   // ---------- callbacks ----------
-
-  void on_odom(const nav_msgs::msg::Odometry::SharedPtr msg)
-  {
-    x_ = msg->pose.pose.position.x;
+  void on_odom(const nav_msgs::msg::Odometry::SharedPtr msg) {
+    // get x_, y_, yaw_ from the odometry message
+    x_ = msg->pose.pose.position.x; 
     y_ = msg->pose.pose.position.y;
     const double yaw = tf2::getYaw(msg->pose.pose.orientation);
 
@@ -91,6 +91,8 @@ private:
       stop("stop command");
       return;
     }
+
+    // exceptions: no odom yet, or non-positive value
     if (!have_odom_) {
       RCLCPP_WARN(get_logger(), "no /odom yet, ignoring '%s'", text.c_str());
       return;
@@ -100,6 +102,7 @@ private:
       return;
     }
 
+    // operations
     if (verb == "forward" || verb == "backward") {
       mode_ = Mode::kStraight;
       direction_ = (verb == "forward") ? 1.0 : -1.0;
@@ -118,39 +121,42 @@ private:
     }
   }
 
+  // timer (like heartbeat) runs every 50 ms
   void on_timer()
   {
     if (mode_ == Mode::kIdle) {
       return;   // stay quiet when idle, so other nodes (teleop, Nav2) can use /cmd_vel
     }
 
-    // Safety: if odom stops arriving we no longer know where we are -> stop.
+    // Safety: timeout
     if ((now() - last_odom_time_).seconds() > odom_timeout_) {
       stop("odom timeout");
       return;
     }
 
+    // straight or turn: check if the target is reached, otherwise publish a command
     if (mode_ == Mode::kStraight) {
       const double moved = std::hypot(x_ - start_x_, y_ - start_y_);
       if (moved >= target_) {
         RCLCPP_INFO(get_logger(), "done: target %.3f m, moved %.3f m at stop command", target_, moved);
         stop("target reached");
       } else {
+        // publish
         publish(direction_ * linear_speed_, 0.0);
       }
     } else if (mode_ == Mode::kTurn) {
       if (std::fabs(turned_) >= target_) {
         RCLCPP_INFO(get_logger(), "done: target %.1f deg, turned %.1f deg at stop command",
-          angles::to_degrees(target_), angles::to_degrees(std::fabs(turned_)); 
+          angles::to_degrees(target_), angles::to_degrees(std::fabs(turned_))); 
         stop("target reached");
       } else {
+        // publishㄷ
         publish(0.0, direction_ * angular_speed_);
       }
     }
   }
 
   // ---------- helpers ----------
-
   void publish(double linear, double angular)
   {
     geometry_msgs::msg::TwistStamped msg;
