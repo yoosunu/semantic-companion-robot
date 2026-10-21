@@ -46,8 +46,8 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   2. **(진행 중)** `ugv02_bridge` (src/scr_ugv02): v0 ✅ 2026-10-14 (/cmd_vel→T:13 JSON, teleop으로 TB3 주행 확인, 브리지 죽으면 3 s 폭주 측정)
      v2 ✅ 2026-10-18 (Jasper 작성): 명령 끊김 3 s → 0.505 s, 종료 시 즉시 정지.
      v1 ✅ 2026-10-20 (Jasper 작성, odom 적분): /odom·TF·/battery_state. UGV02 모드는 Gazebo odom/tf를 /sim/* 로 숨김.
-     미션 L1 ✅ (Nav2 3 m, 도착 4.9 cm). Nav2와 쓸 땐 브리지 `-p use_sim_time:=true` 필수. 다음: 미션 L2(기둥 앞까지).
-     열린 질문: 도착 방향 11°(yaw_goal_tolerance 0.25 rad), 도착 후 AMCL 14.8 cm → A/B(일반 vs UGV02 모드)로 내 odom 탓인지 확인. 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
+     미션 L1 ✅ (Nav2 3 m, 도착 4.9 cm). Nav2와 쓸 땐 브리지 `-p use_sim_time:=true` 필수. 미션 L2 ✅ (기둥 중심까지 0.388 m). 다음: L2b(yaw_goal_tolerance만 0.05로) → L3(기둥 회피).
+     열린 질문: 도착 방향 L1 11°·L2 12.7° — 둘 다 yaw_goal_tolerance 0.25 rad(14.3°) 바로 안쪽 → L2b로 확인, 도착 후 AMCL 14.8 cm → A/B(일반 vs UGV02 모드)로 내 odom 탓인지 확인. 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
      실행: `./scripts/ugv02_sim.sh`(UGV02 모드 시뮬, robot-start 아님) → `ros2 run scr_ugv02 ugv02_bridge` → `robot-drive`
      폭주 테스트는 teleop 대신 `ros2 topic pub -r 10 /cmd_vel ...` (teleop은 포커스 잃으면 스스로 정지)
   3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
