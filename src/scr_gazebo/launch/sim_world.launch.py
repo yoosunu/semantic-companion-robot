@@ -6,7 +6,7 @@ the upstream TurtleBot3 sources. Differences from upstream:
     (OpenGL 2.1 via virgl), see docs/debugging/001-slam-map-quality.md.
   - Spawns models/scr_burger (3-row LiDAR workaround) instead of turtlebot3_burger.
   - Does not depend on the TURTLEBOT3_MODEL environment variable.
-  - ugv02_mode argument (scripts/ugv02_sim.sh): hides Gazebo's own robot interface from ROS by renaming
+  - ugv02_mode argument (`robot up`, scripts/robot): hides Gazebo's own robot interface from ROS by renaming
     cmd_vel -> /sim/cmd_vel, odom -> /sim/odom, tf -> /sim/tf. Only scripts/fake_esp32.py talks to them,
     so the robot moves through our ugv02_bridge, and /odom + odom->base_footprint TF come only from
     the bridge -- exactly like the real UGV02.

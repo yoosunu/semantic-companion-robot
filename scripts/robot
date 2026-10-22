@@ -1,0 +1,165 @@
+#!/bin/bash
+# robot — 시뮬 놀이터의 입구 하나. 이것만 외우면 된다 (장고의 manage.py 같은 것).
+#   robot          도움말
+#   robot <할 일>  아래 help() 참고
+# 처음 한 번: bash ~/semantic-companion-robot/scripts/robot setup   (→ 이후 어디서든 robot)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+S="robot"   # tmux 세션 이름
+
+help() {
+cat <<'TXT'
+robot — 시뮬 놀이터
+
+  켜고 끄기
+    robot up        시뮬 전체 켜기 (Gazebo, 내 브리지, Nav2, RViz)
+    robot down      전체 끄기
+    robot show      시뮬 화면(tmux 창들)으로 돌아가기
+
+  움직이기
+    robot go        A ↔ B 왕복 시작 (Ctrl+C로 멈춤)   예) robot go --laps 3
+    robot drive     키보드로 직접 운전
+    robot test      목표 하나 보내고 정확도 채점      예) robot test 2.0 0.1 90
+
+  설정 만지기
+    robot edit      Nav2 설정(손잡이 파일) 열기
+    robot reload    고친 설정으로 Nav2만 다시 켜기 (Gazebo는 그대로)
+
+  문제 찾기
+    robot status    뭐가 켜져 있고 뭐가 꺼져 있는지
+
+  시뮬 화면 안에서: Ctrl+b 숫자 = 창 이동,  Ctrl+b d = 화면 나가기 (계속 실행됨)
+  더 자세히: docs/sim-playbook.md
+TXT
+}
+
+running() { tmux has-session -t "$S" 2>/dev/null; }
+need_running() { running || { echo "시뮬이 꺼져 있어요 → robot up"; exit 1; }; }
+ros_env() { source "$SCRIPT_DIR/env.sh"; }
+
+goto_session() {  # 시뮬 화면으로 이동 (tmux 안이면 전환, 밖이면 붙기)
+    if [ -n "$TMUX" ]; then tmux switch-client -t "$S"; else tmux attach -t "$S"; fi
+}
+
+layer() {  # layer <창 이름> <명령> : 창을 만들고 명령을 "입력"해서 실행 (창에서 ↑ 로 다시 실행 가능)
+    if running; then tmux new-window -t "$S" -n "$1" -c "$REPO"
+    else tmux new-session -d -s "$S" -n "$1" -c "$REPO"; fi
+    tmux send-keys -t "$S:$1" "source scripts/env.sh" C-m
+    tmux send-keys -t "$S:$1" "$2" C-m
+}
+
+# Nav2는 /odom 이 실제로 나올 때 켠다 (토픽 이름만 있고 데이터가 없으면 Nav2가 TF를 못 받아 멈춤)
+NAV_CMD="echo '/odom 기다리는 중 (브리지·esp32 확인: Ctrl+b 3, 2)...'; until timeout 3 ros2 topic echo --once /odom >/dev/null 2>&1; do sleep 1; done; bash scripts/robot_nav.sh"
+
+cmd_up() {
+    if running; then echo "이미 켜져 있어요 → 화면으로 이동"; goto_session; exit 0; fi
+    command -v socat >/dev/null || { echo "socat 없음: sudo apt install socat"; exit 1; }
+    python3 -c "import serial" 2>/dev/null || { echo "pyserial 없음: sudo apt install python3-serial"; exit 1; }
+    # 층마다 창 하나. 한 층만 재시작: 그 창에서 Ctrl+C → ↑ → Enter
+    layer world  "ros2 launch scr_gazebo sim_world.launch.py ugv02_mode:=true gui:=${GUI:-true}"
+    layer serial "socat -d -d pty,raw,echo=0,link=/tmp/ugv02_bridge pty,raw,echo=0,link=/tmp/ugv02_esp32"
+    layer esp32  "until [ -e /tmp/ugv02_esp32 ]; do sleep 0.2; done; python3 scripts/fake_esp32.py --port /tmp/ugv02_esp32"
+    # 브리지는 가짜 ESP32가 포트를 연 뒤에 켠다: 브리지가 처음 보내는 "피드백 켜" 명령(T:131)이
+    # 포트를 열기 전에 도착하면 버려져서 /odom·TF가 영영 안 나옴 (10-22에 겪음)
+    layer bridge "until ros2 node list 2>/dev/null | grep -q fake_esp32; do sleep 0.5; done; sleep 1; ros2 run scr_ugv02 ugv02_bridge --ros-args -p use_sim_time:=true"
+    layer nav2   "$NAV_CMD"
+    layer cmd    "clear; bash scripts/robot"
+    tmux select-window -t "$S:cmd"
+    echo "켜는 중... Gazebo·RViz 창이 뜨고 Nav2가 준비되기까지 30초~1분."
+    goto_session
+}
+
+stop_all() {  # 명령 → Nav2 → 브리지(정지 명령 보냄) → 나머지 순서로 Ctrl+C, 그다음 세션 종료
+    for w in cmd nav2 bridge; do tmux send-keys -t "$S:$w" C-c 2>/dev/null; done
+    sleep 2
+    for w in esp32 serial world; do tmux send-keys -t "$S:$w" C-c 2>/dev/null; done
+    sleep 3
+    tmux kill-session -t "$S" 2>/dev/null
+}
+
+cmd_down() {
+    running || { echo "이미 꺼져 있어요"; exit 0; }
+    if [ -n "$TMUX" ] && [ "$(tmux display-message -p '#S')" = "$S" ]; then
+        # 시뮬 화면 안에서 쳤을 때: 이 창도 같이 꺼지므로 tmux에게 맡긴다
+        tmux run-shell -b "bash '$SCRIPT_DIR/robot' _stop"
+        echo "끄는 중... (화면이 곧 닫혀요)"
+    else
+        echo "끄는 중..."; stop_all; echo "꺼졌어요"
+    fi
+}
+
+cmd_reload() {
+    need_running
+    echo "Nav2 끄는 중..."
+    tmux send-keys -t "$S:nav2" C-c
+    for _ in $(seq 1 20); do pgrep -f navigation2.launch.py >/dev/null || break; sleep 1; done
+    tmux send-keys -t "$S:nav2" "$NAV_CMD" C-m
+    echo "Nav2 다시 켜는 중 (30초 정도). 바뀐 설정은 nav2 창 맨 위 [my_nav2] 줄에서 확인: Ctrl+b 4"
+    # Nav2(AMCL)는 켜질 때 로봇이 출발점(0,0)에 있다고 가정한다. 로봇이 다른 곳에 있으면
+    # 지도와 로봇 위치가 어긋나므로, Gazebo의 실제 위치를 AMCL에 알려준다 (RViz "2D Pose Estimate"를 자동으로)
+    ros_env
+    for _ in $(seq 1 60); do timeout 3 ros2 lifecycle get /amcl 2>/dev/null | grep -q "^active" && break; sleep 2; done
+    # AMCL이 막 켜진 직후엔 TF가 덜 쌓여서 위치 지정이 무시될 수 있음 (10-22: "Failed to transform initial pose") → 기다렸다 두 번
+    sleep 5; set_pose_from_gazebo; sleep 3; set_pose_from_gazebo
+}
+
+set_pose_from_gazebo() {  # Gazebo 정답 위치 → /initialpose  (map = 월드 + (2.0, 0.5), maps/tb3_world_cartographer 기준)
+    local pose
+    pose="$(gz model -m burger -p 2>/dev/null | python3 -c "
+import sys, re
+rows = [l for l in sys.stdin.read().splitlines() if re.match(r'\s*\[', l)]
+xyz = [float(v) for v in re.findall(r'-?\d+\.\d+(?:e-?\d+)?', rows[0])]
+rpy = [float(v) for v in re.findall(r'-?\d+\.\d+(?:e-?\d+)?', rows[1])]
+print(f'{xyz[0]+2.0:.3f} {xyz[1]+0.5:.3f} {rpy[2]:.3f}')" 2>/dev/null)"
+    if [ -z "$pose" ]; then echo "⚠ Gazebo 위치를 못 읽음 → RViz 2D Pose Estimate로 직접 지정"; return; fi
+    read -r X Y YAW <<< "$pose"
+    local QZ QW
+    QZ=$(python3 -c "import math; print(math.sin($YAW/2))"); QW=$(python3 -c "import math; print(math.cos($YAW/2))")
+    ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+      "{header: {frame_id: map}, pose: {pose: {position: {x: $X, y: $Y}, orientation: {z: $QZ, w: $QW}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}" >/dev/null
+    echo "로봇 위치를 AMCL에 알려줌: x=$X y=$Y yaw=$YAW (Gazebo 실제 위치)"
+}
+
+cmd_edit() {
+    local f="$REPO/config/my_nav2.yaml"
+    if command -v code >/dev/null; then code "$f"; else "${EDITOR:-nano}" "$f"; fi
+    echo "저장했으면 → robot reload"
+}
+
+cmd_status() {
+    ros_env
+    ok()  { printf "  ✅ %s\n" "$1"; }
+    bad() { printf "  ❌ %s  → %s\n" "$1" "$2"; }
+    echo "시뮬 화면 (tmux):"
+    if running; then ok "켜져 있음 (창: $(tmux list-windows -t "$S" -F '#W' | tr '\n' ' '))"; else bad "꺼져 있음" "robot up"; return; fi
+    echo "층별:"
+    timeout 4 ros2 topic echo --once /clock >/dev/null 2>&1 && ok "Gazebo (/clock)" || bad "Gazebo" "world 창 확인 (Ctrl+b 0)"
+    [ -e /tmp/ugv02_bridge ] && ok "가상 시리얼" || bad "가상 시리얼" "serial 창 확인 (Ctrl+b 1)"
+    timeout 4 ros2 topic echo --once /odom >/dev/null 2>&1 && ok "브리지 (/odom 나옴)" || bad "브리지 (/odom 없음)" "bridge·esp32 창 확인 (Ctrl+b 3, 2)"
+    timeout 5 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active" && ok "Nav2 (준비 완료)" || bad "Nav2 (아직/실패)" "nav2 창 확인 (Ctrl+b 4)"
+    echo "/cmd_vel 보내는 노드:"
+    timeout 5 ros2 topic info /cmd_vel -v 2>/dev/null | awk '/Node name:/{n=$3} /Endpoint type: PUBLISHER/{print "  - " n}'
+}
+
+case "${1:-help}" in
+    help|-h|--help) help ;;
+    up)     cmd_up ;;
+    down)   cmd_down ;;
+    _stop)  stop_all ;;
+    show)   need_running; goto_session ;;
+    go)     need_running; shift; ros_env; python3 "$SCRIPT_DIR/shuttle.py" "$@" ;;
+    drive)  need_running; ros_env; python3 "$SCRIPT_DIR/safe_teleop.py" ;;
+    test)   need_running; shift; bash "$SCRIPT_DIR/nav_test.sh" "$@" ;;
+    edit)   cmd_edit ;;
+    reload) cmd_reload ;;
+    status) cmd_status ;;
+    setup)
+        # 옛 alias(robot-start, robot-ugv, robot-stop, robot-drive ...) 지우고 robot 하나만 등록
+        cp ~/.bashrc ~/.bashrc.bak_robot
+        sed -i '/^alias robot-/d; /^alias robot=/d' ~/.bashrc
+        echo "alias robot='bash $SCRIPT_DIR/robot'" >> ~/.bashrc
+        echo "완료. 옛 alias 삭제, 'robot' 등록 (백업: ~/.bashrc.bak_robot)"
+        echo "이 터미널에 적용: source ~/.bashrc   (새 터미널은 자동)"
+        ;;
+    *) echo "모르는 할 일: $1"; echo; help; exit 1 ;;
+esac

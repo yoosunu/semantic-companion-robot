@@ -75,8 +75,7 @@ fake_esp32 ─{"T":1001,"L":..,"R":..,"v":..}\n─▶ read_lines ─▶ parse_fe
 ```bash
 # [VM] once:   sudo apt install socat python3-serial
 # [VM] build:  cd ~/scr_ws && colcon build --symlink-install --packages-select scr_gazebo scr_ugv02
-./scripts/ugv02_sim.sh                       # tmux: gazebo / serial(socat) / esp32 windows
-ros2 run scr_ugv02 ugv02_bridge              # new terminal (source scripts/env.sh first)
-robot-drive                                  # new terminal, teleop
-robot-stop                                   # when done
+robot up                                     # tmux: world / serial / esp32 / bridge / nav2 / cmd
+robot drive                                  # teleop
+robot down                                   # when done
 ```

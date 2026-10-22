@@ -1,0 +1,68 @@
+# 내 손잡이 파일 — Nav2 원본(nav2_burger_sim.yaml) 위에 덮어쓴다. 원본은 건드리지 않는다.
+#
+# 쓰는 법: robot edit → 바꾸고 싶은 줄의 # 을 지우고 값 수정 → 저장 → robot reload (Nav2만 재시작)
+#          nav2 창 맨 위에 "[my_nav2] ... 원본 → 새 값" 이 찍히면 적용된 것.
+# 망가지면: 이 파일의 값을 다시 주석 처리하면 원상복구.
+# 규칙: 한 번에 하나만 바꾸기. 바꾸기 전에 예측 한 줄.
+#
+# 재시작 없이 바로 바꿔보기 (실행 중에만 유지, 재시작하면 이 파일 값으로 돌아감):
+#   ros2 param set /controller_server goal_checker.yaw_goal_tolerance 0.05
+#   또는 rqt_reconfigure (docs/sim-playbook.md)
+#
+# 들여쓰기가 곧 경로다: controller_server → ros__parameters → goal_checker → yaw_goal_tolerance
+
+controller_server:
+  ros__parameters:
+    # controller_frequency: 10.0        # 초당 몇 번 속도를 새로 고르나
+
+    goal_checker:
+      # xy_goal_tolerance: 0.25         # [m]   이 안에 들어오면 "위치 도착"
+      # yaw_goal_tolerance: 0.25        # [rad] 이 안에 들어오면 "방향 도착" (0.25 rad = 14.3°)  ← L1·L2에서 11~13° 남은 이유
+
+    FollowPath:                         
+    # DWB controller
+      # max_vel_x: 0.5                 # [m/s] 전진 최고 속도
+      # max_speed_xy: 0.5               # [m/s] 이것도 속도 상한! max_vel_x만 올리면 이게 막는다 → 같이 올릴 것
+      # max_vel_theta: 1.0              # [rad/s] 회전 최고 속도
+      # acc_lim_x: 3.0                  # [m/s²] 가속 한계
+      # RotateToGoal.scale: 32.0        # 도착 후 방향 맞추기를 얼마나 중요하게 보나
+      # PathDist.scale: 32.0            # 경로에 붙어 가기를 얼마나 중요하게 보나
+      # GoalDist.scale: 24.0            # 목표 쪽으로 가기를 얼마나 중요하게 보나
+    # RPP controller 
+      # plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # desired_linear_vel: 0.3              # 기준선과 같은 속도 (변수는 controller 하나만)
+      # lookahead_dist: 0.6                  # 당근 거리 [m]
+      # use_rotate_to_heading: true          # 출발·도착 때 제자리 회전으로 방향 맞추기
+      # rotate_to_heading_angular_vel: 1.0   # DWB의 max_vel_theta와 같게
+    # MPPI controller
+      plugin: "nav2_mppi_controller::MPPIController"   # 10-22 결정: MPPI (대안 RPP) → docs/decisions/001-nav2-controller.md
+      motion_model: "DiffDrive"
+      time_steps: 30          # 30 × 0.1 s = 3초 앞까지 굴려봄
+      model_dt: 0.1           # controller 주기(10 Hz)와 맞춤
+      batch_size: 1000        # 한 번에 굴려볼 후보 수 (VM 고려해 기본 2000의 절반)
+      vx_max: 0.3             # 기준선과 같은 속도
+      vx_min: 0.0             # 후진 금지 (다른 두 controller와 조건 맞춤)
+      wz_max: 1.0
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
+                "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+
+velocity_smoother:                      # controller 다음에 속도를 한 번 더 자르는 노드
+  ros__parameters:
+    # max_velocity: [0.5, 0.0, 2.5]     # [vx, vy, wz] 최종 상한. controller 값보다 낮으면 이게 이긴다
+    # max_accel: [2.5, 0.0, 3.2]
+
+local_costmap:                          # 로봇 주변 3x3 m, 센서로 실시간 갱신
+  local_costmap:
+    ros__parameters:
+      # robot_radius: 0.1               # [m] 로봇 크기. UGV02로 갈 때 반드시 바꿀 값
+      inflation_layer:
+        # inflation_radius: 0.5         # [m] 장애물 주변 "비싼 구역" 폭 → 기둥을 얼마나 멀리 돌아가나
+        # cost_scaling_factor: 5.0      # 클수록 비용이 빨리 줄어듦 → 장애물에 더 붙어서 감
+
+global_costmap:                         # 지도 전체, 경로 계획용
+  global_costmap:
+    ros__parameters:
+      # robot_radius: 0.1
+      inflation_layer:
+        # inflation_radius: 0.5
+        # cost_scaling_factor: 5.0

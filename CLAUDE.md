@@ -35,8 +35,8 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 
 ## 현재 상태 (2026-10-14) — 시뮬 v0.1 통과, 브리지 v0 통과. 전체 계획·일정·목표 Lv: `docs/roadmap.md`
 - 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
-- 실행: `robot-start` → `./scripts/robot_nav.sh` → `./scripts/nav_test.sh` (Nav2 설정: `config/nav2_burger_sim.yaml`)
-  맵 생성: `robot-start` → `robot-slam` → `robot-drive` → `./scripts/save_map.sh <name>`
+- 실행: **`robot` 하나** (도움말 출력). `robot up` / `robot go` / `robot edit` → `robot reload` / `robot status` / `robot down`. 구현: `scripts/robot`, 사용법: `docs/sim-playbook.md`
+  맵 생성(옛 방식, robot 명령에 아직 없음): `scripts/robot_slam.sh` → `robot drive` → `./scripts/save_map.sh <name>`
 - 빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
 - 결정: 시뮬레이션 튜닝은 여기서 멈춤. Burger 파라미터는 실물 UGV02로 옮겨가지 않으므로, 실물 bring-up하며 개념을 채운다.
   시뮬레이션은 회귀 테스트·실험용으로 유지.
@@ -48,7 +48,9 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
      v1 ✅ 2026-10-20 (Jasper 작성, odom 적분): /odom·TF·/battery_state. UGV02 모드는 Gazebo odom/tf를 /sim/* 로 숨김.
      미션 L1 ✅ (Nav2 3 m, 도착 4.9 cm). Nav2와 쓸 땐 브리지 `-p use_sim_time:=true` 필수. 미션 L2 ✅ (기둥 중심까지 0.388 m). 다음: L2b(yaw_goal_tolerance만 0.05로) → L3(기둥 회피).
      열린 질문: 도착 방향 L1 11°·L2 12.7° — 둘 다 yaw_goal_tolerance 0.25 rad(14.3°) 바로 안쪽 → L2b로 확인, 도착 후 AMCL 14.8 cm → A/B(일반 vs UGV02 모드)로 내 odom 탓인지 확인. 프로토콜: docs/ugv02-protocol.md (피드백 형식은 Waveshare 앱 근거 + [가정])
-     실행: `./scripts/ugv02_sim.sh`(UGV02 모드 시뮬, robot-start 아님) → `ros2 run scr_ugv02 ugv02_bridge` → `robot-drive`
+     실행(10-22~): `robot up` = UGV02 모드만. tmux 창 world/serial/esp32/bridge/nav2/cmd. Nav2 손잡이: `config/my_nav2.yaml`(원본 위에 덮어씀).
+     옛 alias(robot-start/ugv/stop/drive)와 ugv02_sim.sh·play.sh 삭제. 일반(비 UGV02) 시뮬 모드는 더 이상 안 씀.
+     Nav2 controller = MPPI (10-22 결정, 대안 RPP): docs/decisions/001-nav2-controller.md. 다음: SLAM + Nav2 동시(L6).
      폭주 테스트는 teleop 대신 `ros2 topic pub -r 10 /cmd_vel ...` (teleop은 포커스 잃으면 스스로 정지)
   3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
   4. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
@@ -56,7 +58,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 보류 실험: iPhone 높이별(20/30/40cm) YOLO 탐지율 비교 → 거치 높이 결정 근거. 공간 확보 후 진행.
 - 구매 기준서: docs/hardware-purchase-checklist.md (배터리 미포함 가능성, UGV02 5V 출력 전류 미표기 등)
 - 후보(나중): 자율 탐색(frontier exploration) — 로봇이 스스로 돌아다니며 맵 완성. 직접 작성 후보.
-- 알려진 불편: tmux 안에서 robot-stop 실행 시 같이 붙여넣은 명령이 사라짐.
+- tmux 안에서 `robot down`: tmux run-shell로 넘겨서 처리 (옛 robot-stop 문제 해결).
 - 열린 결정: SLAM은 실물에서 SLAM Toolbox 사용 예정(시뮬레이션은 Cartographer 맵 사용 중).
 
 ## 로봇 임무 (2026-10-13 결정) — 전체 단계: `docs/roadmap.md`

@@ -15,7 +15,7 @@ Mimics what docs/ugv02-protocol.md says the real firmware does:
     v: fake battery, 12.3 V draining slowly (faster while moving).
 Prints every command change, so you can see exactly what the bridge sent (debug layer by layer).
 
-Run via scripts/ugv02_sim.sh. Needs: sudo apt install python3-serial socat
+Run via `robot up` (scripts/robot). Needs: sudo apt install python3-serial socat
 """
 import argparse
 import json
