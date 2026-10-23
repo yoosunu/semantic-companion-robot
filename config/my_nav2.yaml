@@ -1,7 +1,7 @@
 # 내 손잡이 파일 — Nav2 원본(nav2_burger_sim.yaml) 위에 덮어쓴다. 원본은 건드리지 않는다.
 #
 # 쓰는 법: robot edit → 바꾸고 싶은 줄의 # 을 지우고 값 수정 → 저장 → robot reload (Nav2만 재시작)
-#          nav2 창 맨 위에 "[my_nav2] ... 원본 → 새 값" 이 찍히면 적용된 것.
+#          nav2 창 맨 위에 "[설정] ... 원본 → 새 값" 이 찍히면 적용된 것.
 # 망가지면: 이 파일의 값을 다시 주석 처리하면 원상복구.
 # 규칙: 한 번에 하나만 바꾸기. 바꾸기 전에 예측 한 줄.
 #
@@ -41,7 +41,7 @@ controller_server:
       model_dt: 0.1           # controller 주기(10 Hz)와 맞춤
       batch_size: 1000        # 한 번에 굴려볼 후보 수 (VM 고려해 기본 2000의 절반)
       vx_max: 0.3             # 기준선과 같은 속도
-      vx_min: 0.0             # 후진 금지 (다른 두 controller와 조건 맞춤)
+      vx_min: -0.2             # 후진 허용 (mppi는 후진을 안 하면 경로를 못 따라감)
       wz_max: 1.0
       critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
                 "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]

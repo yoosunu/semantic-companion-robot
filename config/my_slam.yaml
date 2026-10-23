@@ -1,0 +1,21 @@
+# 내 SLAM 설정값 — SLAM Toolbox 원본(config/slam_toolbox.yaml) 위에 덮어쓴다.
+#
+# 쓰는 법: robot edit slam → 바꾸고 싶은 줄의 # 을 지우고 값 수정 → 저장
+#          → robot down → robot up slam  (SLAM은 지도를 처음부터 다시 그려야 하므로 전체 재시작)
+#          → robot tour  (같은 경로로 한 바퀴 → 경로 오차 비교)
+# 규칙: 한 번에 하나, 바꾸기 전에 예측 한 줄.
+
+slam_toolbox:
+  ros__parameters:
+    # resolution: 0.05                    # [m] 지도 한 칸 크기. 작게 = 세밀하지만 무거움
+    # map_update_interval: 5.0            # [s] 지도 그림(/map)을 몇 초마다 새로 내보내나. Nav2가 보는 지도 갱신 주기
+    # max_laser_range: 3.5                # [m] 지도에 쓸 레이저 최대 거리. 멀수록 넓게, 먼 점은 부정확
+
+    # minimum_travel_distance: 0.5        # [m]   이만큼 움직여야 새 스캔을 지도에 반영
+    # minimum_travel_heading: 0.5         # [rad] 이만큼 돌아야 새 스캔을 반영. 작게 = 촘촘·무거움
+
+    # do_loop_closing: true               # 아는 곳에 돌아왔을 때 쌓인 오차를 바로잡기 (끄고 켜서 비교해보기 좋음)
+    # loop_search_maximum_distance: 3.0   # [m] 루프 후보를 찾을 거리
+    # loop_match_minimum_response_fine: 0.45  # 루프로 인정할 최소 매칭 점수. 낮추면 잘 잡지만 오인 위험
+
+    # correlation_search_space_dimension: 0.5  # [m] 스캔 매칭 때 odom 추정 주변 얼마나 넓게 찾나. odom이 나쁠수록 넓혀야 함

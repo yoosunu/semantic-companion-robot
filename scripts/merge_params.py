@@ -31,18 +31,18 @@ def main():
     base = yaml.safe_load(open(base_path))
     mine = yaml.safe_load(open(my_path)) or {}   # 전부 주석이면 None → 변경 없음
     if not isinstance(mine, dict):
-        sys.exit(f"[my_nav2] 형식 오류: {my_path} 의 최상위는 노드 이름(controller_server: ...)이어야 함")
+        sys.exit(f"[설정] 형식 오류: {my_path} 의 최상위는 노드 이름(controller_server: ...)이어야 함")
 
     changes, unknown = [], []
     merge(base, mine, "", changes, unknown)
 
-    print(f"[my_nav2] {my_path}")
+    print(f"[설정] {my_path}")
     if not changes and not unknown:
-        print("[my_nav2]   변경 없음 (원본 그대로)")
+        print("[설정]   변경 없음 (원본 그대로)")
     for p, old, new in changes:
-        print(f"[my_nav2]   {p.replace('.ros__parameters', '')}: {old} → {new}")
+        print(f"[설정]   {p.replace('.ros__parameters', '')}: {old} → {new}")
     for p in unknown:
-        print(f"[my_nav2]   ⚠ 원본에 없는 키: {p.replace('.ros__parameters', '')}  ← 오타인지 확인 (오타면 Nav2가 무시함)")
+        print(f"[설정]   ⚠ 원본에 없는 키: {p.replace('.ros__parameters', '')}  ← 오타인지 확인 (오타면 Nav2가 무시함)")
 
     with open(out_path, "w") as f:
         f.write(f"# 자동 생성: {base_path} + {my_path}. 직접 고치지 말 것.\n")

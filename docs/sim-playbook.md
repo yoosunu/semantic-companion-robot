@@ -19,6 +19,13 @@
 - 창 이동: `Ctrl+b` 다음 숫자 / `Ctrl+b w` (목록에서 고르기)
 - 화면 나가기 (계속 실행): `Ctrl+b d` → 돌아오기: `robot show`
 
+## SLAM 모드
+
+- `robot up slam`: 저장된 지도·AMCL 대신 SLAM Toolbox가 빈 지도에서 그리면서 주행 (지도 저장 위치 `logs/maps/`)
+- 설정: `robot edit slam` (`config/my_slam.yaml`, 원본 `config/slam_toolbox.yaml`) → `robot down` → `robot up slam` → `robot tour`
+- 처음 한 번: `sudo apt install ros-jazzy-slam-toolbox` (없으면 nav2 창이 알려줌)
+- 모드 바꾸기: `robot down` 후 `robot up` / `robot up slam`
+
 ## 1. 움직이기
 
 | 방법 | 어떻게 |
@@ -27,6 +34,7 @@
 | 왕복 | `robot go` (옵션: `--laps 3`, `--a 0,0,0 --b 2.5,0,180`) |
 | 숫자 판정 1회 | `robot test 2.0 0.1 90 2.0 0.5` (x y 방향 [기둥x 기둥y], 정답 위치 비교, logs/에 저장) |
 | 키보드 | `robot drive` |
+| 맵 전체 순회 + 채점 | `robot tour` (바깥 고리 → 기둥 사이 통로 → 출발점, 정답 대비 경로 오차 ATE, SLAM 모드면 지도 저장 → `logs/maps/`) |
 
 map 좌표: 출발점 = (0, 0). 기둥 9개 중심 x ∈ {0.9, 2.0, 3.1}, y ∈ {-0.6, 0.5, 1.6}.
 

@@ -12,7 +12,8 @@ cat <<'TXT'
 robot — 시뮬 놀이터
 
   켜고 끄기
-    robot up        시뮬 전체 켜기 (Gazebo, 내 브리지, Nav2, RViz)
+    robot up        시뮬 전체 켜기 — 저장된 지도 + AMCL (Gazebo, 내 브리지, Nav2, RViz)
+    robot up slam   시뮬 전체 켜기 — 빈 지도에서 SLAM이 그리면서 주행
     robot down      전체 끄기
     robot show      시뮬 화면(tmux 창들)으로 돌아가기
 
@@ -20,10 +21,12 @@ robot — 시뮬 놀이터
     robot go        A ↔ B 왕복 시작 (Ctrl+C로 멈춤)   예) robot go --laps 3
     robot drive     키보드로 직접 운전
     robot test      목표 하나 보내고 정확도 채점      예) robot test 2.0 0.1 90
+    robot tour      맵 전체 한 바퀴 순회 → 위치 오차(정답 대비) 채점, SLAM 모드면 지도 저장
 
   설정 만지기
-    robot edit      Nav2 설정(손잡이 파일) 열기
-    robot reload    고친 설정으로 Nav2만 다시 켜기 (Gazebo는 그대로)
+    robot edit      Nav2 설정값 파일 열기        → 저장 후 robot reload
+    robot edit slam SLAM 설정값 파일 열기        → 저장 후 robot down, robot up slam (지도를 새로 그려야 해서)
+    robot reload    고친 설정으로 Nav2만 다시 켜기 (Gazebo는 그대로. SLAM 모드면 지도도 처음부터)
 
   문제 찾기
     robot status    뭐가 켜져 있고 뭐가 꺼져 있는지
@@ -49,10 +52,18 @@ layer() {  # layer <창 이름> <명령> : 창을 만들고 명령을 "입력"�
 }
 
 # Nav2는 /odom 이 실제로 나올 때 켠다 (토픽 이름만 있고 데이터가 없으면 Nav2가 TF를 못 받아 멈춤)
-NAV_CMD="echo '/odom 기다리는 중 (브리지·esp32 확인: Ctrl+b 3, 2)...'; until timeout 3 ros2 topic echo --once /odom >/dev/null 2>&1; do sleep 1; done; bash scripts/robot_nav.sh"
+nav_cmd() {  # nav_cmd <모드: map|slam>
+    local arg=""; [ "$1" = "slam" ] && arg="--slam"
+    echo "echo '/odom 기다리는 중 (브리지·esp32 확인: Ctrl+b 3, 2)...'; until timeout 3 ros2 topic echo --once /odom >/dev/null 2>&1; do sleep 1; done; bash scripts/robot_nav.sh $arg"
+}
+mode() { tmux show-environment -t "$S" ROBOT_MODE 2>/dev/null | cut -d= -f2; }   # 지금 켜진 모드: map | slam
 
-cmd_up() {
-    if running; then echo "이미 켜져 있어요 → 화면으로 이동"; goto_session; exit 0; fi
+cmd_up() {  # cmd_up [slam]
+    local m="map"; [ "$1" = "slam" ] && m="slam"
+    if running; then
+        if [ "$(mode)" != "$m" ]; then echo "이미 '$(mode)' 모드로 켜져 있어요. 모드를 바꾸려면 robot down 후 다시"; exit 1; fi
+        echo "이미 켜져 있어요 → 화면으로 이동"; goto_session; exit 0
+    fi
     command -v socat >/dev/null || { echo "socat 없음: sudo apt install socat"; exit 1; }
     python3 -c "import serial" 2>/dev/null || { echo "pyserial 없음: sudo apt install python3-serial"; exit 1; }
     # 층마다 창 하나. 한 층만 재시작: 그 창에서 Ctrl+C → ↑ → Enter
@@ -62,10 +73,11 @@ cmd_up() {
     # 브리지는 가짜 ESP32가 포트를 연 뒤에 켠다: 브리지가 처음 보내는 "피드백 켜" 명령(T:131)이
     # 포트를 열기 전에 도착하면 버려져서 /odom·TF가 영영 안 나옴 (10-22에 겪음)
     layer bridge "until ros2 node list 2>/dev/null | grep -q fake_esp32; do sleep 0.5; done; sleep 1; ros2 run scr_ugv02 ugv02_bridge --ros-args -p use_sim_time:=true"
-    layer nav2   "$NAV_CMD"
+    layer nav2   "$(nav_cmd $m)"
+    tmux set-environment -t "$S" ROBOT_MODE "$m"
     layer cmd    "clear; bash scripts/robot"
     tmux select-window -t "$S:cmd"
-    echo "켜는 중... Gazebo·RViz 창이 뜨고 Nav2가 준비되기까지 30초~1분."
+    echo "켜는 중 ($m 모드)... Gazebo·RViz 창이 뜨고 Nav2가 준비되기까지 30초~1분."
     goto_session
 }
 
@@ -92,9 +104,13 @@ cmd_reload() {
     need_running
     echo "Nav2 끄는 중..."
     tmux send-keys -t "$S:nav2" C-c
-    for _ in $(seq 1 20); do pgrep -f navigation2.launch.py >/dev/null || break; sleep 1; done
-    tmux send-keys -t "$S:nav2" "$NAV_CMD" C-m
-    echo "Nav2 다시 켜는 중 (30초 정도). 바뀐 설정은 nav2 창 맨 위 [my_nav2] 줄에서 확인: Ctrl+b 4"
+    for _ in $(seq 1 20); do pgrep -f "navigation2.launch.py|slam_nav.launch.py" >/dev/null || break; sleep 1; done
+    tmux send-keys -t "$S:nav2" "$(nav_cmd "$(mode)")" C-m
+    echo "Nav2 다시 켜는 중 (30초 정도). 바뀐 설정은 nav2 창 맨 위 [설정] 줄에서 확인: Ctrl+b 4"
+    if [ "$(mode)" = "slam" ]; then
+        echo "SLAM 모드: 지도가 지금 로봇 자리에서 처음부터 다시 그려져요. 정답 비교가 필요하면 robot down → robot up slam 이 깔끔해요"
+        return
+    fi
     # Nav2(AMCL)는 켜질 때 로봇이 출발점(0,0)에 있다고 가정한다. 로봇이 다른 곳에 있으면
     # 지도와 로봇 위치가 어긋나므로, Gazebo의 실제 위치를 AMCL에 알려준다 (RViz "2D Pose Estimate"를 자동으로)
     ros_env
@@ -120,10 +136,11 @@ print(f'{xyz[0]+2.0:.3f} {xyz[1]+0.5:.3f} {rpy[2]:.3f}')" 2>/dev/null)"
     echo "로봇 위치를 AMCL에 알려줌: x=$X y=$Y yaw=$YAW (Gazebo 실제 위치)"
 }
 
-cmd_edit() {
-    local f="$REPO/config/my_nav2.yaml"
+cmd_edit() {  # cmd_edit [slam]
+    local f="$REPO/config/my_nav2.yaml" next="robot reload"
+    if [ "$1" = "slam" ]; then f="$REPO/config/my_slam.yaml"; next="robot down → robot up slam"; fi
     if command -v code >/dev/null; then code "$f"; else "${EDITOR:-nano}" "$f"; fi
-    echo "저장했으면 → robot reload"
+    echo "저장했으면 → $next"
 }
 
 cmd_status() {
@@ -143,14 +160,15 @@ cmd_status() {
 
 case "${1:-help}" in
     help|-h|--help) help ;;
-    up)     cmd_up ;;
+    up)     cmd_up "$2" ;;
     down)   cmd_down ;;
     _stop)  stop_all ;;
     show)   need_running; goto_session ;;
     go)     need_running; shift; ros_env; python3 "$SCRIPT_DIR/shuttle.py" "$@" ;;
     drive)  need_running; ros_env; python3 "$SCRIPT_DIR/safe_teleop.py" ;;
     test)   need_running; shift; bash "$SCRIPT_DIR/nav_test.sh" "$@" ;;
-    edit)   cmd_edit ;;
+    tour)   need_running; shift; ros_env; python3 "$SCRIPT_DIR/tour.py" --mode "$(mode)" "$@" ;;
+    edit)   cmd_edit "$2" ;;
     reload) cmd_reload ;;
     status) cmd_status ;;
     setup)

@@ -8,6 +8,12 @@
 #      ("Failed to change state for node: planner_server ... Aborting bringup").
 #      In our sim the robot always spawns at the map origin (maps/tb3_world_cartographer was recorded from there),
 #      so starting AMCL at the origin is correct. Revisit for the real robot.
+#   2. bt_navigator.default_server_timeout: (default 20) -> 100 ms (10-22) -> 1000 ms (10-23: 100 ms still timed out 5x in a SLAM tour)
+#      In the VM, Nav2's internal actions sometimes answer later than 20 ms and the whole goal fails instantly:
+#      "Timed out while waiting for action server to acknowledge goal request for follow_path / compute_path_to_pose".
+#   3. global_costmap: rolling_window false, width/height 12 written out explicitly (2026-10-22). No effect in map mode
+#      (the static map sets the size). SLAM mode (config/nav2_slam_mode.yaml) flips rolling_window to true, because a
+#      growing SLAM map makes goals outside the current map "out of bounds" and the planner refuses them.
 #
 # Known baseline risks (not changed yet, evaluate with nav_test results first):
 #   - controller FollowPath max_vel_x 0.3 > Burger max 0.22
@@ -67,6 +73,7 @@ bt_navigator:
     robot_base_frame: base_link
     transform_tolerance: 0.5
     filter_duration: 0.3
+    default_server_timeout: 1000
     default_nav_to_pose_bt_xml: "$(find-pkg-share nav2_bt_navigator)/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml" # behavior trees location.
     default_nav_through_poses_bt_xml: "$(find-pkg-share nav2_bt_navigator)/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml"
     always_reload_bt_xml: false
@@ -235,6 +242,9 @@ global_costmap:
       transform_tolerance: 0.5
       robot_radius: 0.1
       resolution: 0.05
+      rolling_window: false
+      width: 12
+      height: 12
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "voxel_layer", "inflation_layer"]
       obstacle_layer:

@@ -1,0 +1,10 @@
+# SLAM 모드에서만 Nav2 원본 위에 덮어쓰는 것 (robot up slam → robot_nav.sh --slam). 직접 실험값은 my_nav2.yaml 에.
+#
+# 왜: SLAM 지도는 처음엔 작고 점점 커진다. 전체 지도(global costmap) 크기가 "지금까지 그린 지도" 크기를 따라가므로,
+#     아직 안 그린 곳의 목표는 "지도 밖(out of bounds)"이라 planner가 거절한다 (10-22 tour: 13개 중 12개 실패).
+#     → 전체 지도를 로봇 중심 12 x 12 m 창으로 바꿔서, 모르는 곳(unknown)으로도 경로를 짤 수 있게 한다.
+#       (track_unknown_space: true + planner allow_unknown: true 는 원본에 이미 있음)
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      rolling_window: true
