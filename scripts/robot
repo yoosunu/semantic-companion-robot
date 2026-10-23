@@ -22,6 +22,7 @@ robot — 시뮬 놀이터
     robot drive     키보드로 직접 운전
     robot test      목표 하나 보내고 정확도 채점      예) robot test 2.0 0.1 90
     robot tour      맵 전체 한 바퀴 순회 → 위치 오차(정답 대비) 채점, SLAM 모드면 지도 저장
+    robot explore   목표 없이 스스로 탐색 (SLAM 모드) → 순회와 같은 방식으로 채점
 
   설정 만지기
     robot edit      Nav2 설정값 파일 열기        → 저장 후 robot reload
@@ -168,6 +169,7 @@ case "${1:-help}" in
     drive)  need_running; ros_env; python3 "$SCRIPT_DIR/safe_teleop.py" ;;
     test)   need_running; shift; bash "$SCRIPT_DIR/nav_test.sh" "$@" ;;
     tour)   need_running; shift; ros_env; python3 "$SCRIPT_DIR/tour.py" --mode "$(mode)" "$@" ;;
+    explore) need_running; shift; ros_env; python3 "$SCRIPT_DIR/explore_run.py" --mode "$(mode)" "$@" ;;
     edit)   cmd_edit "$2" ;;
     reload) cmd_reload ;;
     status) cmd_status ;;

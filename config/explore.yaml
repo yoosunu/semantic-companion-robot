@@ -1,0 +1,20 @@
+# explore_lite (m-explore-ros2) 설정 — robot explore 가 사용. 기성품 frontier 탐색기.
+#
+# 탐색기가 하는 일: SLAM 지도(/map)에서 "아는 빈 칸 ↔ 모르는 칸" 경계(frontier) 묶음을 찾고,
+#   점수가 가장 좋은 경계로 Nav2 목표를 보낸다. 가 보면 지도가 넓어지고 → 새 경계 → 반복. 경계가 없으면 끝.
+# 경계 점수 (낮을수록 먼저 감):  potential_scale × 거리  −  gain_scale × 경계 크기
+#   → 나중에 "어느 경계부터 갈까"를 직접 짤 때 바꿀 바로 그 공식 (내 판단 로직의 비교 기준)
+/**:
+  ros__parameters:
+    robot_base_frame: base_link
+    costmap_topic: map                 # SLAM 지도를 그대로 사용
+    costmap_updates_topic: map_updates
+    visualize: true                    # RViz에 경계 표시 (MarkerArray: /explore/frontiers)
+    planner_frequency: 0.15            # [Hz] 다음 경계를 다시 고르는 주기
+    progress_timeout: 30.0             # [s] 이 시간 동안 경계에 못 가까워지면 그 경계는 포기
+    potential_scale: 3.0               # 거리 가중치 (클수록 가까운 경계 선호)
+    gain_scale: 1.0                    # 크기 가중치 (클수록 큰 경계 선호)
+    orientation_scale: 0.0
+    min_frontier_size: 0.75            # [m] 이보다 작은 경계는 무시
+    transform_tolerance: 0.3
+    return_to_init: true               # 다 탐색하면 출발점으로 복귀 (순회와 같은 조건으로 표류 비교)

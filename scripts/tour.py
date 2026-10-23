@@ -115,13 +115,55 @@ def my_settings(path):
         return ["(파일 없음)"]
 
 
-def save_map(stamp):
+def save_map(stamp, prefix="tour"):
     out_dir = os.path.join(REPO, "logs", "maps"); os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"tour_{stamp}")
+    path = os.path.join(out_dir, f"{prefix}_{stamp}")
     r = subprocess.run(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", path, "--ros-args",
                         "-p", "use_sim_time:=true", "-p", "map_subscribe_transient_local:=false",
                         "-p", "save_map_timeout:=10.0"], capture_output=True, text=True, timeout=40)
     return path if r.returncode == 0 else None
+
+
+def read_pgm(path):
+    """(width, height, bytes). P5 형식만."""
+    data = open(path, "rb").read()
+    parts = data.split(maxsplit=4)
+    w, h = int(parts[1]), int(parts[2])
+    return w, h, parts[4][-w * h:]
+
+
+def read_map(yaml_path):
+    """map_saver 결과 → (w, h, pixels, origin_x, origin_y, resolution)."""
+    meta = {}
+    for line in open(yaml_path):
+        if ":" in line:
+            k, v = line.split(":", 1); meta[k.strip()] = v.strip()
+    ox, oy = [float(v) for v in meta["origin"].strip("[]").split(",")[:2]]
+    w, h, px = read_pgm(os.path.join(os.path.dirname(yaml_path), meta["image"]))
+    return w, h, px, ox, oy, float(meta["resolution"])
+
+
+def coverage(map_yaml, ref_yaml=os.path.join(REPO, "maps", "tb3_world_cartographer.yaml")):
+    """기준 지도의 빈 칸 중, 새 지도에서도 '빈 칸으로 확인된' 비율 (%). 두 지도 모두 원점 = 로봇 출발점."""
+    rw, rh, rpx, rox, roy, rres = read_map(ref_yaml)
+    w, h, px, ox, oy, res = read_map(map_yaml)
+    total = seen = 0
+    for j in range(rh):
+        for i in range(rw):
+            if rpx[j * rw + i] < 250:          # 기준 지도에서 빈 칸(254)만
+                continue
+            x = rox + (i + 0.5) * rres
+            y = roy + (rh - 1 - j + 0.5) * rres
+            total += 1
+            ii, jj = int((x - ox) / res), h - 1 - int((y - oy) / res)
+            if 0 <= ii < w and 0 <= jj < h and px[jj * w + ii] >= 250:
+                seen += 1
+    return 100.0 * seen / total if total else float("nan")
+
+
+def distance(samples):
+    """실제 이동 거리 (1초 간격 샘플이라 약간 짧게 나옴)."""
+    return sum(math.hypot(b[1][0] - a[1][0], b[1][1] - a[1][1]) for a, b in zip(samples, samples[1:]))
 
 
 def main():
@@ -181,10 +223,15 @@ def main():
             "설정 my_slam.yaml: " + " | ".join(my_settings(os.path.join(REPO, "config", "my_slam.yaml"))),
             "설정 my_nav2.yaml: " + " | ".join(my_settings(os.path.join(REPO, "config", "my_nav2.yaml"))),
         ]
+        summary.insert(2, f"이동 거리 약 {distance(samples):.1f} m")
         if args.mode == "slam":
             print("\n지도 저장 중...")
             path = save_map(stamp)
-            summary.append(f"지도: {path}.pgm" if path else "지도 저장 실패 (robot status, nav2 창 확인)")
+            if path:
+                summary.append(f"지도 완성도: 기준 지도 빈 공간의 {coverage(path + '.yaml'):.1f}%")
+                summary.append(f"지도: {path}.pgm")
+            else:
+                summary.append("지도 저장 실패 (robot status, nav2 창 확인)")
         print("\n" + "\n".join(summary))
 
         log = os.path.join(REPO, "logs", f"tour_{stamp}")

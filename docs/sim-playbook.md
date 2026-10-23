@@ -25,6 +25,9 @@
 - 설정: `robot edit slam` (`config/my_slam.yaml`, 원본 `config/slam_toolbox.yaml`) → `robot down` → `robot up slam` → `robot tour`
 - 처음 한 번: `sudo apt install ros-jazzy-slam-toolbox` (없으면 nav2 창이 알려줌)
 - 모드 바꾸기: `robot down` 후 `robot up` / `robot up slam`
+- 스스로 탐색: `robot explore` (설정 `config/explore.yaml`). 처음 한 번 빌드:
+  `cd ~/scr_ws/src && git clone https://github.com/robo-friends/m-explore-ros2.git && cd ~/scr_ws && rosdep install --from-paths src/m-explore-ros2 --ignore-src -r -y && colcon build --symlink-install --packages-up-to explore_lite`
+- 비교할 땐 매번 빈 지도에서: `robot down` → `robot up slam` → `robot tour` 또는 `robot explore`
 
 ## 1. 움직이기
 
