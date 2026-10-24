@@ -43,7 +43,7 @@ LLM은 자연어 → 정해진 명령 형식 번역만 하고, 실행 여부는 
 | L3 | 기둥을 피해서 반대편 | LiDAR → costmap, 재계획 | 기둥과 최소 거리, 충돌 0 | | |
 | L4 | 갔다가 돌아오기 | 목표 2개를 순서대로 주는 **내 코드** (task_manager 씨앗) | 복귀 위치 오차 | | |
 | L5 | 기둥 한 바퀴 돌아오기 | 여러 지점 연속 주행 | 한 바퀴 후 위치 오차 | | |
-| L6 | **빈 지도에서 시작해 방 전체 그리기** (SLAM Toolbox + Nav2 동시) | 지도 없이 주행, (이후) frontier 탐색 = **내 판단 로직** | 정답 대비 경로 오차(ATE), 소요 시간, 지도 완성도 | ✅ 10-24 (정해진 순회 경로): 13/13, 160 s, ATE 4.4 cm, 복귀 표류 0.9 cm. 다음: 스스로 탐색(explore_lite) | |
+| L6 | **빈 지도에서 시작해 방 전체 그리기** (SLAM Toolbox + Nav2 동시) | 지도 없이 주행, (이후) frontier 탐색 = **내 판단 로직** | 정답 대비 경로 오차(ATE), 소요 시간, 지도 완성도 | ✅ 10-24 (정해진 순회 경로): 13/13, 160 s, ATE 4.4 cm, 복귀 표류 0.9 cm, 완성도 97.8%. ✅ 10-24 스스로 탐색(explore_lite): 완성도 96.8%, 이동 10.8 m(순회 22.5 m의 절반), ATE 4.2 cm. 미해결: 탐색 후 출발점 복귀 안 함 | |
 
 ## 단계
 
@@ -92,6 +92,7 @@ LLM은 자연어 → 정해진 명령 형식 번역만 하고, 실행 여부는 
 | 10-22 | Nav2 controller 교체 (왕복 3 m, 0.3 m/s) | DWB 평균 30.3 s (24~40) | RPP 21.5 s (19~25), **MPPI 20.6 s (19~22)** → MPPI 채택 | `docs/decisions/001-nav2-controller.md` |
 | 10-23 | SLAM 순회 (빈 지도, 13지점) 성공률 | 8/13 (planner 응답 대기 100 ms, 시간 초과 5회) | 12/13 (대기 1000 ms, 시간 초과 0) | `logs/tour_20261023_*.txt` |
 | 10-24 | SLAM 순회: 기둥 옆 갇힘 | 후진 금지(vx_min 0): 12번 지점 273 s 갇혀 실패, 총 600 s | **후진 허용(vx_min −0.2): 13/13, 총 160 s**, ATE 4.4 cm, 복귀 표류 0.9 cm / 1.6° | `logs/tour_20261024_034749.txt` |
+| 10-24 | 지도 그리기: 정해진 경로 vs 스스로 탐색 (기성품 explore_lite) | 순회: 완성도 97.8%, 22.5 m, 160 s | 탐색: 완성도 96.8%, **10.8 m**, 주행 약 147 s, ATE 4.2 cm → 나중에 **내 탐색 로직**과 비교할 기준 | `logs/explore_20261024_041325.txt` |
 | 10-18 | 브리지 v2 안전 정지 (명령 끊김) | 약 3 s (펌웨어 타임아웃) | **0.505 s** (브리지 데드맨), 브리지 종료 시 약 20 ms 내 정지 | `src/scr_ugv02/README.md` |
 
 ## 결정 기록 (왜 이걸 썼나)
@@ -126,7 +127,7 @@ teleop / Nav2 ── /cmd_vel ──→ ugv02_bridge (Jasper) ──JSON over �
 | 1-C | **채용 공고 대조표**: 국내 로봇 SW 공고 요구사항 ↔ 로드맵 단계 (Flutter식 함정 점검) | 함께 | |
 | 1-D | UGV02 로봇 모델(URDF: base_link, laser 위치) + bringup launch (브리지 + 모델 + LiDAR) | Claude 기본형, Jasper 실측값 | |
 | 1-E | SLAM Toolbox를 시뮬에서 먼저 (실물은 Cartographer 대신 이것). **목표: SLAM + Nav2 동시 실행 = 미션 L6** | 함께 | |
-| 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | |
+| 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | SD ✅ 10-25: Ubuntu Server 24.04 (64-bit), Imager 2.0 사용자 지정(cloud-init) — 호스트 `scr-pi`, 사용자 `jasper`, SSH 공개키 인증만, Wi-Fi KR, Asia/Seoul. 첫 부팅 3~5분 대기 후 `ssh jasper@scr-pi.local` (안 되면 공유기에서 IP — avahi 미설치일 수 있음). `setup_pi.sh` 남음 |
 | 1-F | Pi ↔ VM ROS 네트워크(DDS discovery) 방법 조사 — M3 RViz용 | 함께 | |
 | 1-6 | 내 브리지를 거쳐 시뮬 SLAM·Nav2 재실행 (sim v0.1 회귀) | 함께 | 여유 있으면 |
 
