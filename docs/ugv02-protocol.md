@@ -51,3 +51,7 @@ and turns the stream on at boot with:
 2. Slow left turn `{"T":13,"X":0,"Z":0.3}` → confirm counter-clockwise.
 3. Stop sending → confirm stop after ~3 s.
 4. Charging port spec / charge while powered on / voltage field (mission requirement).
+5. **Which port**: plug UGV02 to the Pi (USB first; GPIO UART later) → `ls /dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA*` before/after → that is `ugv_port` for `ros2 launch scr_bringup robot.launch.py ugv_port:=...`. Wheels in the air.
+6. **Measure for the URDF** (`src/scr_description/urdf/ugv02.urdf.xacro`, lines marked ★): wheel radius, wheel width, left↔right wheel center distance, front↔rear wheel distance, LiDAR position (front/back, left/right from body center) and height above the wheel axles.
+7. **LiDAR direction**: put a box 50 cm in front of the robot → RViz `/scan` (Fixed Frame `base_link`). Box drawn behind → set `laser_yaw` to `${pi}`.
+8. **LiDAR driver**: `ros2 pkg executables rplidar_ros` → executable name matches `rplidar_node`? `/scan` at ~10 Hz? If C1 is not detected → switch to Slamtec `sllidar_ros2`.

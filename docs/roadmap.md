@@ -125,7 +125,7 @@ teleop / Nav2 ── /cmd_vel ──→ ugv02_bridge (Jasper) ──JSON over �
 | 1-4 | 브리지 v1 (2026-10-20: /odom ~20 Hz·배터리·TF 동작, Nav2 L1 통과. A/B 정밀 비교는 남음): T:1001 피드백 → `/odom` (+TF), `/battery_state`. 합격: RViz에서 내 odom으로 로봇이 따라 움직임, 1 m 직진 오차 | 함께 (odom 계산은 Jasper) | **진행 중** (시뮬 준비 ✅ 10-19) |
 | 1-B | 브리지 마무리: **피드백이 일정 시간 안 오면 T:131 재전송**(10-22: 켜는 순서 때문에 피드백이 영영 꺼진 일), main try/catch, 속도 제한(±0.5 m/s), 로그를 값이 바뀔 때만(엣지), 이미 정지 후 침묵엔 데드맨 무시, 기본값 상수 한 곳 | Jasper | |
 | 1-C | **채용 공고 대조표**: 국내 로봇 SW 공고 요구사항 ↔ 로드맵 단계 (Flutter식 함정 점검) | 함께 | |
-| 1-D | UGV02 로봇 모델(URDF: base_link, laser 위치) + bringup launch (브리지 + 모델 + LiDAR) | Claude 기본형, Jasper 실측값 | |
+| 1-D | UGV02 로봇 모델(URDF: base_link, laser 위치) + bringup launch (브리지 + 모델 + LiDAR) | Claude 기본형, Jasper 실측값 | 기본형 ✅ 10-27: `scr_description` (★ = 실측할 값), `scr_bringup/robot.launch.py` (ugv_port 는 도착 날 확인). 시뮬 로봇을 UGV02 모양으로 = 다음 |
 | 1-E | SLAM Toolbox를 시뮬에서 먼저 (실물은 Cartographer 대신 이것). **목표: SLAM + Nav2 동시 실행 = 미션 L6** | 함께 | |
 | 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | SD ✅ 10-25: Ubuntu Server 24.04 (64-bit), Imager 2.0 사용자 지정(cloud-init) — 호스트 `scr-pi`, 사용자 `jasper`, SSH 공개키 인증만, Wi-Fi KR, Asia/Seoul. 첫 부팅 3~5분 대기 후 `ssh jasper@scr-pi.local` (안 되면 공유기에서 IP — avahi 미설치일 수 있음). `setup_pi.sh` ✅ 10-27 깨끗한 Ubuntu 24.04 **arm64** 컨테이너(VM이 ARM)에서 처음부터 끝까지 통과 — ROS Jazzy·Nav2·SLAM Toolbox·rplidar_ros 설치, 패키지 4개 빌드 42.8 s, 전체 약 15분. 발견: 시계가 틀리면 apt 거절 → 시계 확인 단계 추가 |
 | 1-F | Pi ↔ VM ROS 네트워크(DDS discovery) 방법 조사 — M3 RViz용 | 함께 | |

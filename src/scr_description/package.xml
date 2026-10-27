@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>scr_description</name>
+  <version>0.1.0</version>
+  <description>UGV02 robot model (URDF/xacro): base_footprint, base_link, wheels, laser.</description>
+  <maintainer email="jasperyoo010@gmail.com">Jasper</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <!-- rviz2 는 일부러 안 적음: Pi 에는 화면 프로그램을 안 깔기 때문 (view.launch.py 는 VM 전용) -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

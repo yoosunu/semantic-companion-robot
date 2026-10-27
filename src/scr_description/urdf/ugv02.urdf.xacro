@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!--
+  UGV02 몸 설계도 (URDF). 로봇의 부품(link)과 부품끼리의 위치 관계(joint)를 적는다.
+  robot_state_publisher 가 이걸 읽어 TF 를 낸다:  base_footprint → base_link → laser
+  (map → odom 은 SLAM, odom → base_footprint 는 내 브리지가 낸다)
+
+  ★ 표시 = 추정값. 실물이 오면 자로 재서 바꿀 것 (docs/ugv02-protocol.md day-1).
+  숫자는 아래 property 에만 있다. 여기만 고치면 된다.
+-->
+<robot name="ugv02" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===== 치수 [m] ===== -->
+  <!-- 스펙: 외곽 252 × 230 × 94 mm (바퀴 포함), 6바퀴 4WD 스키드 스티어 -->
+  <xacro:property name="length"        value="0.252"/>  <!-- 앞뒤 길이 (스펙) -->
+  <xacro:property name="width"         value="0.230"/>  <!-- 좌우 폭, 바퀴 포함 (스펙) -->
+  <xacro:property name="height"        value="0.094"/>  <!-- 바닥 ~ 차체 윗면 (스펙) -->
+  <xacro:property name="wheel_radius"  value="0.040"/>  <!-- ★ 바퀴 반지름 -->
+  <xacro:property name="wheel_width"   value="0.035"/>  <!-- ★ 바퀴 폭 -->
+  <xacro:property name="track_width"   value="0.160"/>  <!-- ★ 좌우 바퀴 중심 간격. 브리지 track_width 파라미터와 같은 뜻 (odom 보정으로 실제 유효값은 따로 구함) -->
+  <xacro:property name="wheel_base"    value="0.170"/>  <!-- ★ 맨 앞 바퀴 ~ 맨 뒤 바퀴 중심 거리 -->
+  <xacro:property name="body_width"    value="${width - 2 * wheel_width}"/>
+  <xacro:property name="body_height"   value="${height - wheel_radius}"/>
+
+  <!-- 라이다 (RPLIDAR C1): 차체 중심(base_link 원점) 기준 위치 -->
+  <xacro:property name="laser_x"   value="0.0"/>   <!-- ★ 앞(+)/뒤(-) -->
+  <xacro:property name="laser_y"   value="0.0"/>   <!-- ★ 왼(+)/오른(-) -->
+  <xacro:property name="laser_z"   value="0.090"/> <!-- ★ base_link 원점(바퀴 축 높이)에서 라이다 스캔 면까지 높이 -->
+  <xacro:property name="laser_yaw" value="0.0"/>   <!-- ★ 라이다 0° 방향. RPLIDAR 는 0°가 로봇 뒤쪽인 경우가 있음 → 앞에 물건 두고 RViz 에서 확인, 반대면 ${pi} -->
+
+  <!-- ===== 부품 ===== -->
+  <!-- 바닥에 찍힌 로봇 중심점. Nav2·브리지 odom 의 기준 -->
+  <link name="base_footprint"/>
+
+  <!-- 차체. 원점 = 바퀴 축 높이의 차체 중심 -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${body_height / 2}"/>
+      <geometry><box size="${length} ${body_width} ${body_height}"/></geometry>
+      <material name="dark"><color rgba="0.2 0.2 0.2 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${body_height / 2}"/>
+      <geometry><box size="${length} ${width} ${body_height}"/></geometry>
+    </collision>
+  </link>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}"/>
+  </joint>
+
+  <!-- 바퀴 6개: 보이기만 하는 고정 부품 (회전은 ESP32 가 처리, ROS 는 바퀴 각도를 모름) -->
+  <xacro:macro name="wheel" params="name x y">
+    <link name="${name}_wheel">
+      <visual>
+        <origin rpy="${pi / 2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="black"><color rgba="0.05 0.05 0.05 1"/></material>
+      </visual>
+    </link>
+    <joint name="${name}_wheel_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${name}_wheel"/>
+      <origin xyz="${x} ${y} 0"/>
+    </joint>
+  </xacro:macro>
+  <xacro:wheel name="front_left"  x="${ wheel_base / 2}" y="${ track_width / 2}"/>
+  <xacro:wheel name="mid_left"    x="0"                  y="${ track_width / 2}"/>
+  <xacro:wheel name="rear_left"   x="${-wheel_base / 2}" y="${ track_width / 2}"/>
+  <xacro:wheel name="front_right" x="${ wheel_base / 2}" y="${-track_width / 2}"/>
+  <xacro:wheel name="mid_right"   x="0"                  y="${-track_width / 2}"/>
+  <xacro:wheel name="rear_right"  x="${-wheel_base / 2}" y="${-track_width / 2}"/>
+
+  <!-- 라이다. 이름 laser = rplidar_ros 의 기본 frame_id -->
+  <link name="laser">
+    <visual>
+      <geometry><cylinder radius="0.028" length="0.04"/></geometry>
+      <material name="blue"><color rgba="0.1 0.3 0.9 1"/></material>
+    </visual>
+  </link>
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser"/>
+    <origin xyz="${laser_x} ${laser_y} ${laser_z}" rpy="0 0 ${laser_yaw}"/>
+  </joint>
+</robot>
