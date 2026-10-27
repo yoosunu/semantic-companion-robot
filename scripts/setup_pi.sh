@@ -10,7 +10,6 @@
 #          ③ 시리얼 권한(dialout)  ④ ~/scr_ws 작업 공간 빌드 (Gazebo 패키지 제외)  ⑤ .bashrc 에 ROS 환경
 # 하지 않는 일 (도착 날 실측 후 결정 → docs/ugv02-protocol.md day-1 체크리스트):
 #   - UGV02 ↔ Pi 연결 포트(GPIO UART /dev/ttyAMA0 인지 USB 인지)와 UART 활성화 설정
-#   - RPLIDAR C1 이 apt 의 rplidar_ros 로 되는지 (안 되면 Slamtec sllidar_ros2 소스 빌드)
 #   - Wi-Fi·비밀번호 등 비밀값은 다루지 않음 (Imager 에서 이미 설정, repo 에 절대 넣지 않음)
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -71,8 +70,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   ros-jazzy-slam-toolbox \
   ros-jazzy-robot-state-publisher ros-jazzy-xacro \
   ros-jazzy-tf2-tools ros-jazzy-robot-localization \
-  ros-jazzy-teleop-twist-keyboard \
-  ros-jazzy-rplidar-ros
+  ros-jazzy-teleop-twist-keyboard
+# 라이다 드라이버는 apt rplidar_ros 가 아니라 src/sllidar_ros2 (submodule, 6) 에서 빌드) — C1 은 SDK 2.x 필요 (10-28)
 # 없는 것: Gazebo, RViz (화면은 Mac/VM 쪽에서 띄움)
 
 step "4) rosdep"
@@ -84,7 +83,7 @@ if id -nG "$USER" | grep -qw dialout; then echo "이미 dialout 그룹"; else
   sudo usermod -aG dialout "$USER"; echo "dialout 추가 → 다시 로그인해야 적용"; fi
 
 step "6) 작업 공간 ~/scr_ws (src = repo/src 링크) 빌드"
-[ -d "$REPO/src/m-explore-ros2/explore" ] || git -C "$REPO" submodule update --init --recursive
+git -C "$REPO" submodule update --init --recursive   # 항상 (새로 추가된 submodule 도 받게)
 mkdir -p "$WS"
 [ -e "$WS/src" ] || ln -s "$REPO/src" "$WS/src"
 set +u; source /opt/ros/jazzy/setup.bash; set -u

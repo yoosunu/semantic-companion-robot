@@ -43,10 +43,10 @@ def generate_launch_description():
         Node(package="scr_ugv02", executable="ugv02_bridge", output="screen",
              parameters=[{"port": ugv_port, "baud": 115200, "track_width": track_width}]),
 
-        # RPLIDAR C1: 460800 baud. 실행 파일 이름·파라미터는 설치된 rplidar_ros 버전에 따라 다를 수 있음 → 도착 날 확인
-        #   (ros2 pkg executables rplidar_ros). C1 이 안 잡히면 Slamtec sllidar_ros2 로 교체
-        Node(package="rplidar_ros", executable="rplidar_node", output="screen",
+        # RPLIDAR C1: Slamtec sllidar_ros2 (src/sllidar_ros2 submodule). 10-28 실측: Standard, 5 kHz, 10.0 Hz, 720 beams.
+        #   apt rplidar_ros 2.1.0 (SDK 1.12) 는 C1 에서 "Cannot start scan: 80008002" → 사용 안 함
+        Node(package="sllidar_ros2", executable="sllidar_node", output="screen",
              condition=IfCondition(LaunchConfiguration("use_lidar")),
-             parameters=[{"serial_port": lidar_port, "serial_baudrate": 460800,
-                          "frame_id": "laser", "angle_compensate": True, "scan_mode": "Standard"}]),
+             parameters=[{"channel_type": "serial", "serial_port": lidar_port, "serial_baudrate": 460800,
+                          "frame_id": "laser", "inverted": False, "angle_compensate": True, "scan_mode": "Standard"}]),
     ])

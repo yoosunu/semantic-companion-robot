@@ -33,11 +33,13 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
-## 지금 (2026-10-28 새벽) — 실물 1단계(Pi 혼자) ✅. 다음: 2단계 라이다. ← 새 대화는 여기부터 읽기
+## 지금 (2026-10-28 새벽) — 실물 1단계(Pi) ✅ · 2단계(라이다) ✅. 다음: 3단계 UGV02 혼자 전원. ← 새 대화는 여기부터 읽기
 - 실물 순서 (하나씩 붙이기, 바퀴는 띄우고, Pi는 처음엔 27W 어댑터 전원만):
   1) ✅ 10-28 Pi: Active Cooler(팬 동작 확인) · SSH · `dev` clone · `setup_pi.sh` 완료 · dialout · `ros2 pkg list | grep scr_` 4개
      막힌 3가지(OUI 필터 누락 / cloud-init instance-id·캐시 / apt noble-updates 없음) → `docs/debugging/002-pi-first-boot.md`
-  2) 라이다 USB → `/dev/ttyUSB*` → `/scan`  3) UGV02 혼자 전원(ESP32 웹 페이지로 바퀴·전압 먼저)
+  2) ✅ 10-28 라이다: `/dev/ttyUSB0`(CP210x) → **sllidar_ros2**(submodule, apt rplidar_ros 는 C1 스캔 시작 실패) → `/scan` 10.0 Hz, 720빔.
+     Pi USB 2.0(검은) **아래 칸 고정**. 방향(Day-1 7번)은 로봇에 단 뒤. +23°·10 cm 에 상시 물체(케이블 추정) — 장착 후 자기 몸 필터 검토.
+  3) UGV02 혼자 전원(ESP32 웹 페이지로 바퀴·전압 먼저)
   4) UGV02↔Pi (USB 먼저) → 포트 → T:1001 피드백 → 브리지로 살짝
   5) 체크리스트: `docs/ugv02-protocol.md` Day-1 1~8 (피드백 형식, 좌회전 부호, 3 s 정지, 충전, 포트, URDF 실측, 라이다 방향, 라이다 드라이버)
 - Pi 접속: Mac에서 `ssh jasper@scr-pi.local` (avahi 설치됨). 안 되면 핑 스캔 후 `arp -a | grep -i 98:fe:54` (이 Pi의 OUI).

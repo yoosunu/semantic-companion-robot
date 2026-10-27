@@ -1,3 +1,6 @@
 [submodule "src/m-explore-ros2"]
 	path = src/m-explore-ros2
 	url = https://github.com/robo-friends/m-explore-ros2.git
+[submodule "src/sllidar_ros2"]
+	path = src/sllidar_ros2
+	url = https://github.com/Slamtec/sllidar_ros2.git
