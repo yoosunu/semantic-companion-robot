@@ -33,6 +33,20 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-10-27 밤) — 하드웨어 도착, 실물 단계 시작. ← 새 대화는 여기부터 읽기
+- 시뮬 단계 끝: 브리지 v0·v1·v2, Nav2 L1·L2, `robot` 놀이터, controller=MPPI(vx_min −0.2), SLAM 순회 13/13·ATE 4.4 cm, 탐색(explore_lite) 완성도 96.8%.
+- 도착 전 준비 완료: SD(Ubuntu Server 24.04, 호스트 `scr-pi`, 사용자 `jasper`, SSH 키 인증만) / `scripts/setup_pi.sh`(arm64 컨테이너 검증, 약 15분)
+  / `src/scr_description`(URDF, ★=실측할 값) / `src/scr_bringup/launch/robot.launch.py`(ugv_port 는 도착 날 확인해서 인자로).
+- 실물 순서 (하나씩 붙이기, 바퀴는 띄우고, Pi는 처음엔 27W 어댑터 전원만):
+  1) Pi 부팅 → 3~5분 → `ssh jasper@scr-pi.local` (안 되면 공유기에서 IP) → `git clone --recurse-submodules ...` → `bash scripts/setup_pi.sh`
+     (apt 가 "not valid yet" 이면 시계: `sudo systemctl restart systemd-timesyncd`)
+  2) 라이다 USB → `/dev/ttyUSB*` → `/scan`  3) UGV02 혼자 전원  4) UGV02↔Pi (USB 먼저) → 포트 → T:1001 피드백 → 브리지로 살짝
+  5) 체크리스트: `docs/ugv02-protocol.md` Day-1 1~8 (피드백 형식, 좌회전 부호, 3 s 정지, 충전, 포트, URDF 실측, 라이다 방향, 라이다 드라이버)
+- 남은 준비성 항목: 1-F Pi↔VM 통신(UTM VM 네트워크가 Mac 안쪽 망이면 Pi 토픽을 VM RViz 에서 못 봄 → 첫 확인: VM `ip -4 addr`, Mac `ipconfig getifaddr en0`)
+  / odom 측정 도구(1 m 직진·360° 회전, 11/15 게이트) / 1-B 브리지 T:131 재전송.
+- 다음 내 노드: task_manager (Python 결정) — 설계 v0 `docs/design/task_manager.md`. 실물 Nav2가 돈 다음.
+- 진행 방식: Jasper가 말하면 먼저 듣고 방향을 정한 뒤 진행. 명령은 [VM]/[Mac]/[Pi] 표시, 한 번에 조금씩. 배선은 전원 넣기 전 사진으로 확인.
+
 ## 현재 상태 (2026-10-14) — 시뮬 v0.1 통과, 브리지 v0 통과. 전체 계획·일정·목표 Lv: `docs/roadmap.md`
 - 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
 - 실행: **`robot` 하나** (도움말 출력). `robot up` / `robot go` / `robot edit` → `robot reload` / `robot status` / `robot down`. 구현: `scripts/robot`, 사용법: `docs/sim-playbook.md`
