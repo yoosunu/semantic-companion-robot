@@ -50,7 +50,7 @@ and turns the stream on at boot with:
 1. `{"T":131,"cmd":1}` → record 10 s of raw feedback to `docs/ugv02-feedback-sample.txt`. Update the [가정] lines above.
 2. Slow left turn `{"T":13,"X":0,"Z":0.3}` → confirm counter-clockwise.
 3. Stop sending → confirm stop after ~3 s.
-4. Charging port spec / charge while powered on / voltage field (mission requirement).
+4. Charging port spec / charge while powered on / voltage field (mission requirement). — 10-28: 12.6V 2A DC jack on the top plate; first charge "wakes" the UPS (no output before). **Powered on while charging works** (OLED + web panel up, voltage 12.46 → 12.54 V while charging). Spec: "charging and power output at the same time", 1.5 h charge. Resting voltage (charger off) and the feedback `v` field still to check.
 5. **Which port**: plug UGV02 to the Pi (USB first; GPIO UART later) → `ls /dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA*` before/after → that is `ugv_port` for `ros2 launch scr_bringup robot.launch.py ugv_port:=...`. Wheels in the air.
 6. **Measure for the URDF** (`src/scr_description/urdf/ugv02.urdf.xacro`, lines marked ★): wheel radius, wheel width, left↔right wheel center distance, front↔rear wheel distance, LiDAR position (front/back, left/right from body center) and height above the wheel axles.
 7. **LiDAR direction** (do after mounting): put a box 50 cm in front of the robot → RViz `/scan` (Fixed Frame `base_link`). Box drawn behind → set `laser_yaw` to `${pi}`.
