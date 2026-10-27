@@ -1,5 +1,5 @@
 #!/bin/bash
-# Raspberry Pi 5 (Ubuntu Server 24.04, arm64) 를 로봇 컴퓨터로 만드는 설치 스크립트. [10-27 arm64 컨테이너에서 전 과정 통과]
+# Raspberry Pi 5 (Ubuntu Server 24.04, arm64) 를 로봇 컴퓨터로 만드는 설치 스크립트. [10-27 arm64 컨테이너, 10-28 실물 Pi 5 에서 전 과정 통과]
 #
 # 사용 (Pi에 SSH로 들어가서):
 #   git clone --recurse-submodules https://github.com/yoosunu/semantic-companion-robot.git ~/semantic-companion-robot
@@ -33,6 +33,13 @@ echo "현재 시각: $(date '+%F %T %Z')  ← 실제 시각과 다르면 Ctrl+C 
 [ "$(date +%Y)" -ge 2026 ] || { echo "시계가 과거(年 $(date +%Y))로 되어 있음 → 시간부터 맞추기"; exit 1; }
 
 step "1) 시스템 업데이트 + 기본 도구"
+# Ubuntu Server 이미지에 noble-updates 가 빠져 있는 경우가 있음 (10-28 실제로 겪음 → docs/debugging/002)
+# 없으면 설치된 라이브러리(updates 버전)와 -dev 패키지(release 버전)가 안 맞아 3) 에서 "unmet dependencies"
+SRC=/etc/apt/sources.list.d/ubuntu.sources
+if [ -f "$SRC" ] && ! grep -q "^Suites:.*${VERSION_CODENAME}-updates" "$SRC"; then
+  sudo sed -i "s/^Suites: ${VERSION_CODENAME}\$/Suites: ${VERSION_CODENAME} ${VERSION_CODENAME}-updates ${VERSION_CODENAME}-backports/" "$SRC"
+  echo "apt 소스에 ${VERSION_CODENAME}-updates/-backports 추가"
+fi
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
