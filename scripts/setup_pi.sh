@@ -1,5 +1,5 @@
 #!/bin/bash
-# Raspberry Pi 5 (Ubuntu Server 24.04, arm64) 를 로봇 컴퓨터로 만드는 설치 스크립트. [초안 10-25 — 도착 날 처음 실행]
+# Raspberry Pi 5 (Ubuntu Server 24.04, arm64) 를 로봇 컴퓨터로 만드는 설치 스크립트. [10-27 arm64 컨테이너에서 전 과정 통과]
 #
 # 사용 (Pi에 SSH로 들어가서):
 #   git clone --recurse-submodules https://github.com/yoosunu/semantic-companion-robot.git ~/semantic-companion-robot
@@ -22,6 +22,15 @@ step() { echo; echo "=== $* ==="; }
 [ "${VERSION_CODENAME:-}" = "noble" ] || { echo "Ubuntu 24.04 (noble) 가 아님: ${PRETTY_NAME:-?}"; exit 1; }
 echo "OS: $PRETTY_NAME / arch: $(uname -m)"
 [ "$(uname -m)" = "aarch64" ] || echo "⚠ arm64 가 아님 (VM 컨테이너 시험이면 정상)"
+
+# 시계 확인: 시계가 틀리면 apt 가 저장소를 "아직 유효하지 않음(not valid yet)"으로 거절한다.
+# Pi 5 는 시계 배터리가 없어 부팅 직후 인터넷 시간을 받기 전까지 틀릴 수 있음 (10-27 VM에서 19시간 늦어 실제로 겪음)
+if timedatectl show -p NTPSynchronized --value >/dev/null 2>&1; then
+  for _ in $(seq 1 30); do [ "$(timedatectl show -p NTPSynchronized --value)" = "yes" ] && break; sleep 2; done
+  [ "$(timedatectl show -p NTPSynchronized --value)" = "yes" ] || echo "⚠ 인터넷 시간 동기화가 아직 안 됨"
+fi
+echo "현재 시각: $(date '+%F %T %Z')  ← 실제 시각과 다르면 Ctrl+C 후: sudo systemctl restart systemd-timesyncd"
+[ "$(date +%Y)" -ge 2026 ] || { echo "시계가 과거(年 $(date +%Y))로 되어 있음 → 시간부터 맞추기"; exit 1; }
 
 step "1) 시스템 업데이트 + 기본 도구"
 sudo apt-get update

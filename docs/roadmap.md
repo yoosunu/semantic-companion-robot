@@ -127,7 +127,7 @@ teleop / Nav2 ── /cmd_vel ──→ ugv02_bridge (Jasper) ──JSON over �
 | 1-C | **채용 공고 대조표**: 국내 로봇 SW 공고 요구사항 ↔ 로드맵 단계 (Flutter식 함정 점검) | 함께 | |
 | 1-D | UGV02 로봇 모델(URDF: base_link, laser 위치) + bringup launch (브리지 + 모델 + LiDAR) | Claude 기본형, Jasper 실측값 | |
 | 1-E | SLAM Toolbox를 시뮬에서 먼저 (실물은 Cartographer 대신 이것). **목표: SLAM + Nav2 동시 실행 = 미션 L6** | 함께 | |
-| 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | SD ✅ 10-25: Ubuntu Server 24.04 (64-bit), Imager 2.0 사용자 지정(cloud-init) — 호스트 `scr-pi`, 사용자 `jasper`, SSH 공개키 인증만, Wi-Fi KR, Asia/Seoul. 첫 부팅 3~5분 대기 후 `ssh jasper@scr-pi.local` (안 되면 공유기에서 IP — avahi 미설치일 수 있음). `setup_pi.sh` 남음 |
+| 1-7 | Pi SD 굽기 + `scripts/setup_pi.sh` | 함께 | SD ✅ 10-25: Ubuntu Server 24.04 (64-bit), Imager 2.0 사용자 지정(cloud-init) — 호스트 `scr-pi`, 사용자 `jasper`, SSH 공개키 인증만, Wi-Fi KR, Asia/Seoul. 첫 부팅 3~5분 대기 후 `ssh jasper@scr-pi.local` (안 되면 공유기에서 IP — avahi 미설치일 수 있음). `setup_pi.sh` ✅ 10-27 깨끗한 Ubuntu 24.04 **arm64** 컨테이너(VM이 ARM)에서 처음부터 끝까지 통과 — ROS Jazzy·Nav2·SLAM Toolbox·rplidar_ros 설치, 패키지 4개 빌드 42.8 s, 전체 약 15분. 발견: 시계가 틀리면 apt 거절 → 시계 확인 단계 추가 |
 | 1-F | Pi ↔ VM ROS 네트워크(DDS discovery) 방법 조사 — M3 RViz용 | 함께 | |
 | 1-6 | 내 브리지를 거쳐 시뮬 SLAM·Nav2 재실행 (sim v0.1 회귀) | 함께 | 여유 있으면 |
 
