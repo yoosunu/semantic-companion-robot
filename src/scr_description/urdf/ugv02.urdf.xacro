@@ -25,7 +25,7 @@
   <xacro:property name="laser_x"   value="0.0"/>   <!-- ★ 앞(+)/뒤(-) -->
   <xacro:property name="laser_y"   value="0.0"/>   <!-- ★ 왼(+)/오른(-) -->
   <xacro:property name="laser_z"   value="0.090"/> <!-- ★ base_link 원점(바퀴 축 높이)에서 라이다 스캔 면까지 높이 -->
-  <xacro:property name="laser_yaw" value="0.0"/>   <!-- ★ 라이다 0° 방향. RPLIDAR 는 0°가 로봇 뒤쪽인 경우가 있음 → 앞에 물건 두고 RViz 에서 확인, 반대면 ${pi} -->
+  <xacro:property name="laser_yaw" value="${pi}"/> <!-- ✅ 10-29 실측: 로봇 앞 물체가 라이다 +178° 로 찍힘 → 0°가 로봇 뒤쪽 → pi (wander.py --check) -->
 
   <!-- ===== 부품 ===== -->
   <!-- 바닥에 찍힌 로봇 중심점. Nav2·브리지 odom 의 기준 -->

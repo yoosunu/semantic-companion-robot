@@ -118,20 +118,28 @@ class Wander(Node):
 
 
 def check(node):
-    """로봇 바로 앞 30 cm 에 물건을 두고 실행 → 가장 가까운 점이 0° 근처면 OK, ±180° 근처면 --laser-yaw 3.1416."""
+    """움직이지 않고, 라이다 원래 각도 0° / +90° / 180° / -90° 방향(각 ±15°)의 가장 가까운 거리를 출력.
+    로봇 앞에 손을 댔다 뗐다 하며 어느 칸 숫자가 바뀌는지 본다 → 그 칸이 로봇 앞."""
     node.destroy_timer(node._timers[0])        # 움직이는 제어는 끔
-    t_end = time.time() + 5
+    t_end = time.time() + 15
     while time.time() < t_end:
         rclpy.spin_once(node, timeout_sec=0.1)
         s = node.scan
         if s is None:
             continue
-        best, ang = float("inf"), 0.0
-        for i, r in enumerate(s.ranges):
-            if MIN_VALID < r < best and not math.isinf(r):
-                best, ang = r, s.angle_min + i * s.angle_increment
-        print(f"가장 가까운 물체: {best:.2f} m, 라이다 각도 {math.degrees(ang):+.0f}°")
-        time.sleep(0.4)
+        out = []
+        for c in (0, 90, 180, -90):
+            best = float("inf")
+            for i, r in enumerate(s.ranges):
+                if not (MIN_VALID < r) or math.isinf(r):
+                    continue
+                a = math.degrees(s.angle_min + i * s.angle_increment)
+                d = (a - c + 180) % 360 - 180
+                if abs(d) <= 15 and r < best:
+                    best = r
+            out.append(f"{c:+4d}°: {best:4.2f} m")
+        print("   ".join(out))
+        time.sleep(0.5)
     rclpy.try_shutdown()
 
 
