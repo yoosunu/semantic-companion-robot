@@ -33,7 +33,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
-## 지금 (2026-10-28 새벽) — 실물 1단계(Pi) ✅ · 2단계(라이다) ✅ · 3단계(UGV02 혼자 전원·웹 패널 주행) ✅. 다음: 4단계 UGV02↔Pi. ← 새 대화는 여기부터 읽기
+## 지금 (2026-10-29 새벽) — 실물 1~4단계 ✅ + 조립 완료(배터리 전원으로 Pi·라이다 동작). 다음: Day-1 2·3·6·7, 브리지 v1 파싱. ← 새 대화는 여기부터 읽기
 - 실물 순서 (하나씩 붙이기, 바퀴는 띄우고, Pi는 처음엔 27W 어댑터 전원만):
   1) ✅ 10-28 Pi: Active Cooler(팬 동작 확인) · SSH · `dev` clone · `setup_pi.sh` 완료 · dialout · `ros2 pkg list | grep scr_` 4개
      막힌 3가지(OUI 필터 누락 / cloud-init instance-id·캐시 / apt noble-updates 없음) → `docs/debugging/002-pi-first-boot.md`
@@ -46,7 +46,13 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
      **방향: OLED 화면 쪽 = 뒤(엉덩이)** (웹 ▲ 기준) → URDF·라이다 장착 방향의 기준. 회전 부호(◀ = 반시계?)는 아직 기록 안 함 → 4단계에서 T:13으로.
      생각보다 빠르고 힘이 셈 → 내 코드에선 속도 상한을 낮게 시작 (브리지/Nav2 max vel).
      공식 위키 http://www.waveshare.com/wiki/UGV02 — 거꾸로 넣은 셀로 충전 금지(폭발), 10V 아래면 충전, 보호회로 없는 셀.
-  4) UGV02↔Pi (USB 먼저) → 포트 → T:1001 피드백 → 브리지로 살짝
+  4) ✅ 10-29 UGV02↔Pi: **GPIO UART `/dev/ttyAMA0`** (USB 아님). 연결 = 차체 40핀(암) → Jetson Nano Adapter (B) → 무지개 10핀 F-F → Pi GPIO 1~10.
+     Pi 설정: `serial-getty@ttyAMA0` mask, cmdline.txt 에서 `console=serial0,115200` 제거(백업 cmdline.txt.bak-uart) → setup_pi.sh 5b.
+     **Pi 전원도 이 케이블로 UGV02 배터리에서 받음 → 27W 어댑터 동시 연결 절대 금지.** 끌 때: Pi `sudo poweroff` 먼저 → UGV02 전원.
+     피드백(T:1001) 기본 ~20Hz 스트림 → `docs/ugv02-protocol.md` "Real feedback". 어댑터 방향 180° 틀리면 5V가 TX/RX로 감 — 검은선=GND 위치로 확인.
+  4.5) ✅ 10-29 조립: 마운트 판(날개 아래로) 아래에 Pi 매달기(M2.5 황동 스페이서), 판은 차체 창의 긴 황동 스페이서 3개로 받침(어댑터 때문에 4번째 불가).
+     라이다는 판 위, **16248(M2.5×8+3, 수나사 3mm) 스페이서 + 15685(KM2.5×8)** 로 고정 — C1 바닥 나사 깊이 ≤4mm(데이터시트). 19024(+6)·15685 직결은 초과.
+     라이다 케이블은 판 날개 밑으로 묶어 바퀴에서 뗌, Pi USB2 아래 칸. 배터리 전원에서 `throttled=0x0`, `/scan` 10.0 Hz ✅ (800mA 기동 문제 없음).
   5) 체크리스트: `docs/ugv02-protocol.md` Day-1 1~8 (피드백 형식, 좌회전 부호, 3 s 정지, 충전, 포트, URDF 실측, 라이다 방향, 라이다 드라이버)
 - Pi 접속: Mac에서 `ssh jasper@scr-pi.local` (avahi 설치됨). 안 되면 핑 스캔 후 `arp -a | grep -i 98:fe:54` (이 Pi의 OUI).
   sudo는 비밀번호 필요(user-data `sudo: null`). 긴 작업은 `tmux new -s <이름>` 안에서 (SSH 끊겨도 계속).

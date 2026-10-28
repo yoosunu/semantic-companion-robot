@@ -82,6 +82,14 @@ step "5) 시리얼 권한 (UGV02, 라이다)"
 if id -nG "$USER" | grep -qw dialout; then echo "이미 dialout 그룹"; else
   sudo usermod -aG dialout "$USER"; echo "dialout 추가 → 다시 로그인해야 적용"; fi
 
+step "5b) GPIO UART (UGV02 = /dev/ttyAMA0, 10-29)"
+sudo systemctl mask serial-getty@ttyAMA0.service
+CMD=/boot/firmware/cmdline.txt
+if grep -q 'console=serial0,115200' "$CMD"; then
+  sudo cp "$CMD" "$CMD.bak-uart"
+  sudo sed -i 's/console=serial0,115200 *//' "$CMD"; echo "console=serial0 제거 → 재부팅 필요"
+else echo "이미 serial 콘솔 없음"; fi
+
 step "6) 작업 공간 ~/scr_ws (src = repo/src 링크) 빌드"
 git -C "$REPO" submodule update --init --recursive   # 항상 (새로 추가된 submodule 도 받게)
 mkdir -p "$WS"

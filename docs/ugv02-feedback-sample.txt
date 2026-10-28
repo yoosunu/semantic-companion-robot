@@ -1,0 +1,8 @@
+# UGV02 raw feedback on /dev/ttyAMA0 @115200 — 2026-10-29 01:56 KST
+# Setup: Pi 5 powered from UGV02 via 40PIN + Jetson Nano Adapter (B) + 10-pin cable. Wheels still, robot on desk, charger unplugged.
+# Sent {"T":130} once; stream arrived continuously: 41 lines in 2.0 s (~20 Hz), each terminated by \r\n. 5 of 41 lines kept below.
+{"T":1001,"L":0,"R":0,"ax":12,"ay":-248,"az":8568,"gx":14,"gy":1,"gz":-5,"mx":16,"my":-75,"mz":549,"odl":0,"odr":0,"v":1122}
+{"T":1001,"L":0,"R":0,"ax":30,"ay":-248,"az":8570,"gx":13,"gy":7,"gz":-6,"mx":19,"my":-84,"mz":560,"odl":0,"odr":0,"v":1122}
+{"T":1001,"L":0,"R":0,"ax":4,"ay":-226,"az":8628,"gx":17,"gy":1,"gz":-3,"mx":22,"my":-82,"mz":548,"odl":0,"odr":0,"v":1122}
+{"T":1001,"L":0,"R":0,"ax":-52,"ay":-280,"az":8492,"gx":9,"gy":2,"gz":-16,"mx":3,"my":-75,"mz":559,"odl":0,"odr":0,"v":1122}
+{"T":1001,"L":0,"R":0,"ax":48,"ay":-266,"az":8582,"gx":9,"gy":9,"gz":-6,"mx":16,"my":-73,"mz":552,"odl":0,"odr":0,"v":1122}
