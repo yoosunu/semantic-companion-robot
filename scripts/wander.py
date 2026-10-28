@@ -22,13 +22,15 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
 from geometry_msgs.msg import TwistStamped
 from sensor_msgs.msg import LaserScan
 
 FWD_SPEED = 0.08      # m/s  전진 (느리게: 라이다 10 Hz → 한 스캔에 0.8 cm 이동)
 TURN_SPEED = 0.4      # rad/s 제자리 회전 (한 바퀴 ~16 s)
-STOP_DIST = 0.40      # m  앞(±30°)에 이보다 가까운 게 있으면 회전 시작
-CLEAR_DIST = 0.65     # m  회전하다 앞이 이만큼 비면 다시 전진
+STOP_DIST = 0.55      # m  앞(±30°)에 이보다 가까우면 회전 시작 (10-29: 0.40 → 사무용 의자 바닥 다리(라이다 아래)를 못 보고 기둥만 봐서 부딪힘 → 0.55)
+CLEAR_DIST = 0.85     # m  회전하다 앞이 이만큼 비면 다시 전진
+MIN_TURN = 1.5        # s  한 번 돌기 시작하면 최소 이만큼은 돈다 (가는 다리가 보였다 안 보였다 해서 떨던 것 방지)
 SIDE_DIST = 0.22      # m  옆(±30~80°)이 이보다 가까우면 그쪽에서 살짝 비켜감
 MIN_VALID = 0.12      # m  이보다 가까운 값은 자기 몸/노이즈로 보고 무시
 SCAN_TIMEOUT = 0.5    # s  스캔이 이만큼 안 오면 정지
@@ -45,6 +47,7 @@ class Wander(Node):
         self.scan = None
         self.scan_time = 0.0
         self.turning = 0          # 0 = 전진 모드, +1 왼쪽 회전, -1 오른쪽 회전
+        self.turn_start = 0.0
         self.last_save = time.time()
         self.create_timer(0.1, self.tick)   # 10 Hz 제어
 
@@ -84,7 +87,7 @@ class Wander(Node):
         right = self.sector_min(-d80, -d30)
 
         if self.turning:
-            if front > CLEAR_DIST:
+            if front > CLEAR_DIST and time.time() - self.turn_start > MIN_TURN:
                 self.turning = 0
             else:
                 self.send(0.0, self.turning * TURN_SPEED)
@@ -94,6 +97,7 @@ class Wander(Node):
                 wide_l = self.sector_min(d30, math.radians(120))
                 wide_r = self.sector_min(-math.radians(120), -d30)
                 self.turning = 1 if wide_l >= wide_r else -1
+                self.turn_start = time.time()
                 self.get_logger().info(f"막힘 front={front:.2f} m → {'왼쪽' if self.turning > 0 else '오른쪽'} 회전")
                 self.send(0.0, self.turning * TURN_SPEED)
             else:
@@ -152,7 +156,8 @@ def main():
     ap.add_argument("--check", action="store_true", help="움직이지 않고 가장 가까운 물체의 각도만 출력 (라이다 방향 확인)")
     a = ap.parse_args()
 
-    rclpy.init()
+    # Ctrl+C 를 rclpy 가 가로채면 context 가 먼저 죽어 정지 명령을 못 보냄 (10-29 겪음) → 우리가 직접 처리
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = Wander(a.laser_yaw, a.name, a.save_every)
     if a.check:
         check(node)
