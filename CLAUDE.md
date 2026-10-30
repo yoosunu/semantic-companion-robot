@@ -54,6 +54,14 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
      라이다는 판 위, **16248(M2.5×8+3, 수나사 3mm) 스페이서 + 15685(KM2.5×8)** 로 고정 — C1 바닥 나사 깊이 ≤4mm(데이터시트). 19024(+6)·15685 직결은 초과.
      라이다 케이블은 판 날개 밑으로 묶어 바퀴에서 뗌, Pi USB2 아래 칸. 배터리 전원에서 `throttled=0x0`, `/scan` 10.0 Hz ✅ (800mA 기동 문제 없음).
   5) 체크리스트: `docs/ugv02-protocol.md` Day-1 1~8 (피드백 형식, 좌회전 부호, 3 s 정지, 충전, 포트, URDF 실측, 라이다 방향, 라이다 드라이버)
+- 10-29 05시 첫 실물 SLAM 맛보기: Pi 에서 `nohup` 으로 robot.launch.py + `slam_toolbox online_async_launch.py`, `scripts/wander.py --laser-yaw 3.1416` (혼자 헤매기, 1분마다 ~/maps 저장).
+  라이다 방향 실측(`wander.py --check`): 로봇 앞 = 라이다 180°, 좌우 정상 → URDF `laser_yaw=${pi}` (XML 주석에 `--` 쓰면 xacro 깨짐 — 겪음).
+  1차: 사무용 의자 바닥 다리(라이다 높이 아래) 못 봄 → STOP 0.55 m. 2차: ~6.5분 돌다 SSH 끊김(Operation timed out) → 원인 미확인(배터리 vs Wi-Fi: Pi 가 금속 판 아래).
+  지도: Pi `~/maps/room_try1`, `~/maps/room_1029_0529` (.pgm/.yaml). 다음날 확인: `journalctl -b -1 | tail -50`, 전압(피드백 v), 지도 Mac 으로 scp.
+  TODO: 실물용 `robot` 명령(지금은 nohup 수동), wander → Nav2+explore.
+  결과(room_1029_0529): 방 윤곽은 잡혔지만 **같은 벽이 여러 각도로 겹침 = 회전(yaw) 누적 오차**. 원인 추정: track_width 0.160(TB3 값, UGV02 미보정·스키드 미끄러짐), L/R 단위 미확인, wander 의 잦은 제자리 회전.
+  다음: odom 측정(360° 회전 → track_width, 1 m 직진 → 단위) → 필요하면 브리지 yaw 를 IMU gz 로 → 같은 방 재시도 비교.
+  배터리: 보호회로 없는 셀 → 자는 동안 충전 안 함(Jasper 결정), 깨어 있을 때 충전.
 - Pi 접속: Mac에서 `ssh jasper@scr-pi.local` (avahi 설치됨). 안 되면 핑 스캔 후 `arp -a | grep -i 98:fe:54` (이 Pi의 OUI).
   sudo는 비밀번호 필요(user-data `sudo: null`). 긴 작업은 `tmux new -s <이름>` 안에서 (SSH 끊겨도 계속).
   화면 없음(micro-HDMI 케이블 없음, 랜선 어려움) → Pi 안 로그가 필요하면: Mac `sudo dd if=/dev/rdiskNs2 ... count=2048` + `debugfs -c` (002 참고).
