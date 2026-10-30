@@ -68,3 +68,10 @@ Raw sample: `docs/ugv02-feedback-sample.txt`. Link: Pi 5 `/dev/ttyAMA0` @115200 
 6. **Measure for the URDF** (`src/scr_description/urdf/ugv02.urdf.xacro`, lines marked ★): wheel radius, wheel width, left↔right wheel center distance, front↔rear wheel distance, LiDAR position (front/back, left/right from body center) and height above the wheel axles.
 7. **LiDAR direction** (do after mounting): put a box 50 cm in front of the robot → RViz `/scan` (Fixed Frame `base_link`). Box drawn behind → set `laser_yaw` to `${pi}`.
 8. **LiDAR driver**: ✅ 10-28. apt `rplidar_ros` 2.1.0 (SDK 1.12): reads S/N·health but `Cannot start scan: 80008002` → **Slamtec `sllidar_ros2`** (SDK 2.1.0, submodule `src/sllidar_ros2`): Standard mode, 5 kHz, `/scan` 10.0 Hz (std 1 ms), 720 beams (0.5°), angle −180..180°. CP210x on `/dev/ttyUSB0`. Note: the C1 outer cap does not spin (only the inside), motor sound only. 10-29: mounted, powered from the UGV02 battery via the Pi → still 10.0 Hz, `throttled=0x0`.
+
+## Known sensor limits (real robot)
+- 10-31: **LiDAR scan plane = 19.5 cm above the floor** (one thin horizontal plane, 0.5° steps, 10 Hz). Anything below/above that plane is invisible:
+  office-chair star base (also black/chrome → weak returns), low thresholds. Thin legs far away can fall between beams (2 m → ~1.7 cm gap).
+  Symptom: one object missing or a few dots, walls clean. (Different from yaw drift = whole walls duplicated at angles.)
+  Mitigation later: camera (iPhone) detections into the costmap, cheap low sensors (ToF/bumper), or Nav2 keepout zones.
+

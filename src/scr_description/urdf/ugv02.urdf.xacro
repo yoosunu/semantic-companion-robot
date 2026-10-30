@@ -14,9 +14,9 @@
   <xacro:property name="length"        value="0.252"/>  <!-- 앞뒤 길이 (스펙) -->
   <xacro:property name="width"         value="0.230"/>  <!-- 좌우 폭, 바퀴 포함 (스펙) -->
   <xacro:property name="height"        value="0.094"/>  <!-- 바닥 ~ 차체 윗면 (스펙) -->
-  <xacro:property name="wheel_radius"  value="0.040"/>  <!-- ★ 바퀴 반지름 -->
+  <xacro:property name="wheel_radius"  value="0.0375"/> <!-- 실측 10-31: 지름 7.5 cm -->
   <xacro:property name="wheel_width"   value="0.035"/>  <!-- ★ 바퀴 폭 -->
-  <xacro:property name="track_width"   value="0.160"/>  <!-- ★ 좌우 바퀴 중심 간격. 브리지 track_width 파라미터와 같은 뜻 (odom 보정으로 실제 유효값은 따로 구함) -->
+  <xacro:property name="track_width"   value="0.170"/>  <!-- 실측 10-31: 좌우 가운데 바퀴 중심 간격 17 cm. 브리지 track_width 파라미터와 같은 뜻 (odom 보정으로 실제 유효값은 따로 구함) -->
   <xacro:property name="wheel_base"    value="0.170"/>  <!-- ★ 맨 앞 바퀴 ~ 맨 뒤 바퀴 중심 거리 -->
   <xacro:property name="body_width"    value="${width - 2 * wheel_width}"/>
   <xacro:property name="body_height"   value="${height - wheel_radius}"/>
@@ -24,7 +24,8 @@
   <!-- 라이다 (RPLIDAR C1): 차체 중심(base_link 원점) 기준 위치 -->
   <xacro:property name="laser_x"   value="0.0"/>   <!-- ★ 앞(+)/뒤(-) -->
   <xacro:property name="laser_y"   value="0.0"/>   <!-- ★ 왼(+)/오른(-) -->
-  <xacro:property name="laser_z"   value="0.090"/> <!-- ★ base_link 원점(바퀴 축 높이)에서 라이다 스캔 면까지 높이 -->
+  <xacro:property name="laser_scan_height" value="0.195"/> <!-- 실측 10-31: 바닥 ~ 라이다 창 가운데 19.5 cm. 이 높이 아래 물체(의자 다리 등)는 라이다가 못 봄 -->
+  <xacro:property name="laser_z"   value="${laser_scan_height - wheel_radius}"/> <!-- base_link 원점(바퀴 축 높이) 기준. wheel_radius 가 ★ 라 이 값도 바퀴 실측 후 확정 -->
   <xacro:property name="laser_yaw" value="${pi}"/> <!-- ✅ 10-29 실측: 로봇 앞 물체가 라이다 +178° 로 찍힘 → 0°가 로봇 뒤쪽 → pi (wander.py check) -->
 
   <!-- ===== 부품 ===== -->

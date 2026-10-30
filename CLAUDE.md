@@ -33,6 +33,14 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-10-31 새벽) — odom 보정 1차 완료: 회전은 자이로, 거리는 odl/odr(cm). track_width 0.40 으로 실물 지도 벽 겹침 해소(3분). ← 새 대화는 여기부터
+- 근거·숫자: `docs/calibration/odom-2026-10-31.md` (라이다 정답 측정 도구 `scripts/lidar_angle.py`, 단위 측정 `scripts/odom_probe.py`)
+- 다음: ① 브리지 yaw 를 자이로로 (gz ÷ 16.4 °/s, 정지 시 바이어스 재측정, v ÷ 100, odl/odr cm) — Jasper 코드
+  ② 완충(Pi 끄고 충전) 후 같은 자리·같은 시간 3종 지도 비교 (0.16 / 0.40 / 자이로) ③ 배터리 실사용 시간 측정 (자동 충전 기준)
+- 실물 실행(지금은 수동): `tmux new -d -s robot "bash -ic 'ros2 launch scr_bringup robot.launch.py ugv_port:=/dev/ttyAMA0 track_width:=0.40; exec bash'"`
+  → `tmux new -d -s slam "bash -ic 'ros2 launch slam_toolbox online_async_launch.py; exec bash'"` → wander 도 같은 방식. 끄기 `tmux send-keys -t <이름> C-c`
+- Mac 으로 지도 가져오기: `scp 'jasper@scr-pi.local:~/maps/room_10*' ~/Projects/semantic-companion-robot/logs/maps/` (원격 {} 묶음 표기는 안 됨)
+
 ## 지금 (2026-10-29 새벽) — 실물 1~4단계 ✅ + 조립 완료(배터리 전원으로 Pi·라이다 동작). 다음: Day-1 2·3·6·7, 브리지 v1 파싱. ← 새 대화는 여기부터 읽기
 - 실물 순서 (하나씩 붙이기, 바퀴는 띄우고, Pi는 처음엔 27W 어댑터 전원만):
   1) ✅ 10-28 Pi: Active Cooler(팬 동작 확인) · SSH · `dev` clone · `setup_pi.sh` 완료 · dialout · `ros2 pkg list | grep scr_` 4개
@@ -74,6 +82,8 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 다음 내 노드: task_manager (Python 결정) — 설계 v0 `docs/design/task_manager.md`. 실물 Nav2가 돈 다음.
 - 진행 방식: Jasper가 말하면 먼저 듣고 방향을 정한 뒤 진행. 명령은 [Mac]/[VM]/[Pi] 표시, **한 번에 한 동작씩**(긴 목록 금지 — 중간에 질문할 수 있게).
   물리 작업은 영상 공유가 없으므로 위치·방향·확인 방법까지 세세하게. 배선은 전원 넣기 전 사진으로 확인.
+  **tmux 는 안에 들어가게 하지 말 것**: 붙여넣은 다음 줄이 사라지고, 나올 때 꺼지는 일이 반복됨 → 항상 한 줄 `tmux new -d -s <이름> "bash -ic '<명령>; exec bash'"`,
+  상태 확인은 `tmux capture-pane -pt <이름> | tail -20`. (Pi Wi-Fi 절전으로 첫 SSH/scp 타임아웃 가능 → ping 후 재시도, TODO: setup_pi.sh 에서 절전 끄기)
 
 ## 현재 상태 (2026-10-14) — 시뮬 v0.1 통과, 브리지 v0 통과. 전체 계획·일정·목표 Lv: `docs/roadmap.md`
 - 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
