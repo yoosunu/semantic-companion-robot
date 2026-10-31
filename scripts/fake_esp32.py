@@ -10,7 +10,7 @@ Mimics what docs/ugv02-protocol.md says the real firmware does:
   - no movement command for 3 s -> stop (firmware heartbeat)
   - {"T":131,"cmd":1}                 start streaming feedback (OFF by default, like the real board)
   - {"T":142,"cmd":<ms>}              feedback period (default 50 ms)
-  - feedback line: {"T":1001,"L":<m/s>,"R":<m/s>,"r":0,"p":0,"v":<V>}   (format = [가정], see protocol doc)
+  - feedback line: real UGV02 format {"T":1001,"L","R","ax..gz","odl","odr","v"} (see protocol doc "Real feedback")
     L/R come from Gazebo's measured motion (/sim/odom), not from the command -> slip/lag show up like real.
     v: fake battery, 12.3 V draining slowly (faster while moving).
 Prints every command change, so you can see exactly what the bridge sent (debug layer by layer).
@@ -19,6 +19,8 @@ Run via `robot up` (scripts/robot). Needs: sudo apt install python3-serial socat
 """
 import argparse
 import json
+import math
+import random
 import time
 
 import rclpy
@@ -29,6 +31,7 @@ from rclpy.node import Node
 
 WHEEL_LIMIT = 0.5        # m/s per wheel (UGV02 wiki)
 TRACK_WIDTH = 0.160      # m, TB3 burger wheel separation (stand-in for UGV02)
+GYRO_BIAS = -15          # raw gz at rest, like the real board (10-31: −14.8 … −15.0)
 FIRMWARE_TIMEOUT = 3.0   # s (UGV02 wiki)
 BATTERY_START = 12.3     # V, full 3S pack
 
@@ -50,6 +53,8 @@ class FakeEsp32(Node):
         self.next_feedback = 0.0
         self.meas_v = 0.0          # measured by Gazebo
         self.meas_w = 0.0
+        self.odl = 0.0           # cumulative wheel distance, m (sent as cm)
+        self.odr = 0.0
         self.battery = BATTERY_START
         self.create_subscription(Odometry, '/sim/odom', self.on_sim_odom, 10)
         self.create_timer(0.02, self.poll_serial)   # 50 Hz
@@ -137,8 +142,16 @@ class FakeEsp32(Node):
         self.battery -= dt * (0.0005 if moving else 0.0001)     # V per second, just for testing
         left = self.meas_v - self.meas_w * TRACK_WIDTH / 2.0
         right = self.meas_v + self.meas_w * TRACK_WIDTH / 2.0
+        # Real UGV02 format (measured 10-29/10-31): odl/odr cumulative cm (int), gz raw (16.4 units = 1 °/s)
+        # with a bias like the real board (−15) + noise, v in centivolts. Gyro = Gazebo's TRUE turn rate
+        # (no slip), wheels = left/right speeds → the sim now has the same "wheels vs gyro" choice as the robot.
+        self.odl += left * dt
+        self.odr += right * dt
+        gz = round(math.degrees(self.meas_w) * 16.4 + GYRO_BIAS + random.gauss(0.0, 2.0))
         line = json.dumps({'T': 1001, 'L': round(left, 4), 'R': round(right, 4),
-                           'r': 0, 'p': 0, 'v': round(self.battery, 2)}, separators=(',', ':'))
+                           'ax': 0, 'ay': 0, 'az': 8500, 'gx': 0, 'gy': 0, 'gz': gz,
+                           'odl': round(self.odl * 100), 'odr': round(self.odr * 100),
+                           'v': round(self.battery * 100)}, separators=(',', ':'))
         self.ser.write((line + '\n').encode())
 
     def drive(self):

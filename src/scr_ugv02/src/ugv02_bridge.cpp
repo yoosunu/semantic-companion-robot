@@ -152,28 +152,74 @@ private:
     }
   }
 
-  // THE CORE OF v1: wheel odometry (dead reckoning).
-  // The ESP32 only reports wheel SPEEDS, never a position → we add up "speed × time" to estimate where we are.
-  // Errors accumulate over time (drift); SLAM later corrects it with map → odom.
+  // v3 (10-31): ODOMETRY = distance from the wheel odometers (odl/odr), heading from the GYRO.
+  // Why: measured on the real robot, the wheels inflate in-place rotation 2.3-2.7x (skid-steer slip),
+  // the gyro is within ±5% → docs/calibration/odom-2026-10-31.md
+  // Plumbing (state, first report, bias bookkeeping) = Claude. The three ★ blanks = Jasper.
   void integrate_odom(const scr_ugv02::Feedback & fb) {
     const rclcpp::Time t = now();
 
-    // First report: nothing to compare with yet → remember the time only.
+    // First report: nothing to compare with yet → remember time and odometer readings only.
     if (last_feedback_time_.nanoseconds() == 0) {
       last_feedback_time_ = t;
+      last_odl_ = fb.odl_m;
+      last_odr_ = fb.odr_m;
       return;
     }
     const double dt = (t - last_feedback_time_).seconds();   // time between this report and the previous one
     last_feedback_time_ = t;
 
-    v_ = (fb.left + fb.right) / 2;              // forward speed of the robot center, m/s
-    w_ = (fb.right - fb.left) / track_width_;   // turn rate, rad/s (+ = left / counter-clockwise)
+    // ① Start-up gyro bias: the robot stands still for the first kBiasWindow seconds after the bridge starts.
+    //    Average gz over that time = what the gyro says when NOT rotating. Until then: no odometry.
+    if (!bias_ready_) {
+      still_sum_ += fb.gz;
+      still_count_ += 1;
+      still_time_ += dt;
+      last_odl_ = fb.odl_m;
+      last_odr_ = fb.odr_m;
+      if (still_time_ >= kBiasWindow) {
+        gyro_bias_ = still_sum_ / still_count_;
+        bias_ready_ = true;
+        RCLCPP_INFO(get_logger(), "gyro bias %.2f (from %d samples, %.1f s) - odometry starts", gyro_bias_, still_count_, still_time_);
+        still_sum_ = 0.0; still_count_ = 0; still_time_ = 0.0;
+      }
+      return;
+    }
 
-    // v is along the robot's nose (base frame); x/y are on the floor (odom frame)
-    // → split v onto the floor axes with the current heading: cos for x, sin for y.
-    x_ += v_ * std::cos(yaw_) * dt;
-    y_ += v_ * std::sin(yaw_) * dt;
+    // ② ★ Jasper: turn rate in rad/s (+ = counter-clockwise), from the gyro.
+    w_ = scr_ugv02::gyro_to_rad_s(fb.gz - gyro_bias_);
     yaw_ += w_ * dt;
+
+    // ③ ★ Jasper: how far the robot CENTER moved since the previous report, in metres.
+    const double d = (fb.odl_m - last_odl_ + fb.odr_m - last_odr_) / 2.0;   // m
+    last_odl_ = fb.odl_m;
+    last_odr_ = fb.odr_m;
+
+    // Distance is along the robot's nose → split onto the floor axes with the current heading.
+    x_ += d * std::cos(yaw_);
+    y_ += d * std::sin(yaw_);
+    v_ = (fb.left + fb.right) / 2;   // /odom velocity field: wheel SPEEDS (smooth; odometer steps are 1 cm)
+
+    // ⑤ ★ Jasper: "really standing still" → only then may the bias be re-measured.
+    //   wheels report exactly 0 at rest; gz at rest jitters about ±2-4 units around the bias (10-31 bias runs)
+    //   → 6 units = 0.37 °/s: rest noise passes, a slow hand turn (1 °/s = 16 units) does not.  [Claude, 10-31: tune while driving]
+    const bool still = std::abs(fb.left) < 1e-3 && std::abs(fb.right) < 1e-3 &&
+                       std::abs(fb.gz - gyro_bias_) < kStillGyroUnits;
+    if (still) {
+      still_sum_ += fb.gz;
+      still_count_ += 1;
+      still_time_ += dt;
+      if (still_time_ >= kBiasWindow) {   // still for the whole window → replace the bias with this average
+        const double new_bias = still_sum_ / still_count_;
+        if (std::abs(new_bias - gyro_bias_) > 0.5) {   // log only real changes (edge, not every 3 s)
+          RCLCPP_INFO(get_logger(), "gyro bias %.2f -> %.2f", gyro_bias_, new_bias);
+        }
+        gyro_bias_ = new_bias;
+        still_sum_ = 0.0; still_count_ = 0; still_time_ = 0.0;
+      }
+    } else {   // moved (or rotated by hand) → start the still window over
+      still_sum_ = 0.0; still_count_ = 0; still_time_ = 0.0;
+    }
   }
 
   // Publish the same pose two ways, with ONE timestamp (same fact → same time):
@@ -247,8 +293,24 @@ private:
   // up: odometry state
   rclcpp::Time last_feedback_time_{0, 0, RCL_ROS_TIME};
   double x_{0.0}, y_{0.0}, yaw_{0.0};   // pose in the odom frame (m, m, rad)
+
+  // gyro bias + odometer state (v3)
+  static constexpr double kBiasWindow = 3.0;   // s, how long "standing still" must last to (re)measure the bias
+  static constexpr double kStillGyroUnits = 6.0; // raw gz units, max |gz - bias| that still counts as "not rotating"
+  bool bias_ready_{false};
+  double gyro_bias_{0.0};                       // raw gz units at rest (real robot ≈ −15)
+  double still_sum_{0.0};                       // sum of gz during the current still window
+  int still_count_{0};
+  double still_time_{0.0};                      // s
+  double last_odl_{0.0}, last_odr_{0.0};        // previous odometer readings, m
   double v_{0.0}, w_{0.0};              // latest speeds (m/s, rad/s), also published in /odom twist
+
+  // bias
+  int start_bias_{0};   // the first feedback line may have a non-zero bias (e.g., 0.01 m/s) → ignore it
+  
 };
+
+
 
 int main(int argc, char ** argv)
 {

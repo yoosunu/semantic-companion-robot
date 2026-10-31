@@ -27,11 +27,14 @@ def snap(name, count=10):
     import rclpy
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import LaserScan
+    from nav_msgs.msg import Odometry
 
     rclpy.init()
     node = rclpy.create_node("lidar_angle")
     scans = []
     node.create_subscription(LaserScan, "scan", lambda m: scans.append(m), qos_profile_sensor_data)
+    odom = []   # 브리지가 켜져 있으면 /odom 방향도 같이 저장 → compare 에서 "브리지가 믿는 회전"과 비교
+    node.create_subscription(Odometry, "odom", lambda m: odom.append(m), 10)
     while len(scans) < count and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=2.0)
         if not scans:
@@ -44,7 +47,12 @@ def snap(name, count=10):
                 and m.range_min < s.ranges[i] < m.range_max]
         med.append(statistics.median(vals) if len(vals) >= count // 2 else None)
     os.makedirs(os.path.dirname(SNAP.format(name)), exist_ok=True)
-    json.dump({"angle_min": m.angle_min, "inc": m.angle_increment, "ranges": med}, open(SNAP.format(name), "w"))
+    yaw = None
+    if odom:
+        q = odom[-1].pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+    json.dump({"angle_min": m.angle_min, "inc": m.angle_increment, "ranges": med, "odom_yaw": yaw},
+              open(SNAP.format(name), "w"))
     valid = sum(r is not None for r in med)
     print(f"저장: {SNAP.format(name)}  ({n}빔 중 유효 {valid}, 간격 {math.degrees(m.angle_increment):.2f}°)")
     node.destroy_node(); rclpy.shutdown()
@@ -69,6 +77,10 @@ def compare():
     d = deg(best[1])
     alt = d + 360 if d < 0 else d - 360
     print(f"실제 회전 (반시계 +): {d:+.1f}°  또는 {alt:+.1f}°  ← 둘 중 자이로 방향·크기와 맞는 쪽 (겹침 오차 중앙값 {best[0] * 100:.1f} cm, 비교 빔 {best[2]})")
+    if b.get("odom_yaw") is not None and a.get("odom_yaw") is not None:
+        o = math.degrees(a["odom_yaw"] - b["odom_yaw"])
+        o = (o + 180) % 360 - 180
+        print(f"브리지 /odom 이 믿는 회전: {o:+.1f}°  또는 {o + 360 if o < 0 else o - 360:+.1f}°  → 라이다와 차이 = odom 회전 오차")
     print("다음 후보:", ", ".join(f"{deg(k):+.1f}° ({s * 100:.1f} cm)" for s, k, _ in scores[1:4]))
     print("→ 오차가 수 cm 이하면 믿을 만함. 360° 넘게 돌았으면 자이로로 바퀴 수를 더할 것")
 
