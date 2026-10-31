@@ -21,7 +21,10 @@ namespace scr_ugv02
 // ---- unit conversions (measured 10-31) ----
 constexpr double kOdoMetersPerUnit = 0.01;    // odl/odr: 1 unit = 1 cm   (60 cm by tape → 61, 64)
 constexpr double kVoltsPerUnit = 0.01;        // v: centivolts            (1150 → 11.50 V)
-constexpr double kGyroUnitsPerDegS = 16.4;    // gx/gy/gz: 16.4 units = 1 °/s (±2000 °/s setting; lidar check ±5%)
+constexpr double kGyroUnitsPerDegS = 15.65;   // gx/gy/gz: 15.65 units = 1 °/s. Datasheet ±2000 °/s says 16.4, but on THIS board
+                                              // bridge v3 vs lidar truth (10-31): +184.3/+175.4, +88.6/+83.0, −91.1/−88.7
+                                              // → always ~4.8% short in both directions = scale, not bias. 16.4 / 1.048 = 15.65
+                                              // → residual +0.3 %, +1.8 %, −2.0 % (= lidar truth precision ±1-2°)
 
 // Raw gyro units (bias already removed!) → rad/s.  + = counter-clockwise for gz.
 inline double gyro_to_rad_s(double raw_minus_bias)
