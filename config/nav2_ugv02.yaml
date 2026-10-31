@@ -1,0 +1,71 @@
+# 실물 UGV02 용 Nav2 설정 — 원본(nav2_burger_sim.yaml) + SLAM 모드(nav2_slam_mode.yaml) 위에 덮어쓴다.
+# scr_bringup/launch/nav.launch.py 가 합쳐서 쓴다. 숫자는 처음이라 "안전하게 느리게"가 원칙 (2026-10-31 초안).
+#
+# 시뮬(my_nav2.yaml)에서 가져온 것: controller = MPPI (docs/decisions/001), 후진 허용
+# 실물이라 바꾼 것: 로봇 모양 25×23 cm 사각형, 속도 상한 낮게, 출발·정지 부드럽게, 방이 좁으니 안전 여유 작게,
+#                    라이다가 자기 몸(케이블 등)을 장애물로 보지 않게 가까운 점 무시
+
+controller_server:
+  ros__parameters:
+    goal_checker:
+      xy_goal_tolerance: 0.15            # [m]   시뮬 0.25 → 방이 좁아서 조금 더 정확하게
+      yaw_goal_tolerance: 0.25           # [rad] 14°
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      motion_model: "DiffDrive"          # 스키드 스티어도 제어 모델은 차동 구동으로 근사
+      time_steps: 30
+      model_dt: 0.1
+      batch_size: 1000                   # Pi 5 계산량 확인 대상 (docs/decisions/001 재검증 기준)
+      vx_max: 0.20                       # [m/s] 10-31 실험: 일정한 명령으로 0.1 약간 덜컥 / 0.2 부드러움 / 0.3 더 부드러움
+                                         #       → 0.15 는 모터가 버거운 저속 구간 → 0.2 (여전히 느림)
+      vx_min: -0.10                      # 후진 허용 (시뮬에서 갇힘 방지로 확인, 10-24)
+      wz_max: 0.8                        # [rad/s]
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
+                "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+
+velocity_smoother:                       # 출발·정지를 부드럽게 (Jasper 10-31: "엑셀 천천히, 브레이크 나눠 밟기")
+  ros__parameters:
+    max_velocity: [0.20, 0.0, 0.8]
+    min_velocity: [-0.10, 0.0, -0.8]
+    max_accel: [0.3, 0.0, 1.0]           # [m/s², -, rad/s²] 0 → 0.2 m/s 까지 약 0.7 s (시뮬 2.5 → 덜컥 출발·헛돎)
+    max_decel: [-0.5, 0.0, -1.5]
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"   # 252×230 mm (+약간), robot_radius 대신
+      inflation_layer:
+        inflation_radius: 0.30           # [m] 시뮬 0.5 → 방이 좁음
+        cost_scaling_factor: 4.0
+      obstacle_layer:
+        scan:
+          obstacle_min_range: 0.18       # [m] 라이다 중심에서 18 cm 안 = 로봇 몸 안 → 무시 (10-28 +23°·10 cm 상시 점)
+          raytrace_min_range: 0.18
+      voxel_layer:
+        scan:
+          obstacle_min_range: 0.18
+          raytrace_min_range: 0.18
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"
+      inflation_layer:
+        inflation_radius: 0.30
+        cost_scaling_factor: 4.0
+      obstacle_layer:
+        scan:
+          obstacle_min_range: 0.18
+          raytrace_min_range: 0.18
+      voxel_layer:
+        scan:
+          obstacle_min_range: 0.18
+          raytrace_min_range: 0.18
+
+collision_monitor:                       # 마지막 안전망: 로봇 바로 앞 상자 안에 점이 생기면 정지/감속
+  ros__parameters:
+    PolygonStop:
+      type: "polygon"
+      points: "[[0.20, 0.15], [0.20, -0.15], [0.14, -0.15], [0.14, 0.15]]"   # 차체 앞 1~7 cm 띠 (몸 안 점은 안 걸리게)
+    PolygonSlow:
+      points: "[[0.35, 0.20], [0.35, -0.20], [0.14, -0.20], [0.14, 0.20]]"   # 앞 1~22 cm → 30% 로 감속
