@@ -15,7 +15,8 @@ controller_server:
     progress_checker:
       movement_time_allowance: 20.0      # [s] 10 → 20: 기어가는 속도에서 제자리 180° 회전이 10초를 넘음 (0.3 rad/s ≈ 10 s)
     goal_checker:
-      xy_goal_tolerance: 0.08            # [m]   11-04 0.15 → 0.08 (오차가 늘 0.13~0.14 = 기준선에 붙음). 시뮬 0.25
+      xy_goal_tolerance: 0.10            # [m]   11-04 0.15 → 0.08 → 0.10. 0.08 은 바닥선(0.05 m/s)으로 앞뒤 맴돌기 (성공 1, 맴돌기 1)
+                                         #       → 하드웨어가 허락하는 정확도. 도킹 마지막 접근은 별도 제어 (지도 좌표 아님)
       yaw_goal_tolerance: 0.25           # [rad] 14°
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
