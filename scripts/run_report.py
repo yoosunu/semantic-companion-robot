@@ -26,7 +26,6 @@ NUM = r"(-?\d+\.?\d*)"
 STOP_ERROR_SEC = 30.0   # 충돌 정지가 이보다 길면 ERROR (logging.md)
 STUCK_SEC = 45.0        # 같은 자리 이보다 오래 → 의심 구간
 STUCK_RADIUS = 0.5      # m
-BRIDGE_GAP_SEC = 5.0    # 브리지 로그가 다른 노드보다 이만큼 먼저 끊기면 의심
 
 
 # ---------------------------------------------------------------- 파일 → 주행 묶기
@@ -215,21 +214,22 @@ class Builder:
 # ---------------------------------------------------------------- 브리지 분석
 def bridge_check(lines, t_end):
     """브리지가 종료 신호 없이 먼저 끊겼는지, 마지막 명령이 0이 아니었는지."""
-    b = [r for r in lines if r[2] == "ugv02_bridge"]
+    # 브리지 파일의 모든 줄 (rclcpp 의 "signal_handler" 줄은 로거 이름이 [rclcpp] 라서 노드 이름으로 거르면 놓침 — 11-04 오탐 3건)
+    b = [r for r in lines if r[4].startswith("ugv02_bridge_")]
     if not b:
         return []
     out = []
     last_t = b[-1][0]
-    shutdown = any("signal_handler" in r[3] or "shutting down" in r[3].lower() for r in b)
+    shutdown = any("signal_handler" in r[3] for r in b)   # 정상 종료(Ctrl+C) 표시. 없으면 크래시·행·SIGHUP(tmux kill)
     last_cmd = None
     for r in b:
-        m = re.search(r'"X":' + NUM + r',"Z":' + NUM, r[3])
+        m = re.search(r'"(?:X|L)":' + NUM + r',"(?:Z|R)":' + NUM, r[3])   # T:13 (X,Z) ~10-31, T:1/T:11 (L,R) 11-03~
         if m:
             last_cmd = (float(m.group(1)), float(m.group(2)))
-    if not shutdown and t_end - last_t > BRIDGE_GAP_SEC:
-        msg = f"브리지 로그가 종료 신호 없이 {t_end - last_t:.0f}초 먼저 끊김"
+    if not shutdown:
+        msg = f"브리지가 정상 종료 표시(signal_handler) 없이 끝남 — 마지막 줄은 종료 {t_end - last_t:.0f}초 전"
         if last_cmd and (abs(last_cmd[0]) > 1e-3 or abs(last_cmd[1]) > 1e-3):
-            msg += f" — 마지막 명령 X={last_cmd[0]}, Z={last_cmd[1]} (0 아님: 펌웨어가 계속 수행했을 수 있음)"
+            msg += f" — 마지막 명령 {last_cmd[0]}, {last_cmd[1]} (0 아님)"
         out.append({"t": round(last_t, 2), "lvl": "ERROR", "src": "bridge", "ev": "died", "msg": msg})
     return out
 
@@ -240,7 +240,7 @@ def moving_summary(lines, t0, t_end, step=10):
     for t, _, node, msg, _ in lines:
         if node != "ugv02_bridge":
             continue
-        m = re.search(r'"X":' + NUM + r',"Z":' + NUM, msg)
+        m = re.search(r'"(?:X|L)":' + NUM + r',"(?:Z|R)":' + NUM, msg)
         if m:
             b = int((t - t0) // step)
             bins[b][1] += 1
