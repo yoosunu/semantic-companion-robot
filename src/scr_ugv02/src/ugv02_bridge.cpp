@@ -455,8 +455,11 @@ private:
   bool stopped_{true};
 
   // v5 PWM control state
-  static constexpr double kXDeadzone = 0.01;        // m/s, below → no forward part (Nav2's tiny corrections)
-  static constexpr double kZDeadzone = 0.03;        // rad/s, below → no turn part
+  // Deadzones = only true noise. 11-04: 0.01 / 0.03 swallowed Nav2's final creep (x −0.007, z −0.01 near the goal)
+  // → PWM 0 → "Failed to make progress" forever. Rule now: if Nav2 asks to move, we move — small asks are snapped
+  // UP to the floor (0.05 m/s / 0.13 rad/s); Nav2 re-plans every 50 ms and corrects any overshoot.
+  static constexpr double kXDeadzone = 0.003;       // m/s, below → no forward part
+  static constexpr double kZDeadzone = 0.01;        // rad/s, below → no turn part
   static constexpr double kPwmDeadzone = 5.0;       // PWM, below → wheel off
   static constexpr double kNoPushBelow = 18.0;      // PWM, below the rolling floor (21) → no breakaway push (arc inner wheel)
   static constexpr double kPushStep = 3.0;          // PWM per 50 ms tick while breaking away (= 60 PWM/s)
