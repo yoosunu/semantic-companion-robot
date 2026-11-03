@@ -1,0 +1,23 @@
+#!/bin/bash
+# [Mac] Pi 의 주행 보고서와 ROS 로그를 가져오고, 가장 최근 보고서를 연다.
+#   robot-pull                                  (alias, ~/.zshrc)
+#   PI_HOST=jasper@192.168.x.x robot-pull       (scr-pi.local 이 안 찾아질 때)
+# 보고서는 Pi 가 주행이 끝날 때 스스로 만든다 (nav.launch.py 종료 시 → run_report.py). 여기선 가져오기만.
+# 가져온 것은 logs/ 아래 → .gitignore 대상 (커밋 안 됨).
+set -euo pipefail
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${PI_HOST:-jasper@scr-pi.local}"
+SSH="ssh -o ConnectTimeout=8"
+
+ping -c 1 -t 3 "${HOST#*@}" >/dev/null 2>&1 || true   # Pi Wi-Fi 절전 깨우기 (첫 접속 타임아웃 방지)
+mkdir -p "$REPO/logs/reports" "$REPO/logs/ros_log"
+rsync -a -e "$SSH" "$HOST:scr_logs/reports/" "$REPO/logs/reports/"
+rsync -a -e "$SSH" --include='*.log' --exclude='*' "$HOST:.ros/log/" "$REPO/logs/ros_log/"
+
+latest=$(ls -t "$REPO"/logs/reports/*.md 2>/dev/null | head -1 || true)
+if [ -n "$latest" ]; then
+  echo "최신 보고서: $latest"
+  open "$latest"
+else
+  echo "보고서 없음 (Pi 의 ~/scr_logs/reports 가 비어 있음)"
+fi

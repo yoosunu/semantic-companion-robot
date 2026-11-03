@@ -13,13 +13,17 @@
 - SLAM 중에 손으로 옮기지 말 것 (옮긴 거리는 odom 이 모름 → 지도 어긋남).
 - Nav2 설정 = repo 의 config/nav2_burger_sim.yaml + nav2_slam_mode.yaml + nav2_ugv02.yaml 을 합친 것
   (합친 결과와 바뀐 값 목록: /tmp/nav2_ugv02_effective.yaml, 켤 때 화면에 [설정] 줄로 출력).
+- 끌 때(Ctrl+C) 주행 보고서가 자동으로 만들어짐 → ~/scr_logs/reports/, ntfy 로 요약 한 줄.
+  (Mac: robot-pull 로 가져오기. 설계: docs/design/logging.md)
 """
 import os
 import subprocess
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction,
+                            RegisterEventHandler, TimerAction)
+from launch.event_handlers import OnShutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -37,6 +41,16 @@ def merged_params():
                        check=True, capture_output=True, text=True)
     print(r.stdout)
     return out
+
+
+def report_after_shutdown(context, *args, **kwargs):
+    """주행이 끝나면 보고서 + 알림. 노드들이 로그를 다 쓸 때까지 8초 기다린 뒤 실행.
+    start_new_session: launch 가 끝나도, tmux 의 Ctrl+C 가 와도 이 작업은 따로 살아서 끝까지 돈다."""
+    cmd = (f"mkdir -p ~/scr_logs/reports; sleep 8; "
+           f"python3 {REPO}/scripts/run_report.py ~/.ros/log --pending --notify --prune 7 "
+           f"--out ~/scr_logs/reports >> ~/scr_logs/report_hook.log 2>&1")
+    subprocess.Popen(["bash", "-c", cmd], start_new_session=True)
+    return []
 
 
 def generate_launch_description():
@@ -61,4 +75,6 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(nav2, "launch", "navigation_launch.py")),
                 launch_arguments={"use_sim_time": "false", "params_file": params, "autostart": "true"}.items()),
         ]),
+
+        RegisterEventHandler(OnShutdown(on_shutdown=[OpaqueFunction(function=report_after_shutdown)])),
     ])

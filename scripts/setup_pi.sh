@@ -107,6 +107,15 @@ LINE_WS='[ -f ~/scr_ws/install/setup.bash ] && source ~/scr_ws/install/setup.bas
 grep -qxF "$LINE_ROS" ~/.bashrc || echo "$LINE_ROS" >> ~/.bashrc
 grep -qxF "$LINE_WS" ~/.bashrc || echo "$LINE_WS" >> ~/.bashrc
 
+step "8) 주행 보고서 — 부팅 때 밀린 것 처리 (docs/design/logging.md)"
+# 평소엔 nav.launch.py 가 끝날 때 만든다. 전원이 갑자기 나가 그게 못 돌았을 때를 위해 부팅 90초 뒤 한 번 더.
+# (90초: Pi 는 시계 배터리가 없어 부팅 직후 시각이 틀릴 수 있음 → 인터넷 시간 받을 때까지 대기)
+mkdir -p ~/scr_logs/reports
+CRON="@reboot sleep 90 && python3 $REPO/scripts/run_report.py \$HOME/.ros/log --pending --notify --prune 7 --out \$HOME/scr_logs/reports >> \$HOME/scr_logs/report_hook.log 2>&1"
+( crontab -l 2>/dev/null | grep -vF 'run_report.py' ; echo "$CRON" ) | crontab -
+echo "crontab: $(crontab -l | grep run_report.py)"
+[ -f ~/.scr.env ] && grep -q '^NTFY_TOPIC=' ~/.scr.env && echo "ntfy 주제 있음" || echo "⚠ ~/.scr.env 에 NTFY_TOPIC 없음 → 알림 없이 보고서만 (설정: docs/design/logging.md)"
+
 step "완료"
 echo "다음: 로그아웃 후 다시 SSH 접속 (dialout 적용) → ros2 pkg list | grep scr_"
 echo "도착 날 체크리스트: docs/ugv02-protocol.md (UART 포트, 피드백 형식, 라이다 /scan)"
