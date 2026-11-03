@@ -239,9 +239,17 @@ private:
 
   // One place for the stop command (used by on_timer and the destructor).
   // stopped_ is set only after a successful write, so a failed write is retried on the next tick.
+  // PWM mode stops with PWM 0 (T:11), NOT T:1: T:1 hands the wheels back to the firmware PID while they still roll,
+  // and its fresh integral brakes so hard the wheels kick BACKWARDS (11-03 hang test: −0.19…−0.38 m/s for 0.2 s).
+  // After PWM 0 the wheels stop in ~0.1 s at crawl speed; if the heartbeat later switches to the PID, it sees
+  // "target 0, speed 0" → output 0 (firmware rule) → no kick.
   void send_stop(const char * reason) {
     char json[64];
-    std::snprintf(json, sizeof(json), "{\"T\":1,\"L\":0.000,\"R\":0.000}");
+    if (drive_mode_ == "pwm") {
+      std::snprintf(json, sizeof(json), "{\"T\":11,\"L\":0,\"R\":0}");
+    } else {
+      std::snprintf(json, sizeof(json), "{\"T\":1,\"L\":0.000,\"R\":0.000}");
+    }
     if (!serial_.write_line(json)) {
       RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
       return;
