@@ -61,10 +61,14 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("ugv_port", description="UGV02 시리얼 포트 (실물: /dev/ttyAMA0)"),
+        # 11-03 기어가기: 브리지가 모터를 직접 제어 (v5). config/nav2_ugv02.yaml 의 저속 상한과 짝.
+        #   drive_mode:=pid 로 예전 방식 (그땐 nav2_ugv02.yaml 속도도 10-31 값으로 되돌려야 덜컹 안 함)
+        DeclareLaunchArgument("drive_mode", default_value="pwm"),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(bringup, "launch", "robot.launch.py")),
-            launch_arguments={"ugv_port": LaunchConfiguration("ugv_port")}.items()),
+            launch_arguments={"ugv_port": LaunchConfiguration("ugv_port"),
+                              "drive_mode": LaunchConfiguration("drive_mode")}.items()),
 
         # 브리지가 자이로 영점(3 s)을 잰 뒤 odom 을 내기 시작 → SLAM·Nav2 는 5 s 뒤에
         TimerAction(period=5.0, actions=[
