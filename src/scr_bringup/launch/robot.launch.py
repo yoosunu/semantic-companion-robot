@@ -34,7 +34,7 @@ def generate_launch_description():
         DeclareLaunchArgument("ugv_port", description="UGV02(ESP32) 시리얼 포트 — 도착 날 확인"),
         DeclareLaunchArgument("lidar_port", default_value="/dev/ttyUSB0", description="RPLIDAR C1 포트"),
         DeclareLaunchArgument("use_lidar", default_value="true"),
-        DeclareLaunchArgument("track_width", default_value="0.160",
+        DeclareLaunchArgument("track_width", default_value="0.170",
                               description="odom 계산용 유효 바퀴 간격 [m] — 회전 보정 후 바꿀 값"),
 
         Node(package="robot_state_publisher", executable="robot_state_publisher",

@@ -12,8 +12,10 @@ Every line is marked **[확인됨]** (stated in the wiki) or **[가정]** (not d
 
 | T | Name | Example | Meaning | |
 |---|---|---|---|---|
-| 13 | ROS control | `{"T":13,"X":0.1,"Z":0.3}` | X = linear m/s, Z = angular rad/s. **We use this.** | [확인됨] |
-| 1 | Wheel speed | `{"T":1,"L":0.5,"R":0.5}` | each wheel m/s, −0.5 … +0.5, closed loop (encoders) | [확인됨] |
+| 1 | Wheel speed | `{"T":1,"L":0.5,"R":0.5}` | each wheel m/s, −0.5 … +0.5, closed loop (encoders). **We use this (bridge v4, 11-03)** — refreshes the heartbeat | [확인됨] |
+| 13 | ROS control | `{"T":13,"X":0.1,"Z":0.3}` | X = linear m/s, Z = angular rad/s. Used until v3. **Does NOT refresh the heartbeat on our firmware** → no auto-stop | [확인됨, 11-03] |
+| 136 | Heartbeat | `{"T":136,"cmd":500}` | ms. No T:1 for this long → firmware stops the wheels by itself. Default 3000, reset on ESP32 reboot → bridge sends at start | [확인됨, 11-03] |
+| 3 | OLED line | `{"T":3,"lineNum":0,"Text":"..."}` | 4 lines (0–3) | [문서, 미시험] |
 | 130 | Feedback once | `{"T":130}` | request one feedback message | [확인됨, 응답 형식 미기재] |
 | 131 | Feedback stream | `{"T":131,"cmd":1}` | 1 = chassis sends feedback continuously, 0 = off (default) | [확인됨] |
 | 142 | Feedback interval | `{"T":142,"cmd":50}` | feedback period (probably ms) | [가정, Waveshare app 사용] |

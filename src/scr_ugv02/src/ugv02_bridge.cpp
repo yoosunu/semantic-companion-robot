@@ -1,13 +1,17 @@
 // ugv02_bridge — translator between ROS 2 and the UGV02 base (JSON lines over a serial cable).
 // Written by Jasper (logic). Boilerplate by Claude: serial_port.hpp, ugv02_protocol.hpp.
 //
-//   down (commands):  /cmd_vel (TwistStamped) ──▶ {"T":13,"X":..,"Z":..}\n ──▶ serial ──▶ UGV02 ESP32
+//   down (commands):  /cmd_vel (TwistStamped) ──▶ {"T":1,"L":..,"R":..}\n ──▶ serial ──▶ UGV02 ESP32
 //   up   (reports):   /odom + TF odom→base_footprint + /battery_state ◀── {"T":1001,"L":..,"R":..,"v":..}\n ◀── ESP32
 //
 // v0  /cmd_vel → T:13 JSON.
 // v2  safety: dead-man (no /cmd_vel for cmd_timeout 0.5 s → stop once) + stop on shutdown.
 //     Limit: if the bridge itself is killed hard (kill -9 / crash) only the firmware 3 s timeout remains
 //     → defense in depth (teleop 0.5 s → bridge 0.5 s → firmware 3 s).
+//     11-03 real test: the "firmware 3 s" did NOT exist for T:13 — one T:13 kept the wheels turning 6 s+
+//     (10-31 living room: bridge died → robot kept going). Firmware source: only T:1/T:11 refresh its heartbeat.
+// v4  drive with T:1 (L/R wheel speeds) + set firmware heartbeat T:136 = 500 ms at start
+//     → ESP32 stops by itself 0.5 s after the bridge goes silent (crash, hang, Pi off). Tested 11-03: stopped < 0.8 s.
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
 //     (distance under-counted). Encoder tick counts would avoid this — check if the real UGV02 offers them.
@@ -47,7 +51,8 @@ public:
     port_ = declare_parameter<std::string>("port", "/tmp/ugv02_bridge");   // real robot: /dev/ttyAMA0
     baud_ = declare_parameter<int>("baud", 115200);
     cmd_timeout_ = declare_parameter<double>("cmd_timeout", 0.5);           // s, dead-man limit
-    track_width_ = declare_parameter<double>("track_width", 0.160);         // m, left↔right wheel distance (TB3 sim; UGV02: calibrate)
+    track_width_ = declare_parameter<double>("track_width", 0.170);         // m, splits /cmd_vel into L/R wheel speeds (UGV02 measured 0.170)
+    heartbeat_ms_ = declare_parameter<int>("heartbeat_ms", 500);             // firmware auto-stop if no T:1 for this long
 
     // A bridge without a port must not pretend to run → stop the program with a clear reason.
     if (!serial_.open(port_, baud_)) {
@@ -58,6 +63,14 @@ public:
 
     // The chassis does NOT report by default. Ask it once to stream T:1001 feedback continuously.
     serial_.write_line(scr_ugv02::make_enable_feedback());
+
+    // v4 safety: firmware heartbeat. If no T:1 speed command for heartbeat_ms, the ESP32 stops the wheels BY ITSELF
+    // → covers what the bridge can't: bridge crash, bridge hang, Pi power loss. (Setting is lost on ESP32 reboot → send every start.)
+    // Only T:1 refreshes the firmware's timer; T:13 does NOT on our firmware (11-03 test: T:13 kept running 6 s) → we drive with T:1.
+    char hb[48];
+    std::snprintf(hb, sizeof(hb), "{\"T\":136,\"cmd\":%d}", heartbeat_ms_);
+    serial_.write_line(hb);
+    RCLCPP_INFO(get_logger(), "firmware heartbeat %d ms (auto-stop if bridge goes silent)", heartbeat_ms_);
 
     // Outputs (up direction).
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", 10);
@@ -88,7 +101,9 @@ private:
 
   // ---- down: commands ----
 
-  // Every /cmd_vel message → one T:13 JSON line. Also records "a command just arrived" for the dead-man.
+  // Every /cmd_vel message → one T:1 JSON line (left/right wheel speed). Also records "a command just arrived" for the dead-man.
+  // Why T:1 and not T:13 (forward + turn): only T:1 refreshes the firmware heartbeat (see constructor).
+  // The split is the same one the firmware did for T:13: L = x - z*track/2, R = x + z*track/2.
   void on_cmd_vel(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
     stopped_ = false;
     last_cmd_vel_time_ = now();
@@ -96,8 +111,11 @@ private:
     const double x = msg->twist.linear.x;    // forward speed, m/s
     const double z = msg->twist.angular.z;   // turn speed, rad/s (+ = left)
 
+    const double left = x - z * track_width_ / 2.0;    // m/s
+    const double right = x + z * track_width_ / 2.0;   // m/s
+
     char json[64];
-    std::snprintf(json, sizeof(json), "{\"T\":13,\"X\":%.3f,\"Z\":%.3f}", x, z);
+    std::snprintf(json, sizeof(json), "{\"T\":1,\"L\":%.3f,\"R\":%.3f}", left, right);
 
     // A single failed write may be temporary → log and keep running (unlike a failed open).
     if (!serial_.write_line(json)) {
@@ -121,7 +139,7 @@ private:
   // stopped_ is set only after a successful write, so a failed write is retried on the next tick.
   void send_stop(const char * reason) {
     char json[64];
-    std::snprintf(json, sizeof(json), "{\"T\":13,\"X\":0.000,\"Z\":0.000}");
+    std::snprintf(json, sizeof(json), "{\"T\":1,\"L\":0.000,\"R\":0.000}");
     if (!serial_.write_line(json)) {
       RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
       return;
@@ -273,7 +291,8 @@ private:
   std::string port_;
   int baud_{115200};
   double cmd_timeout_{0.5};
-  double track_width_{0.160};
+  double track_width_{0.170};
+  int heartbeat_ms_{500};
   std::string odom_frame_{"odom"};
   std::string base_frame_{"base_footprint"};   // root frame of the TB3 URDF
 
