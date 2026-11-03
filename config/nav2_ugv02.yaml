@@ -5,6 +5,7 @@
 # 실물이라 바꾼 것: 로봇 모양 25×23 cm 사각형, 속도 상한 낮게, 출발·정지 부드럽게, 방이 좁으니 안전 여유 작게,
 #                    라이다가 자기 몸(케이블 등)을 장애물로 보지 않게 가까운 점 무시
 
+# 원칙 (Jasper 11-04): "조용하되 정확하게. 빠를 필요는 없다." — 집 안 로봇이지 물류 로봇이 아니다.
 # 11-03 기어가기 모드 (브리지 v5 drive_mode pwm 전제, nav.launch 기본값): 속도를 측정한 바닥선 근처로.
 #   직진 바닥선 0.05 m/s, 제자리 회전 바닥선 0.13 rad/s (docs/calibration/lowspeed-2026-11-03.md)
 #   v4 (PID 모드) 로 돌릴 땐 이 저속에서 덜컹거림 → 예전 값: vx 0.20, wz 0.8 (git 10-31)
@@ -14,7 +15,7 @@ controller_server:
     progress_checker:
       movement_time_allowance: 20.0      # [s] 10 → 20: 기어가는 속도에서 제자리 180° 회전이 10초를 넘음 (0.3 rad/s ≈ 10 s)
     goal_checker:
-      xy_goal_tolerance: 0.15            # [m]   시뮬 0.25 → 방이 좁아서 조금 더 정확하게
+      xy_goal_tolerance: 0.08            # [m]   11-04 0.15 → 0.08 (오차가 늘 0.13~0.14 = 기준선에 붙음). 시뮬 0.25
       yaw_goal_tolerance: 0.25           # [rad] 14°
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -24,20 +25,20 @@ controller_server:
       batch_size: 1000                   # Pi 5 계산량 확인 대상 (docs/decisions/001 재검증 기준)
       vx_max: 0.08                       # [m/s] 11-03 기어가기 (PWM 모드 0.08 = PWM 30, 덜컹 92). 10-31 PID 모드 땐 0.20
       vx_min: -0.05                      # 후진 허용 (시뮬에서 갇힘 방지로 확인, 10-24). 바닥선 0.05
-      wz_max: 0.4                        # [rad/s] 제자리 회전 PWM 40~50 구간 (0.13~0.35 측정). 10-31 땐 0.8
+      wz_max: 0.25                       # [rad/s] 11-04 0.4 → 0.25: 회전 = 바퀴 끌림 = 소음. 180° ≈ 13 s. 10-31 땐 0.8
       critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
                 "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
 
 velocity_smoother:                       # 출발·정지를 부드럽게 (Jasper 10-31: "엑셀 천천히, 브레이크 나눠 밟기")
   ros__parameters:
-    max_velocity: [0.08, 0.0, 0.4]       # 11-03 기어가기 (MPPI 와 같은 상한)
-    min_velocity: [-0.05, 0.0, -0.4]
+    max_velocity: [0.08, 0.0, 0.25]      # 11-03 기어가기 (MPPI 와 같은 상한), 11-04 회전 0.25
+    min_velocity: [-0.05, 0.0, -0.25]
     max_accel: [0.15, 0.0, 0.6]          # [m/s², -, rad/s²] 0 → 0.08 m/s 약 0.5 s (출발 밀기는 브리지가 따로 함)
     max_decel: [-0.3, 0.0, -1.0]
 
 behavior_server:                         # 복구 동작 (spin / backup) 도 기어가기 속도로
   ros__parameters:
-    max_rotational_vel: 0.4              # [rad/s] 원본 1.0 → 빠른 제자리 회전은 소리·덜컹
+    max_rotational_vel: 0.25             # [rad/s] 원본 1.0 → 빠른 제자리 회전은 소리·덜컹 (11-04 0.4 → 0.25)
     min_rotational_vel: 0.15             # 원본 0.4. 제자리 회전 바닥선 0.13 위
     rotational_acc_lim: 1.0
 
