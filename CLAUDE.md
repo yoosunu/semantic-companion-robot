@@ -33,6 +33,24 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-11-04 새벽) — 로그 체계 v0 + 안전(heartbeat) + **기어가기(브리지 v5 PWM)** + Nav2 저속 왕복 4/4. ← 새 대화는 여기부터
+- 원칙 (Jasper): **"조용하되 정확하게. 빠를 필요는 없다."** (집 안 로봇, 물류 로봇 아님)
+- 로그: `docs/design/logging.md` (3층: 사건·심박·블랙박스). nav.launch 종료 시 Pi 가 보고서(`~/scr_logs/reports`) + ntfy 알림,
+  부팅 시 밀린 것(crontab). Mac `robot-pull` → 최신 보고서 열기 (VS Code ⌘⇧V). 비밀값 Pi `~/.scr.env` (NTFY_TOPIC).
+  `scripts/run_report.py` (Nav2 로그 → 시간표). 약점: 주행 중 위치 모름 → 2층 심박이 다음.
+- 안전: 펌웨어 heartbeat 는 **T:1/T:11 만** 갱신 (T:13 은 안 됨 = 10-31 거실 사고 원인) → 브리지 v4 부터 T:1 + `T:136 500ms`.
+  crash/hang 0.5~0.8 s 정지. 회귀 시험 `scripts/failsafe_test.py crash|hang [pwm]` → `docs/debugging/004-...`
+- 기어가기: 펌웨어 PID 는 저속에서 가다서다(덜컹 ~450). 일정 PWM 은 잔잔(PWM 30 = 0.08 m/s, 덜컹 92) → 한계는 하드웨어 아님.
+  브리지 v5 `drive_mode:=pwm` (nav.launch 기본): 직진 표 + 회전(자이로 폐루프) + 부드러운 출발 + v5.2 톡톡 밀기(바닥선 0.05 m/s / 0.13 rad/s 미만).
+  측정 전부 `docs/calibration/lowspeed-2026-11-03.md`. 시험 `scripts/crawl_test.py [이름 일부]`.
+- Nav2 (`config/nav2_ugv02.yaml`): vx 0.08, wz 0.25, 도착 0.08 m. 왕복 0.6 m+180°: 4/4, 오차 0.06~0.08 m, 17~19 s (한 번 110 s:
+  진척 확인 20 s/10 cm 가 톡톡 1 cm 와 충돌) → **PoseProgressChecker 3 cm / 11° 로 바꿈, 아직 미시험** ← 다음 첫 할 일
+  `python3 scripts/shuttle.py --laps 2 --a 0,0,0 --b 0.6,0,180`
+- 소음 1 m: 주행 45~55 dB (회전이 시끄러움 = 스키드 스티어 끌림).
+- 다음 후보: 진척 확인 시험 → 기어가기로 방 탐색(지도 비교) → 심박(2층) → 충돌 감시 후진 막힘(VelocityPolygon) → IMU 턱 감지
+  → 의자 다리 LiDAR 빔 수 실험(0.5/1/2 m) → 유리문 keepout. 미뤄둔 것: 핸드폰(YOLO) 얘기, 충전/도킹(opennav_docking), OLED 표시.
+- tmux: 끄기는 `tmux send-keys -t <이름> C-c` (kill-session 은 브리지가 정지 못 하고 죽음 → 보고서에 bridge.died)
+
 ## 지금 (2026-10-31 밤) — 브리지 v3(자이로) + **실물 Nav2 + 스스로 탐색 성공** = Lv 7 핵심 달성. ← 새 대화는 여기부터
 - 브리지 v3: 회전 = 자이로(15.65 단위/°/s, 시작 3 s 영점 + 정지 3 s 마다 갱신), 거리 = odl/odr(cm), 전압 V. 회전 오차 135 % → 2 % (`docs/calibration/odom-2026-10-31.md`)
 - 실물 Nav2: `ros2 launch scr_bringup nav.launch.py ugv_port:=/dev/ttyAMA0` (로봇+SLAM+Nav2, 설정 `config/nav2_ugv02.yaml`: 0.2 m/s, 부드러운 가속, 몸 18 cm 무시, 충돌 감시 라이다 지연 0.5 s)

@@ -12,7 +12,11 @@
 
 controller_server:
   ros__parameters:
-    progress_checker:
+    progress_checker:                    # "막혔나?" 판단. 11-04: 원본(20 s 에 10 cm)이 톡톡 밀기(1 cm 씩)와 충돌 →
+                                         #   도착 직전 정밀 조정을 "막힘"으로 보고 중단·재시작 반복 (4구간 중 1개 110 s)
+      plugin: "nav2_controller::PoseProgressChecker"   # 위치 + 방향 둘 다 봄 → 톡톡 회전도 진척으로 인정
+      required_movement_radius: 0.03     # [m]   원본 0.1
+      required_movement_angle: 0.2       # [rad] ≈ 11°
       movement_time_allowance: 20.0      # [s] 10 → 20: 기어가는 속도에서 제자리 180° 회전이 10초를 넘음 (0.3 rad/s ≈ 10 s)
     goal_checker:
       xy_goal_tolerance: 0.08            # [m]   11-04 0.15 → 0.08 → 0.10 (둘 다 맴돌기) → 브리지 v5.2 톡톡 밀기 후 다시 0.08
