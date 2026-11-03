@@ -15,8 +15,9 @@
 // v5  drive_mode "pwm": WE control the motors (T:11 PWM) instead of the firmware speed PID — for slow, smooth crawling.
 //     Why: firmware PID measures wheel speed over very short periods → at low speed it reads mostly 0 → over-reacts → stop-go
 //     (ax jitter ~450 at 0.03-0.10 m/s). Constant PWM rolls smoothly (PWM 30: 0.08 m/s, jitter 92). docs/calibration/lowspeed-2026-11-03.md
-//     How: speed → PWM from measured tables (straight / spin blended), gentle start (raise PWM until the wheel moves, then drop),
-//     speeds below the floor are snapped up (0.05 m/s straight, 0.13 rad/s spin). T:11 also refreshes the heartbeat (firmware source).
+//     How: forward PWM from the measured straight table + turn PWM from the spin table, corrected by a slow GYRO loop (v5.1:
+//     arcs drove straight without it); gentle start (raise PWM until the wheel moves, then drop); speeds below the floor are
+//     snapped up (0.05 m/s straight, 0.13 rad/s spin). T:11 also refreshes the heartbeat (firmware source).
 //     drive_mode "pid" = v4 behaviour (T:1, firmware PID).
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
@@ -128,10 +129,8 @@ private:
     const double right = x + z * track_width_ / 2.0;   // m/s
 
     if (drive_mode_ == "pwm") {   // v5: only remember the goal; on_timer turns it into PWM every 50 ms
-      const double turn = std::abs(z) * track_width_ / 2.0;
-      spin_ratio_ = turn / (std::abs(x) + turn + 1e-9);   // 0 = straight, 1 = turning on the spot
-      wheel_l_.target = left;
-      wheel_r_.target = right;
+      cmd_x_ = x;
+      cmd_z_ = z;
       return;
     }
 
@@ -154,6 +153,7 @@ private:
     if (!stopped_ && silent > cmd_timeout_) {
       wheel_l_ = Wheel{};
       wheel_r_ = Wheel{};
+      cmd_x_ = cmd_z_ = 0.0; turn_trim_ = 0.0; turn_trim_dir_ = 0;
       send_stop("cmd_vel timeout");
     }
     if (drive_mode_ == "pwm" && !stopped_) {
@@ -167,7 +167,6 @@ private:
   //   spin    : on-the-spot turn, per-wheel speed = w * track/2 (0.13 / 0.35 / 0.64 rad/s). Skid-steer drags the wheels
   //             sideways → much more PWM for the same wheel speed.
   struct Wheel {
-    double target{0.0};   // m/s, from /cmd_vel
     double meas{0.0};     // m/s, firmware feedback L/R (coarse, but non-zero = "it is turning")
     int dir{0};           // -1, 0, +1 of the current push
     bool rolling{false};  // false = still breaking away from standstill
@@ -188,44 +187,77 @@ private:
     return q.second + (v - q.first) * (q.second - p.second) / (q.first - p.first);
   }
 
-  double feedforward(double speed) const {   // |wheel speed| → PWM, blending straight and spin tables
-    static const std::vector<std::pair<double, double>> kStraight =
+  // v5.1 (11-03): split the command into FORWARD (both wheels) and TURN (difference) instead of per-wheel tables.
+  //   crawl_test: arcs (0.06 m/s, 0.3 rad/s) drove STRAIGHT — a small PWM difference can't beat the sideways scrub of a
+  //   skid-steer. The gyro tells us the real turn rate → a slow loop adds turn PWM until the robot really turns.
+  //   forward PWM = table(|x|)                         (open loop; Nav2 + LiDAR correct position)
+  //   turn PWM    = table(|z|) + trim,  trim += kTurnGain * (z_cmd − z_gyro) * dt   (closed loop on the gyro)
+  //   left = forward − turn,  right = forward + turn
+  static double forward_ff(double v) {   // |x| m/s → PWM (both wheels), 11-03 straight test (held PWM after a push)
+    static const std::vector<std::pair<double, double>> k =
       {{0.050, 21}, {0.070, 27}, {0.080, 30}, {0.138, 40}, {0.180, 50}, {0.244, 60}, {0.340, 80}};
-    static const std::vector<std::pair<double, double>> kSpin =
-      {{0.011, 40}, {0.030, 50}, {0.054, 60}};
-    return (1.0 - spin_ratio_) * lookup(kStraight, speed) + spin_ratio_ * lookup(kSpin, speed);
+    return lookup(k, v);
+  }
+  static double turn_ff(double z, bool on_the_spot) {   // |z| rad/s → PWM difference per wheel
+    static const std::vector<std::pair<double, double>> spin = {{0.13, 40}, {0.35, 50}, {0.64, 60}};   // 11-03 spin test
+    // On the spot the wheels must break sideways friction → spin table (floor 40).
+    // While rolling forward they already move → start lower; the gyro loop adds what is missing.
+    return on_the_spot ? lookup(spin, z) : 40.0 * z;   // 40 PWM per rad/s ≈ slope of the spin table
   }
 
-  void control_wheel(Wheel & w, const rclcpp::Time & t) {
-    if (std::abs(w.target) < kWheelDeadzone) {   // "stop this wheel" (also tiny Nav2 corrections)
+  void control_wheel(Wheel & w, double desired, const rclcpp::Time & t) {   // desired = signed PWM before the push logic
+    if (std::abs(desired) < kPwmDeadzone) {     // nothing worth sending (also tiny Nav2 corrections)
       w.out = 0.0; w.dir = 0; w.rolling = false;
       return;
     }
-    const int dir = w.target > 0 ? 1 : -1;
-    const double ff = feedforward(std::abs(w.target));
+    const int dir = desired > 0 ? 1 : -1;
+    const double mag = std::abs(desired);
+    if (mag < kNoPushBelow) {                    // inner wheel of an arc: too weak to roll alone → just help, never kick
+      w.out = dir * mag; w.dir = dir; w.rolling = false;
+      return;
+    }
     if (dir != w.dir) {                          // new start or reversal → break away again
-      w.dir = dir; w.rolling = false; w.push = ff - kPushStep;
+      w.dir = dir; w.rolling = false; w.push = mag - kPushStep;
     }
     const bool moving = dir * w.meas > 1e-3;     // turning in the direction we push (not the old direction)
     if (moving) {w.last_move = t;}
 
     if (!w.rolling) {
-      if (moving && w.push > ff - kPushStep) {   // it turns → drop to the holding PWM (the "kick" ends here)
+      if (moving && w.push >= mag) {             // it turns → drop to the holding PWM (the "kick" ends here)
         w.rolling = true;
       } else {
-        w.push = std::min(w.push + kPushStep, pwm_max_);   // gentle: raise until it moves, no fixed big kick
+        w.push = std::min(std::max(w.push, mag - kPushStep) + kPushStep, pwm_max_);   // gentle: raise until it moves
       }
-    } else if ((t - w.last_move).seconds() > kStallTime) {   // stuck while rolling (rug edge, slope) → push again
-      w.rolling = false; w.push = ff - kPushStep;
+    } else if ((t - w.last_move).seconds() > kStallTime) {   // stuck while rolling (rug edge) → push again
+      w.rolling = false; w.push = mag - kPushStep;
     }
-    const double mag = w.rolling ? ff : w.push;
-    w.out = dir * std::min(mag, pwm_max_);
+    w.out = dir * std::min(w.rolling ? mag : std::max(w.push, mag), pwm_max_);
   }
 
   void pwm_step() {
     const rclcpp::Time t = now();
-    control_wheel(wheel_l_, t);
-    control_wheel(wheel_r_, t);
+    const double dt = last_pwm_time_.nanoseconds() ? (t - last_pwm_time_).seconds() : 0.05;
+    last_pwm_time_ = t;
+
+    const double x = cmd_x_, z = cmd_z_;
+    const bool go = std::abs(x) >= kXDeadzone;
+    const bool turn = std::abs(z) >= kZDeadzone;
+    const double fwd = go ? (x > 0 ? 1 : -1) * forward_ff(std::abs(x)) : 0.0;
+
+    double dif = 0.0;
+    if (turn) {
+      if (turn_trim_dir_ == 0 || (z > 0) != (turn_trim_dir_ > 0)) {   // new turn → fresh trim
+        turn_trim_ = 0.0; turn_trim_dir_ = z > 0 ? 1 : -1;
+      }
+      turn_trim_ += kTurnGain * (z - w_) * dt * turn_trim_dir_;          // positive trim = turn harder in z's direction
+      turn_trim_ = std::clamp(turn_trim_, -kTurnTrimMax, kTurnTrimMax);
+      dif = turn_trim_dir_ * std::max(0.0, turn_ff(std::abs(z), !go) + turn_trim_);
+    } else {
+      turn_trim_ = 0.0; turn_trim_dir_ = 0;
+    }
+    control_wheel(wheel_l_, fwd - dif, t);
+    control_wheel(wheel_r_, fwd + dif, t);
+
     char json[64];
     std::snprintf(json, sizeof(json), "{\"T\":11,\"L\":%d,\"R\":%d}",
       static_cast<int>(std::lround(wheel_l_.out)), static_cast<int>(std::lround(wheel_r_.out)));
@@ -233,12 +265,11 @@ private:
       RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
       return;
     }
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "pwm: %s  target L %.3f R %.3f  rolling %d%d",
-      json, wheel_l_.target, wheel_r_.target, wheel_l_.rolling, wheel_r_.rolling);
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+      "pwm: %s  cmd x %.3f z %.2f | gyro z %.2f trim %.1f | rolling %d%d",
+      json, x, z, w_, turn_trim_, wheel_l_.rolling, wheel_r_.rolling);
   }
 
-  // One place for the stop command (used by on_timer and the destructor).
-  // stopped_ is set only after a successful write, so a failed write is retried on the next tick.
   // PWM mode stops with PWM 0 (T:11), NOT T:1: T:1 hands the wheels back to the firmware PID while they still roll,
   // and its fresh integral brakes so hard the wheels kick BACKWARDS (11-03 hang test: −0.19…−0.38 m/s for 0.2 s).
   // After PWM 0 the wheels stop in ~0.1 s at crawl speed; if the heartbeat later switches to the PID, it sees
@@ -424,11 +455,19 @@ private:
   bool stopped_{true};
 
   // v5 PWM control state
-  static constexpr double kWheelDeadzone = 0.008;   // m/s, below → wheel off (Nav2's tiny corrections)
+  static constexpr double kXDeadzone = 0.01;        // m/s, below → no forward part (Nav2's tiny corrections)
+  static constexpr double kZDeadzone = 0.03;        // rad/s, below → no turn part
+  static constexpr double kPwmDeadzone = 5.0;       // PWM, below → wheel off
+  static constexpr double kNoPushBelow = 18.0;      // PWM, below the rolling floor (21) → no breakaway push (arc inner wheel)
   static constexpr double kPushStep = 3.0;          // PWM per 50 ms tick while breaking away (= 60 PWM/s)
   static constexpr double kStallTime = 0.5;         // s without wheel motion while "rolling" → push again
+  static constexpr double kTurnGain = 60.0;         // PWM per rad of turn-rate error (0.1 rad/s short → +6 PWM/s)
+  static constexpr double kTurnTrimMax = 40.0;      // PWM, how much the gyro loop may add/remove
   Wheel wheel_l_, wheel_r_;
-  double spin_ratio_{0.0};
+  double cmd_x_{0.0}, cmd_z_{0.0};                  // latest /cmd_vel (m/s, rad/s)
+  double turn_trim_{0.0};                           // PWM, learned by the gyro loop during this turn
+  int turn_trim_dir_{0};
+  rclcpp::Time last_pwm_time_{0, 0, RCL_ROS_TIME};
 
   // up: odometry state
   rclcpp::Time last_feedback_time_{0, 0, RCL_ROS_TIME};

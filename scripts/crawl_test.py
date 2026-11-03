@@ -2,10 +2,12 @@
 """[Pi] 저속 주행 확인 (브리지 v5 PWM 모드). 로봇을 바닥에, 앞뒤로 50 cm 이상 비우고.
 
   터미널 A: ros2 launch scr_bringup robot.launch.py ugv_port:=/dev/ttyAMA0 drive_mode:=pwm use_lidar:=false
-  터미널 B: python3 scripts/crawl_test.py
+  터미널 B: python3 scripts/crawl_test.py            # 전부
+            python3 scripts/crawl_test.py 호 제자리   # 이름에 '호' 또는 '제자리' 가 든 동작만
   각 동작 4초 → 1초 정지. 앞뒤·좌우를 짝지어서 제자리 근처로 돌아옴.
   보는 것: 가다 서다 없이 잔잔한가 / 출발 덜컹 / 회전이 끊기지 않는가. 브리지 창의 "pwm:" 줄 = 실제로 보낸 힘.
 """
+import sys
 import time
 import rclpy
 from geometry_msgs.msg import TwistStamped
@@ -26,7 +28,10 @@ def main():
     time.sleep(1.0)                                   # 브리지와 연결될 시간
     msg = TwistStamped()
     try:
+        keys = sys.argv[1:]
         for name, x, z in STEPS:
+            if keys and not any(k in name for k in keys):
+                continue
             print(f"▶ {name}")
             t0 = time.time()
             while time.time() - t0 < 4.0:
