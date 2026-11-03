@@ -35,13 +35,16 @@ def generate_launch_description():
         DeclareLaunchArgument("lidar_port", default_value="/dev/ttyUSB0", description="RPLIDAR C1 포트"),
         DeclareLaunchArgument("use_lidar", default_value="true"),
         DeclareLaunchArgument("track_width", default_value="0.170",
-                              description="odom 계산용 유효 바퀴 간격 [m] — 회전 보정 후 바꿀 값"),
+                              description="/cmd_vel 을 좌우 바퀴 속도로 나눌 때 쓰는 바퀴 간격 [m] (실측)"),
+        DeclareLaunchArgument("drive_mode", default_value="pid",
+                              description="pid = 펌웨어 속도 제어(T:1) / pwm = 저속용 우리 제어(T:11, v5)"),
 
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"robot_description": description}]),
 
         Node(package="scr_ugv02", executable="ugv02_bridge", output="screen",
-             parameters=[{"port": ugv_port, "baud": 115200, "track_width": track_width}]),
+             parameters=[{"port": ugv_port, "baud": 115200, "track_width": track_width,
+                          "drive_mode": LaunchConfiguration("drive_mode")}]),
 
         # RPLIDAR C1: Slamtec sllidar_ros2 (src/sllidar_ros2 submodule). 10-28 실측: Standard, 5 kHz, 10.0 Hz, 720 beams.
         #   apt rplidar_ros 2.1.0 (SDK 1.12) 는 C1 에서 "Cannot start scan: 80008002" → 사용 안 함

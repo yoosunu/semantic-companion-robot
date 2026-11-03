@@ -12,6 +12,12 @@
 //     (10-31 living room: bridge died → robot kept going). Firmware source: only T:1/T:11 refresh its heartbeat.
 // v4  drive with T:1 (L/R wheel speeds) + set firmware heartbeat T:136 = 500 ms at start
 //     → ESP32 stops by itself 0.5 s after the bridge goes silent (crash, hang, Pi off). Tested 11-03: stopped < 0.8 s.
+// v5  drive_mode "pwm": WE control the motors (T:11 PWM) instead of the firmware speed PID — for slow, smooth crawling.
+//     Why: firmware PID measures wheel speed over very short periods → at low speed it reads mostly 0 → over-reacts → stop-go
+//     (ax jitter ~450 at 0.03-0.10 m/s). Constant PWM rolls smoothly (PWM 30: 0.08 m/s, jitter 92). docs/calibration/lowspeed-2026-11-03.md
+//     How: speed → PWM from measured tables (straight / spin blended), gentle start (raise PWM until the wheel moves, then drop),
+//     speeds below the floor are snapped up (0.05 m/s straight, 0.13 rad/s spin). T:11 also refreshes the heartbeat (firmware source).
+//     drive_mode "pid" = v4 behaviour (T:1, firmware PID).
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
 //     (distance under-counted). Encoder tick counts would avoid this — check if the real UGV02 offers them.
@@ -23,11 +29,13 @@
 //   2. functions    = behavior          (callbacks run by the executor on events / timer ticks)
 //   3. member vars  = the node's memory (shared between callbacks; safe because callbacks run one at a time)
 
-#include <cmath>      // std::cos, std::sin
+#include <algorithm>  // std::min
+#include <cmath>      // std::cos, std::sin, std::lround
 #include <cstdio>     // std::snprintf
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>    // std::pair
 #include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
@@ -53,6 +61,11 @@ public:
     cmd_timeout_ = declare_parameter<double>("cmd_timeout", 0.5);           // s, dead-man limit
     track_width_ = declare_parameter<double>("track_width", 0.170);         // m, splits /cmd_vel into L/R wheel speeds (UGV02 measured 0.170)
     heartbeat_ms_ = declare_parameter<int>("heartbeat_ms", 500);             // firmware auto-stop if no T:1 for this long
+    drive_mode_ = declare_parameter<std::string>("drive_mode", "pid");       // "pid" (T:1, firmware PID) | "pwm" (T:11, our control, v5)
+    pwm_max_ = declare_parameter<double>("pwm_max", 100.0);                  // safety cap for PWM mode (80 ≈ 0.34 m/s)
+    if (drive_mode_ != "pid" && drive_mode_ != "pwm") {
+      throw std::runtime_error("drive_mode must be 'pid' or 'pwm'");
+    }
 
     // A bridge without a port must not pretend to run → stop the program with a clear reason.
     if (!serial_.open(port_, baud_)) {
@@ -88,7 +101,7 @@ public:
     read_timer_ = create_wall_timer(20ms, [this]() {on_read();});
     timer_ = create_wall_timer(50ms, [this]() {on_timer();});
 
-    RCLCPP_INFO(get_logger(), "ready: /cmd_vel -> %s (%d baud)", port_.c_str(), baud_);
+    RCLCPP_INFO(get_logger(), "ready: /cmd_vel -> %s (%d baud), drive_mode=%s", port_.c_str(), baud_, drive_mode_.c_str());
   }
 
   // Runs when the node is destroyed (Ctrl+C → spin returns). Must never throw: send_stop only logs on failure.
@@ -114,6 +127,14 @@ private:
     const double left = x - z * track_width_ / 2.0;    // m/s
     const double right = x + z * track_width_ / 2.0;   // m/s
 
+    if (drive_mode_ == "pwm") {   // v5: only remember the goal; on_timer turns it into PWM every 50 ms
+      const double turn = std::abs(z) * track_width_ / 2.0;
+      spin_ratio_ = turn / (std::abs(x) + turn + 1e-9);   // 0 = straight, 1 = turning on the spot
+      wheel_l_.target = left;
+      wheel_r_.target = right;
+      return;
+    }
+
     char json[64];
     std::snprintf(json, sizeof(json), "{\"T\":1,\"L\":%.3f,\"R\":%.3f}", left, right);
 
@@ -131,8 +152,89 @@ private:
   void on_timer() {
     const double silent = (now() - last_cmd_vel_time_).seconds();
     if (!stopped_ && silent > cmd_timeout_) {
+      wheel_l_ = Wheel{};
+      wheel_r_ = Wheel{};
       send_stop("cmd_vel timeout");
     }
+    if (drive_mode_ == "pwm" && !stopped_) {
+      pwm_step();
+    }
+  }
+
+  // ---- v5: our own motor control (drive_mode "pwm") ----
+  // Measured 11-03 on the living-room floor (docs/calibration/lowspeed-2026-11-03.md). {wheel speed m/s, PWM}
+  //   straight: PWM held after a short push → speed.  Below 0.05 m/s the wheel can't keep rolling → snapped up.
+  //   spin    : on-the-spot turn, per-wheel speed = w * track/2 (0.13 / 0.35 / 0.64 rad/s). Skid-steer drags the wheels
+  //             sideways → much more PWM for the same wheel speed.
+  struct Wheel {
+    double target{0.0};   // m/s, from /cmd_vel
+    double meas{0.0};     // m/s, firmware feedback L/R (coarse, but non-zero = "it is turning")
+    int dir{0};           // -1, 0, +1 of the current push
+    bool rolling{false};  // false = still breaking away from standstill
+    double push{0.0};     // PWM while breaking away (rises each tick)
+    double out{0.0};      // PWM sent (signed)
+    rclcpp::Time last_move{0, 0, RCL_ROS_TIME};
+  };
+
+  static double lookup(const std::vector<std::pair<double, double>> & t, double v) {
+    if (v <= t.front().first) {return t.front().second;}            // floor: slower than we can roll → floor PWM
+    for (size_t i = 1; i < t.size(); ++i) {
+      if (v <= t[i].first) {
+        const double a = (v - t[i - 1].first) / (t[i].first - t[i - 1].first);
+        return t[i - 1].second + a * (t[i].second - t[i - 1].second);
+      }
+    }
+    const auto & p = t[t.size() - 2]; const auto & q = t.back();     // faster than measured → extend last segment
+    return q.second + (v - q.first) * (q.second - p.second) / (q.first - p.first);
+  }
+
+  double feedforward(double speed) const {   // |wheel speed| → PWM, blending straight and spin tables
+    static const std::vector<std::pair<double, double>> kStraight =
+      {{0.050, 21}, {0.070, 27}, {0.080, 30}, {0.138, 40}, {0.180, 50}, {0.244, 60}, {0.340, 80}};
+    static const std::vector<std::pair<double, double>> kSpin =
+      {{0.011, 40}, {0.030, 50}, {0.054, 60}};
+    return (1.0 - spin_ratio_) * lookup(kStraight, speed) + spin_ratio_ * lookup(kSpin, speed);
+  }
+
+  void control_wheel(Wheel & w, const rclcpp::Time & t) {
+    if (std::abs(w.target) < kWheelDeadzone) {   // "stop this wheel" (also tiny Nav2 corrections)
+      w.out = 0.0; w.dir = 0; w.rolling = false;
+      return;
+    }
+    const int dir = w.target > 0 ? 1 : -1;
+    const double ff = feedforward(std::abs(w.target));
+    if (dir != w.dir) {                          // new start or reversal → break away again
+      w.dir = dir; w.rolling = false; w.push = ff - kPushStep;
+    }
+    const bool moving = dir * w.meas > 1e-3;     // turning in the direction we push (not the old direction)
+    if (moving) {w.last_move = t;}
+
+    if (!w.rolling) {
+      if (moving && w.push > ff - kPushStep) {   // it turns → drop to the holding PWM (the "kick" ends here)
+        w.rolling = true;
+      } else {
+        w.push = std::min(w.push + kPushStep, pwm_max_);   // gentle: raise until it moves, no fixed big kick
+      }
+    } else if ((t - w.last_move).seconds() > kStallTime) {   // stuck while rolling (rug edge, slope) → push again
+      w.rolling = false; w.push = ff - kPushStep;
+    }
+    const double mag = w.rolling ? ff : w.push;
+    w.out = dir * std::min(mag, pwm_max_);
+  }
+
+  void pwm_step() {
+    const rclcpp::Time t = now();
+    control_wheel(wheel_l_, t);
+    control_wheel(wheel_r_, t);
+    char json[64];
+    std::snprintf(json, sizeof(json), "{\"T\":11,\"L\":%d,\"R\":%d}",
+      static_cast<int>(std::lround(wheel_l_.out)), static_cast<int>(std::lround(wheel_r_.out)));
+    if (!serial_.write_line(json)) {
+      RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
+      return;
+    }
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "pwm: %s  target L %.3f R %.3f  rolling %d%d",
+      json, wheel_l_.target, wheel_r_.target, wheel_l_.rolling, wheel_r_.rolling);
   }
 
   // One place for the stop command (used by on_timer and the destructor).
@@ -164,6 +266,8 @@ private:
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "failed to parse feedback: %s", line.c_str());
         continue;
       }
+      wheel_l_.meas = fb.left;    // v5 PWM control: "is this wheel turning?"
+      wheel_r_.meas = fb.right;
       integrate_odom(fb);
       publish_odom();
       publish_battery(fb);
@@ -293,6 +397,8 @@ private:
   double cmd_timeout_{0.5};
   double track_width_{0.170};
   int heartbeat_ms_{500};
+  std::string drive_mode_{"pid"};
+  double pwm_max_{100.0};
   std::string odom_frame_{"odom"};
   std::string base_frame_{"base_footprint"};   // root frame of the TB3 URDF
 
@@ -308,6 +414,13 @@ private:
   // down: dead-man state
   rclcpp::Time last_cmd_vel_time_{0, 0, RCL_ROS_TIME};
   bool stopped_{true};
+
+  // v5 PWM control state
+  static constexpr double kWheelDeadzone = 0.008;   // m/s, below → wheel off (Nav2's tiny corrections)
+  static constexpr double kPushStep = 3.0;          // PWM per 50 ms tick while breaking away (= 60 PWM/s)
+  static constexpr double kStallTime = 0.5;         // s without wheel motion while "rolling" → push again
+  Wheel wheel_l_, wheel_r_;
+  double spin_ratio_{0.0};
 
   // up: odometry state
   rclcpp::Time last_feedback_time_{0, 0, RCL_ROS_TIME};

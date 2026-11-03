@@ -26,6 +26,7 @@ T:13(`rosCtrl`)은 갱신 안 함 (ugv_base_general 최신판은 갱신함 → �
 - 효과: 브리지 크래시·행, Pi 전원 차단 모두 0.5 s 내 펌웨어가 스스로 정지
 
 ## 남은 확인
-- [ ] v4 실물: 주행 중 `kill -9` (크래시), `kill -STOP` (행) → 0.5 s 내 정지
+- [x] v4 실물 (11-03, 바퀴 띄움, 0.1 m/s 주행 중): `kill -9` (크래시) → **0.65 s** 정지, `kill -STOP` (행) → **0.65 s** 정지.
+      재현: `python3 scripts/failsafe_test.py crash|hang` (Pi, 바퀴 띄우고, ROS 노드 다 끈 상태)
 - [ ] Nav2 주행 느낌이 v3 과 같은지 (track 0.170 분해)
 - [ ] 브리지 사망 실시간 알림 (지금은 주행 후 보고서의 `bridge.died` 로만 앎)
