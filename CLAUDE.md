@@ -33,6 +33,14 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-10-31 밤) — 브리지 v3(자이로) + **실물 Nav2 + 스스로 탐색 성공** = Lv 7 핵심 달성. ← 새 대화는 여기부터
+- 브리지 v3: 회전 = 자이로(15.65 단위/°/s, 시작 3 s 영점 + 정지 3 s 마다 갱신), 거리 = odl/odr(cm), 전압 V. 회전 오차 135 % → 2 % (`docs/calibration/odom-2026-10-31.md`)
+- 실물 Nav2: `ros2 launch scr_bringup nav.launch.py ugv_port:=/dev/ttyAMA0` (로봇+SLAM+Nav2, 설정 `config/nav2_ugv02.yaml`: 0.2 m/s, 부드러운 가속, 몸 18 cm 무시, 충돌 감시 라이다 지연 0.5 s)
+  덜컥거림 = 충돌 감시가 0.22 s 늦은 라이다를 버림 → `docs/debugging/003-nav2-stop-go-jerk.md`
+- 탐색: `tmux new -d -s explore "bash -ic 'cd ~/semantic-companion-robot && ros2 run explore_lite explore --ros-args --params-file config/explore.yaml -p use_sim_time:=false; exec bash'"` → 73초에 완료
+- tmux: kill-server 직후 new 는 같이 사라질 수 있음 → 나눠서. 로그 셀 땐 `capture-pane -J`
+- 다음 후보: 지도 저장 → 저장 지도에서 위치 찾기(AMCL/SLAM localization), task_manager v0(Python), 1-F VM RViz, IMU 덜컹 감지, 배터리 실사용 시간, 충전(UPS 보드 확인)
+
 ## 지금 (2026-10-31 새벽) — odom 보정 1차 완료: 회전은 자이로, 거리는 odl/odr(cm). track_width 0.40 으로 실물 지도 벽 겹침 해소(3분). ← 새 대화는 여기부터
 - 근거·숫자: `docs/calibration/odom-2026-10-31.md` (라이다 정답 측정 도구 `scripts/lidar_angle.py`, 단위 측정 `scripts/odom_probe.py`)
 - 다음: ① 브리지 yaw 를 자이로로 (gz ÷ 16.4 °/s, 정지 시 바이어스 재측정, v ÷ 100, odl/odr cm) — Jasper 코드
