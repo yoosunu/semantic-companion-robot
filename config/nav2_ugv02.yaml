@@ -19,8 +19,9 @@ controller_server:
       required_movement_angle: 0.2       # [rad] ≈ 11°
       movement_time_allowance: 20.0      # [s] 10 → 20: 기어가는 속도에서 제자리 180° 회전이 10초를 넘음 (0.3 rad/s ≈ 10 s)
     goal_checker:
-      xy_goal_tolerance: 0.08            # [m]   11-04 0.15 → 0.08 → 0.10 (둘 다 맴돌기) → 브리지 v5.2 톡톡 밀기 후 다시 0.08
-                                         #       도킹 마지막 접근은 별도 제어 (지도 좌표 아님)
+      xy_goal_tolerance: 0.10            # [m]   11-04 0.15 → 0.08 → 0.10 (둘 다 맴돌기) → 톡톡 밀기 후 0.08 (4/4 성공, 실제 0.05~0.08,
+                                         #       단 한 구간 69 s: MPPI 가 목표 앞에서 x·z 를 ± 로 깔짝 = 톡톡 52회) → 0.10.
+                                         #       방 안 이동엔 10 cm 충분. 정밀이 필요한 도킹은 별도 접근 제어 (지도 좌표 아님)
       yaw_goal_tolerance: 0.25           # [rad] 14°
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
