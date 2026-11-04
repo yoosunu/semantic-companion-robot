@@ -47,6 +47,14 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   진척 확인 20 s/10 cm 가 톡톡 1 cm 와 충돌) → **PoseProgressChecker 3 cm / 11° 로 바꿈, 아직 미시험** ← 다음 첫 할 일
   `python3 scripts/shuttle.py --laps 2 --a 0,0,0 --b 0.6,0,180`
 - 소음 1 m: 주행 45~55 dB (회전이 시끄러움 = 스키드 스티어 끌림).
+- 내일 계획 (Jasper 11-04): **Waveshare 펌웨어 코드 같이 열어보기** (github waveshareteam/ugv_base_ros ROS_Driver: uart_ctrl.h 명령 분기,
+  movtion_module.h heartBeatCtrl·PID·getLeftSpeed — 오늘 원인 찾은 곳) + 배터리 계획 (UGV02 위키: 보호회로 **없는** 셀 권장, UPS 보드가 보호,
+  2200 mAh+ 4C — 지금 셀 KittenBot 2000 mAh 는 기준 미달) + 카메라 얘기
+- 카메라 구상 (11-04 새벽 대화, 결정 전): 역할 = 의미 붙이기(의자·소파 지도 표시) + 사람 알아보기, 안전은 LiDAR 담당 → 실시간 불필요,
+  LiDAR 가 "뭔가 있다" 할 때만 추론. 후보: Pi 카메라/USB 웹캠 + Pi YOLO (가속기 Hailo 는 나중) / 갤럭시 A51 상시 연결
+  (전원은 Pi USB 금지 → 12V→5V 모듈로 따로, 데이터는 USB 테더링, 배터리 보호 85%) / iPhone 16 은 옵션(의존 금지).
+  AR 대신: 로봇 자체가 AR (SLAM = 추적, TF = 카메라 위치, 지도 = 세계). 거리 = ① 라이다 (정답) ② 바닥 평면 투영(bbox 아래끝 → 바닥 z=0,
+  SimCheong 지형 raycast 와 같은 원리) ③ (가능하면) ARCore/단안 깊이 → 라이다를 정답으로 거리추정 비교 가능.
 - 다음 후보: 진척 확인 시험 → 기어가기로 방 탐색(지도 비교) → 심박(2층) → 충돌 감시 후진 막힘(VelocityPolygon) → IMU 턱 감지
   → 의자 다리 LiDAR 빔 수 실험(0.5/1/2 m) → 유리문 keepout. 미뤄둔 것: 핸드폰(YOLO) 얘기, 충전/도킹(opennav_docking), OLED 표시.
 - tmux: 끄기는 `tmux send-keys -t <이름> C-c` (kill-session 은 브리지가 정지 못 하고 죽음 → 보고서에 bridge.died)

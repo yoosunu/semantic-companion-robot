@@ -25,3 +25,6 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+
+# 개인 이력서·포트폴리오 작업 파일 (비공개, Mac 에만)
+docs/portfolio.md
