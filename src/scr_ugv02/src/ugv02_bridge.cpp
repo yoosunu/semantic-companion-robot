@@ -20,6 +20,9 @@
 //     snapped up (0.05 m/s straight, 0.13 rad/s spin). T:11 also refreshes the heartbeat (firmware source).
 //     drive_mode "pid" = v4 behaviour (T:1, firmware PID).
 // v5.2 TAP: asks slower than the floor (Nav2's final creep) → short pushes whose duty = asked / floor (11-04: hunting fix).
+// v5.3 TAP decides from the AVERAGE ask of the last 0.5 s, not the latest one (11-05 explore: stuck 18 cm from home next to
+//      a wall, MPPI asked x ±0.005 z ±0.02-0.06 flipping sign every tick → every flip became a real tap → back-and-forth
+//      and head-shaking for 80 s). Flipping noise averages to ~0 → rest. A real slow ask keeps its sign → still taps.
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
 //     (distance under-counted). Encoder tick counts would avoid this — check if the real UGV02 offers them.
@@ -155,6 +158,7 @@ private:
       wheel_l_ = Wheel{};
       wheel_r_ = Wheel{};
       cmd_x_ = cmd_z_ = 0.0; turn_trim_ = 0.0; turn_trim_dir_ = 0;
+      tap_t_ = 0.0; tap_sum_x_ = tap_sum_z_ = 0.0; tap_n_ = 0; tap_x_ = tap_z_ = tap_duty_ = 0.0;   // resume = fresh tap
       send_stop("cmd_vel timeout");
     }
     if (drive_mode_ == "pwm" && !stopped_) {
@@ -249,11 +253,11 @@ private:
     // Instead: short pushes. Every kPulsePeriod, push for a fraction of it (= asked speed / floor speed), then rest.
     // Each tap moves ~1 cm (or ~1-2°) → the AVERAGE speed is what Nav2 asked, and Nav2 sees the result before the next tap.
     const double duty = std::max(go ? std::abs(x) / kXFloor : 0.0, turn ? std::abs(z) / kZFloor : 0.0);
-    if ((go || turn) && duty < 1.0) {
-      tap_step(x, z, duty, dt);
+    if (duty < 1.0) {   // includes "nothing asked": zero asks pull the average down too
+      tap_step(x, z, dt);
       return;
     }
-    tap_t_ = 0.0;
+    tap_t_ = 0.0; tap_sum_x_ = tap_sum_z_ = 0.0; tap_n_ = 0; tap_x_ = tap_z_ = tap_duty_ = 0.0;
     const double fwd = go ? (x > 0 ? 1 : -1) * forward_ff(std::abs(x)) : 0.0;
 
     double dif = 0.0;
@@ -282,16 +286,25 @@ private:
       json, x, z, w_, turn_trim_, wheel_l_.rolling, wheel_r_.rolling);
   }
 
-  void tap_step(double x, double z, double duty, double dt) {
+  void tap_step(double x, double z, double dt) {
+    // Collect asks during this cycle; at the cycle start, the NEXT tap is decided from the previous cycle's average.
+    // Cost: a slow ask starts moving 0.5 s later — fine ("quiet and accurate, need not be fast").
+    tap_sum_x_ += x; tap_sum_z_ += z; ++tap_n_;
     tap_t_ += dt;
-    if (tap_t_ >= kPulsePeriod) {tap_t_ = 0.0;}
-    const double on = std::max(kPulseMinOn, duty * kPulsePeriod);
+    if (tap_t_ >= kPulsePeriod) {
+      tap_t_ = 0.0;
+      tap_x_ = tap_sum_x_ / tap_n_; tap_z_ = tap_sum_z_ / tap_n_;
+      tap_sum_x_ = tap_sum_z_ = 0.0; tap_n_ = 0;
+      tap_duty_ = std::min(1.0, std::max(std::abs(tap_x_) / kXFloor, std::abs(tap_z_) / kZFloor));
+      if (tap_duty_ < kTapMinDuty) {tap_duty_ = 0.0;}   // undecided controller (or a real stop) → rest, stay quiet
+    }
+    const double on = std::max(kPulseMinOn, tap_duty_ * kPulsePeriod);
     double l = 0.0, r = 0.0;
-    if (tap_t_ < on) {   // push phase: only the bigger of the two asks (forward OR turn), so a tap is one clean motion
-      if (std::abs(x) / kXFloor >= std::abs(z) / kZFloor) {
-        l = r = (x > 0 ? 1 : -1) * kPulseFwdPwm;
+    if (tap_duty_ > 0.0 && tap_t_ < on) {   // push phase: only the bigger of the two asks, so a tap is one clean motion
+      if (std::abs(tap_x_) / kXFloor >= std::abs(tap_z_) / kZFloor) {
+        l = r = (tap_x_ > 0 ? 1 : -1) * kPulseFwdPwm;
       } else {
-        const double d = (z > 0 ? 1 : -1) * kPulseTurnPwm;
+        const double d = (tap_z_ > 0 ? 1 : -1) * kPulseTurnPwm;
         l = -d; r = d;
       }
     }
@@ -306,8 +319,10 @@ private:
       RCLCPP_ERROR(get_logger(), "failed to write to serial port: %s", serial_.error().c_str());
       return;
     }
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "pwm: %s  cmd x %.3f z %.2f | TAP duty %.2f",
-      json, x, z, duty);
+    if (tap_duty_ > 0.0 || std::abs(x) >= kXDeadzone || std::abs(z) >= kZDeadzone) {   // silent while fully stopped
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+        "pwm: %s  cmd x %.3f z %.2f | TAP avg x %.3f z %.2f duty %.2f", json, x, z, tap_x_, tap_z_, tap_duty_);
+    }
   }
 
   // PWM mode stops with PWM 0 (T:11), NOT T:1: T:1 hands the wheels back to the firmware PID while they still roll,
@@ -513,7 +528,11 @@ private:
   static constexpr double kPulseMinOn = 0.10;       // s, shortest push that still moves the wheels
   static constexpr double kPulseFwdPwm = 35.0;      // PWM of a forward/backward tap
   static constexpr double kPulseTurnPwm = 55.0;     // PWM of a turning tap (sideways scrub needs more)
+  static constexpr double kTapMinDuty = 0.2;        // average ask below 20% of the floor → no tap (noise / undecided)
   double tap_t_{0.0};                               // s, position inside the current tap cycle
+  double tap_sum_x_{0.0}, tap_sum_z_{0.0};          // asks collected during this cycle
+  int tap_n_{0};
+  double tap_x_{0.0}, tap_z_{0.0}, tap_duty_{0.0};  // the tap decided at this cycle's start (from the last cycle)
   Wheel wheel_l_, wheel_r_;
   double cmd_x_{0.0}, cmd_z_{0.0};                  // latest /cmd_vel (m/s, rad/s)
   double turn_trim_{0.0};                           // PWM, learned by the gyro loop during this turn

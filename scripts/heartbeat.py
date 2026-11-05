@@ -9,7 +9,7 @@
    "mem_mb":812, "procs":{"slam":9.1, "controller":12.3, ...}}
 
   - v      : 그 사이 /battery_state 평균 (모터가 당길 때 순간 처짐 제외용), v_min: 그 사이 최저
-  - x, y   : map 좌표 (map 이 없으면 odom), 못 찾으면 생략
+  - x, y   : map 좌표 (slam_toolbox /pose 또는 /amcl_pose, 없으면 /odom), 못 찾으면 생략
   - cpu    : 전체 CPU % (코어 4개 합쳐 100%)
   - procs  : 프로세스 묶음별 CPU % (코어 하나 = 100%). SLAM ↔ AMCL 전후 비교용
   - 브리지가 안 떠 있어도 돈다 (v·위치만 빠짐). 배터리 실사용 시간 측정 = 이걸 켜두고 전압 곡선 보기.
@@ -23,14 +23,17 @@ from pathlib import Path
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
-import tf2_ros
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry
 
 GROUPS = [  # (이름, 명령줄에 들어 있는 글자) — 위에서부터 먼저 맞는 것
     ("bridge", "ugv02_bridge"), ("lidar", "sllidar"), ("slam", "slam_toolbox"), ("amcl", "amcl"),
     ("controller", "controller_server"), ("planner", "planner_server"), ("explore", "explore"),
-    ("nav2_other", "bt_navigator"), ("nav2_other", "behavior_server"), ("nav2_other", "smoother"),
-    ("nav2_other", "collision_monitor"), ("nav2_other", "lifecycle_manager"), ("nav2_other", "waypoint_follower"),
-    ("nav2_other", "route_server"), ("nav2_other", "opennav_docking"), ("nav2_other", "map_server"),
+    # 11-05: 묶음 "nav2_other" 가 코어 하나를 거의 다 씀 (85~95%) → 누군지 보려고 하나씩 나눔
+    ("bt_navigator", "bt_navigator"), ("behavior", "behavior_server"), ("velocity_smoother", "velocity_smoother"),
+    ("smoother", "smoother_server"), ("collision_monitor", "collision_monitor"), ("lifecycle", "lifecycle_manager"),
+    ("waypoint", "waypoint_follower"), ("route", "route_server"), ("docking", "opennav_docking"),
+    ("map_server", "map_server"),
     ("tof", "tof_node"), ("heartbeat", "heartbeat.py"), ("ros_cli", "ros2"),
 ]
 TICK = os.sysconf("SC_CLK_TCK")
@@ -80,8 +83,12 @@ class Heartbeat(Node):
         self.period = period
         self.volts = []
         self.create_subscription(BatteryState, "battery_state", lambda m: self.volts.append(m.voltage), 10)
-        self.tf_buf = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buf, self)
+        # 위치: TF 를 통째로 듣던 것(11-05 주행 중 10% CPU) 대신 위치 토픽만. 지도 위치가 있으면 그걸, 없으면 odom.
+        self.poses = {}
+        for topic, frame, typ in (("pose", "map", PoseWithCovarianceStamped),       # slam_toolbox
+                                  ("amcl_pose", "map", PoseWithCovarianceStamped),  # AMCL
+                                  ("odom", "odom", Odometry)):                     # 브리지 (20 Hz)
+            self.create_subscription(typ, topic, lambda m, f=frame: self.poses.__setitem__(f, m.pose.pose.position), 10)
         self.prev_cpu = cpu_total()
         self.prev_procs = proc_times()
         self.prev_t = time.time()
@@ -95,11 +102,9 @@ class Heartbeat(Node):
 
     def pose(self):
         for frame in ("map", "odom"):
-            try:
-                tr = self.tf_buf.lookup_transform(frame, "base_footprint", rclpy.time.Time())
-                return frame, tr.transform.translation.x, tr.transform.translation.y
-            except Exception:
-                continue
+            if frame in self.poses:
+                p = self.poses[frame]
+                return frame, p.x, p.y
         return None
 
     def beat(self):

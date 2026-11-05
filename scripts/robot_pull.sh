@@ -13,6 +13,9 @@ ping -c 1 -t 3 "${HOST#*@}" >/dev/null 2>&1 || true   # Pi Wi-Fi 절전 깨우�
 mkdir -p "$REPO/logs/reports" "$REPO/logs/ros_log"
 rsync -a -e "$SSH" "$HOST:scr_logs/reports/" "$REPO/logs/reports/"
 rsync -a -e "$SSH" --include='*.log' --exclude='*' "$HOST:.ros/log/" "$REPO/logs/ros_log/"
+# 심박(날짜별 heartbeat.jsonl)과 저장한 지도도 같이
+rsync -am -e "$SSH" --include='*/' --include='heartbeat.jsonl' --exclude='*' "$HOST:scr_logs/" "$REPO/logs/scr_logs/"
+rsync -a -e "$SSH" "$HOST:maps/" "$REPO/logs/maps/" 2>/dev/null || true
 
 latest=$(ls -t "$REPO"/logs/reports/*.md 2>/dev/null | head -1 || true)
 if [ -n "$latest" ]; then
