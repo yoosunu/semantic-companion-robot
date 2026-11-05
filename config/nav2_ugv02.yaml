@@ -34,6 +34,10 @@ controller_server:
       wz_max: 0.25                       # [rad/s] 11-04 0.4 → 0.25: 회전 = 바퀴 끌림 = 소음. 180° ≈ 13 s. 10-31 땐 0.8
       critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
                 "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+      CostCritic:
+        consider_footprint: true         # 11-05: 원으로 근사(반지름 = 모서리 17.7 cm)하면 벽 옆 17 cm 는 "부딪힘"으로 봄.
+                                         #   실제 사각형으로 검사 → 벽과 나란히 5 cm 는 OK, 제자리 회전은 모서리가 닿으면 거부 (정확).
+                                         #   대가: 계산량 ↑ (심박으로 controller CPU 확인). 켤 때 "Inconsistent configuration" 경고도 사라짐
 
 velocity_smoother:                       # 출발·정지를 부드럽게 (Jasper 10-31: "엑셀 천천히, 브레이크 나눠 밟기")
   ros__parameters:
@@ -53,32 +57,33 @@ local_costmap:
     ros__parameters:
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"   # 252×230 mm (+약간), robot_radius 대신
       inflation_layer:
-        inflation_radius: 0.30           # [m] 시뮬 0.5 → 방이 좁음
-        cost_scaling_factor: 4.0
+        inflation_radius: 0.25           # [m] 시뮬 0.5 → 0.30 → 11-05 0.25 (벽 붙어 다니기)
+        cost_scaling_factor: 12.0        # 4 → 12: 벽 옆 비용이 빨리 줄어듦. 옆 여유 5 cm 비용 206 → 138, 13 cm 52
+                                         #   (11-05: 벽 옆 17 cm 집 자리 앞에서 MPPI 가 "가라 vs 떨어져라" 로 80 s 버벅)
       obstacle_layer:
         scan:
-          obstacle_min_range: 0.18       # [m] 라이다 중심에서 18 cm 안 = 로봇 몸 안 → 무시 (10-28 +23°·10 cm 상시 점)
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.13       # [m] 라이다 중심에서 13 cm 안 무시 (10-28 +23°·10 cm 상시 점 = 몸).
+          raytrace_min_range: 0.13       #     11-05 0.18 → 0.13: 몸 옆면 12 cm 라 0.18 이면 옆 6 cm 안의 벽이 안 보였음 (벽 붙기 전제)
       voxel_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.13
+          raytrace_min_range: 0.13
 
 global_costmap:
   global_costmap:
     ros__parameters:
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"
       inflation_layer:
-        inflation_radius: 0.30
-        cost_scaling_factor: 4.0
+        inflation_radius: 0.25           # local 과 같게 (11-05)
+        cost_scaling_factor: 12.0
       obstacle_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.13
+          raytrace_min_range: 0.13
       voxel_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.13
+          raytrace_min_range: 0.13
 
 collision_monitor:                       # 마지막 안전망: 로봇 바로 앞 상자 안에 점이 생기면 정지/감속
   ros__parameters:
