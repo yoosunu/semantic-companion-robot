@@ -23,6 +23,7 @@
 // v5.3 TAP decides from the AVERAGE ask of the last 0.5 s, not the latest one (11-05 explore: stuck 18 cm from home next to
 //      a wall, MPPI asked x ±0.005 z ±0.02-0.06 flipping sign every tick → every flip became a real tap → back-and-forth
 //      and head-shaking for 80 s). Flipping noise averages to ~0 → rest. A real slow ask keeps its sign → still taps.
+// v6  /imu (11-06): raw IMU every feedback line → touch/bump/terrain sensing (scripts/imu_lab.py measures it).
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
 //     (distance under-counted). Encoder tick counts would avoid this — check if the real UGV02 offers them.
@@ -48,6 +49,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "tf2/LinearMath/Quaternion.hpp"       // yaw → quaternion
 #include "tf2_ros/transform_broadcaster.hpp"   // sends the odom → base_footprint TF
 
@@ -93,6 +95,7 @@ public:
     // Outputs (up direction).
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", 10);
     battery_pub_ = create_publisher<sensor_msgs::msg::BatteryState>("battery_state", 10);
+    imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("imu", 20);   // v6 (11-06): raw IMU for touch/bump sensing
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     // Input (down direction): when a /cmd_vel message arrives, call on_cmd_vel with it.
@@ -365,6 +368,7 @@ private:
       integrate_odom(fb);
       publish_odom();
       publish_battery(fb);
+      publish_imu(fb);
     }
   }
 
@@ -442,6 +446,26 @@ private:
   //   /odom message : for nodes that want pose + velocity (simple_mover, Nav2)
   //   TF            : the odom → base_footprint link of the frame chain (RViz, SLAM)
   // Fields that fail SILENTLY if wrong: frame_id / child_frame_id, stamp, pose vs twist, orientation (quaternion).
+  // v6 (11-06): the IMU as it comes from the board (every feedback line, ~20 Hz) → /imu, for the "sensitive robot"
+  // (bump / climbing a carpet edge / someone touching it). Axes = the BOARD's axes (which one is "forward" is measured
+  // with scripts/imu_lab.py, not assumed). Accel: raw / 8500 × 9.81 (az ≈ 8500 at rest = 1 g, scale assumed).
+  // Gyro: all three axes with the same scale as gz; only gz has its bias removed (the others: measure at rest).
+  // No orientation estimate (orientation_covariance[0] = -1 = "not provided", ROS convention).
+  void publish_imu(const scr_ugv02::Feedback & fb) {
+    sensor_msgs::msg::Imu m;
+    m.header.stamp = now();
+    m.header.frame_id = "base_link";
+    m.orientation_covariance[0] = -1.0;
+    constexpr double kAccel = 9.81 / 8500.0;
+    m.linear_acceleration.x = fb.ax * kAccel;
+    m.linear_acceleration.y = fb.ay * kAccel;
+    m.linear_acceleration.z = fb.az * kAccel;
+    m.angular_velocity.x = scr_ugv02::gyro_to_rad_s(fb.gx);
+    m.angular_velocity.y = scr_ugv02::gyro_to_rad_s(fb.gy);
+    m.angular_velocity.z = scr_ugv02::gyro_to_rad_s(fb.gz - gyro_bias_);
+    imu_pub_->publish(m);
+  }
+
   void publish_odom() {
     const rclcpp::Time stamp = now();
 
@@ -501,6 +525,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_sub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr read_timer_;
