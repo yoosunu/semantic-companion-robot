@@ -11,7 +11,8 @@
 주의
 - 켜고 3초 동안 로봇을 건드리지 말 것 (자이로 영점 측정). 지도 기준 = 이때 로봇의 자리·방향.
 - SLAM 중에 손으로 옮기지 말 것 (옮긴 거리는 odom 이 모름 → 지도 어긋남).
-- Nav2 설정 = repo 의 config/nav2_burger_sim.yaml + nav2_slam_mode.yaml + nav2_ugv02.yaml 을 합친 것
+- Nav2 설정 = repo 의 config/nav2_burger_sim.yaml + nav2_slam_mode.yaml + nav2_ugv02.yaml + nav2_explore.yaml 을 합친 것
+  (nav2_explore = 탐색 모드: 도착 30 cm, 방향 안 봄)
   (합친 결과와 바뀐 값 목록: /tmp/nav2_ugv02_effective.yaml, 켤 때 화면에 [설정] 줄로 출력).
 - 끌 때(Ctrl+C) 주행 보고서가 자동으로 만들어짐 → ~/scr_logs/reports/, ntfy 로 요약 한 줄.
   (Mac: robot-pull 로 가져오기. 설계: docs/design/logging.md)
@@ -37,7 +38,12 @@ def merged_params():
     step1, out = "/tmp/nav2_ugv02_step1.yaml", "/tmp/nav2_ugv02_effective.yaml"
     subprocess.run(["python3", merge, os.path.join(cfg, "nav2_burger_sim.yaml"),
                     os.path.join(cfg, "nav2_slam_mode.yaml"), step1], check=True, capture_output=True)
-    r = subprocess.run(["python3", merge, step1, os.path.join(cfg, "nav2_ugv02.yaml"), out],
+    step2 = "/tmp/nav2_ugv02_step2.yaml"
+    r = subprocess.run(["python3", merge, step1, os.path.join(cfg, "nav2_ugv02.yaml"), step2],
+                       check=True, capture_output=True, text=True)
+    print(r.stdout)
+    # 11-05: SLAM 중엔 탐색·투어링 모드 = 느슨한 도착 (config/nav2_explore.yaml 설명). 순회(엄격)는 지도 완성 후 따로.
+    r = subprocess.run(["python3", merge, step2, os.path.join(cfg, "nav2_explore.yaml"), out],
                        check=True, capture_output=True, text=True)
     print(r.stdout)
     return out
