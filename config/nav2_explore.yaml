@@ -7,7 +7,9 @@
 controller_server:
   ros__parameters:
     goal_checker:
-      xy_goal_tolerance: 0.30            # [m] 0.10 → 30 cm 안이면 도착. LiDAR 는 몇 m 를 보니 지도엔 차이 없음
+      xy_goal_tolerance: 0.20            # [m] 0.10 → 0.30 → 0.20 (11-05 23:04): 0.30 이면 탐색 목표가 이미 30 cm 안이라 "출발 즉시 도착"
+                                         #   → 경계는 그대로 남음 → 탐색기가 같은 목표를 다시 보냄 → 1초에 수십 번 반복 (283번).
+                                         #   로봇이 실제로 움직여야 도착이 되게. 못 가는 경계는 막힘 판정 → 탐색기가 포기
       yaw_goal_tolerance: 3.15           # [rad] > π = 어느 방향으로 서도 도착 (방향 맞추기 끔)
     FollowPath:
       critics: ["ConstraintCritic", "CostCritic", "GoalCritic",

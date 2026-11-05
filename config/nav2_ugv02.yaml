@@ -87,8 +87,28 @@ collision_monitor:                       # 마지막 안전망: 로봇 바로 �
       source_timeout: 0.5                # [s] 원본 0.2. 실물 라이다는 늘 0.22~0.23 s 늦게 도착(스캔 시작 시각 표시 + 전달)
                                          #     → 0.2 면 "못 믿을 라이다" → 정지 → 재출발 반복 = 덜컥거림 (10-31 첫 Nav2 목표: 7번)
                                          #     0.5 s × 0.2 m/s = 10 cm → 정지 띠(7 cm)·감속 띠(22 cm)·저속이면 안전
-    PolygonStop:
-      type: "polygon"
-      points: "[[0.20, 0.15], [0.20, -0.15], [0.14, -0.15], [0.14, 0.15]]"   # 차체 앞 1~7 cm 띠 (몸 안 점은 안 걸리게)
+    PolygonStop:                         # 11-05: 방향 따라 다른 정지 상자 (velocity_polygon). 예전 "앞 띠 하나"는 후진까지 막아서
+                                         #   가구 틈에 앞이 막히면 뒤로도 못 빠져나와 끝까지 갇힘 (11-05 23:04 탐색: 정지 64초, 해제 없음)
+      type: "velocity_polygon"
+      holonomic: false
+      velocity_polygons: ["forward", "backward", "rotation"]   # 위에서부터 먼저 맞는 것
+      forward:                           # 전진 중: 앞 1~7 cm 띠
+        points: "[[0.20, 0.15], [0.20, -0.15], [0.14, -0.15], [0.14, 0.15]]"
+        linear_min: 0.005
+        linear_max: 1.0
+        theta_min: -2.0
+        theta_max: 2.0
+      backward:                          # 후진 중: 뒤 1~7 cm 띠 (앞이 막혀 있어도 뒤가 비면 빠져나감)
+        points: "[[-0.14, 0.15], [-0.14, -0.15], [-0.20, -0.15], [-0.20, 0.15]]"
+        linear_min: -1.0
+        linear_max: -0.005
+        theta_min: -2.0
+        theta_max: 2.0
+      rotation:                          # 제자리 회전: 모서리가 쓰는 원(반지름 17.7 cm) + 1 cm 안에 점 → 정지
+        points: "[[0.19, 0.19], [0.19, -0.19], [-0.19, -0.19], [-0.19, 0.19]]"
+        linear_min: -0.005
+        linear_max: 0.005
+        theta_min: -2.0
+        theta_max: 2.0
     PolygonSlow:
       points: "[[0.35, 0.20], [0.35, -0.20], [0.14, -0.20], [0.14, 0.20]]"   # 앞 1~22 cm → 30% 로 감속
