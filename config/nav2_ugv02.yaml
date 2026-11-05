@@ -57,12 +57,13 @@ local_costmap:
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:
-          obstacle_min_range: 0.18       # [m] 라이다 중심에서 18 cm 안 = 로봇 몸 안 → 무시 (10-28 +23°·10 cm 상시 점)
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.11       # [m] 라이다 중심 11 cm 안 무시 = 몸 옆면(12 cm) 안쪽이라 진짜 장애물일 수 없는 거리.
+          raytrace_min_range: 0.11       #   11-05 실측: 장착 상태 스캔 20장, 25 cm 안 점 0개 (10-28 의 +23°·10 cm 는 장착 전 책상 시험의
+                                         #   케이블). 예전 0.18 은 검증 안 된 여유 → 옆 6 cm 안의 벽이 안 보였음. 팬틸트 달면 다시 잴 것
       voxel_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.11
+          raytrace_min_range: 0.11
 
 global_costmap:
   global_costmap:
@@ -73,12 +74,12 @@ global_costmap:
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.11
+          raytrace_min_range: 0.11
       voxel_layer:
         scan:
-          obstacle_min_range: 0.18
-          raytrace_min_range: 0.18
+          obstacle_min_range: 0.11
+          raytrace_min_range: 0.11
 
 collision_monitor:                       # 마지막 안전망: 로봇 바로 앞 상자 안에 점이 생기면 정지/감속
   ros__parameters:
