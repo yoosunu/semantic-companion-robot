@@ -1,0 +1,10 @@
+# 실물 SLAM 설정 — slam_toolbox 패키지 기본값(mapper_params_online_async.yaml) 위에 덮어씀. nav.launch.py 가 합침.
+# (config/slam_toolbox.yaml + my_slam.yaml 은 시뮬용. 11-05 전까지 실물은 패키지 기본값을 그대로 썼음)
+slam_toolbox:
+  ros__parameters:
+    # 11-05: 스캔으로 위치를 보정하는 간격. 기본 0.5 m / 0.5 rad(29°) → 기어가는 속도·좁은 방에선 보정이 거의 안 일어나고
+    #   그 사이 위치 = odom 그대로. 카펫 헛바퀴(바퀴는 도는데 로봇은 제자리)에서 odom 이 "앞으로 갔다"고 쌓은 거짓 거리가
+    #   그대로 지도 위 위치가 됨 → 가구 턱 너머(실제로 못 가는 곳)에 로봇이 있다고 판단 (11-05 23:04 탐색).
+    #   15 cm / 11° 마다 보정 → 거짓이 15 cm 넘게 쌓이기 전에 LiDAR 가 바로잡음. 대가: SLAM 계산 ↑ (지금 ~4%)
+    minimum_travel_distance: 0.15
+    minimum_travel_heading: 0.2

@@ -4,7 +4,7 @@
 
   켜지는 것                 하는 일
   robot.launch.py          브리지(odom: 자이로 + 주행거리계), 라이다 /scan, 로봇 모델 TF
-  slam_toolbox (async)     /map, map → odom
+  slam_toolbox (async)     /map, map → odom  (설정: 패키지 기본값 + config/slam_real.yaml)
   Nav2 (navigation_launch) 경로 계획(NavFn), 따라가기(MPPI), 속도 부드럽게, 충돌 감시
   - map_server·AMCL 없음 (지도는 SLAM 이 실시간으로)
 
@@ -49,6 +49,17 @@ def merged_params():
     return out
 
 
+def merged_slam_params():
+    """slam_toolbox 패키지 기본값 → config/slam_real.yaml (실물용) 순서로 덮어써서 한 파일로."""
+    base = os.path.join(get_package_share_directory("slam_toolbox"), "config", "mapper_params_online_async.yaml")
+    out = "/tmp/slam_real_effective.yaml"
+    r = subprocess.run(["python3", os.path.join(REPO, "scripts", "merge_params.py"), base,
+                        os.path.join(REPO, "config", "slam_real.yaml"), out],
+                       check=True, capture_output=True, text=True)
+    print(r.stdout)
+    return out
+
+
 def report_after_shutdown(context, *args, **kwargs):
     """주행이 끝나면 보고서 + 알림. 노드들이 로그를 다 쓸 때까지 8초 기다린 뒤 실행.
     start_new_session: launch 가 끝나도, tmux 의 Ctrl+C 가 와도 이 작업은 따로 살아서 끝까지 돈다."""
@@ -64,6 +75,7 @@ def generate_launch_description():
     nav2 = get_package_share_directory("nav2_bringup")
     slam = get_package_share_directory("slam_toolbox")
     params = merged_params()
+    slam_params = merged_slam_params()
 
     return LaunchDescription([
         DeclareLaunchArgument("ugv_port", description="UGV02 시리얼 포트 (실물: /dev/ttyAMA0)"),
@@ -80,7 +92,7 @@ def generate_launch_description():
         TimerAction(period=5.0, actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(slam, "launch", "online_async_launch.py")),
-                launch_arguments={"use_sim_time": "false"}.items()),
+                launch_arguments={"use_sim_time": "false", "slam_params_file": slam_params}.items()),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(nav2, "launch", "navigation_launch.py")),
                 launch_arguments={"use_sim_time": "false", "params_file": params, "autostart": "true"}.items()),
