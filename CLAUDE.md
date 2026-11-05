@@ -33,6 +33,17 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-11-05 저녁) — 부품 주문 완료 + "로봇의 하루" 목표 확정 + 도착 기준 0.10 (6/6). ← 새 대화는 여기부터
+- 궁극 목표: `docs/design/robot-architecture.md` "로봇의 하루" (기상 깨우기·브리핑 / 외출 중 순회·지도 갱신 / 마중 / 취침 요약).
+  첫 완성 장면 = **아침 기상**. 지휘자 = task_manager. 평소 운행 = 저장 지도 + AMCL (SLAM 은 지도 그릴 때만).
+- 주문 (인수인계: 프로젝트 문서 `claude/handoff_purchase_2026-11-04.md`): 팬틸트 키트(9~12일), 삼성 25R ×3, 엘레파츠(ToF VL53L5CX
+  SparkFun Qwiic + Adafruit 4397 + 점퍼선, 11-13 발송). 멀티미터 안 삼 → 서보 꽂기 전 사진 비교. Pico 안 삼 (직결 후 Pi I2C 3·5번 빔).
+- Nav2: 도착 기준 0.10 m (0.08 은 MPPI 가 목표 앞에서 x·z ± 깔짝, 톡톡 52회) → 왕복 6/6, 평균 21.8 s, 최대 36 s. PoseProgressChecker 효과 확인.
+  Pi 부하 CPU ~45%, 메모리 0.8/7.8 GB, 47°C. 배터리: 완충해도 11.8 V 근처 (켠 채) → 새 셀로 충전 경로 vs 셀 문제 가르기.
+- 심박 로그: `scripts/heartbeat.py` (1분마다 v·위치·CPU·프로세스별 CPU·온도 → `~/scr_logs/<날짜>/heartbeat.jsonl`). 11-05 첫 시험.
+- 다음: 심박 시험 → 방 지도 저장 + AMCL (SLAM↔AMCL CPU 비교) → 충돌 감시 후진 → keepout → IMU 충격 → ToF 노드 → 팬틸트 명령.
+- 펌웨어 읽기 1·2장 함 (loop 구조, 우리 변경 3개 전후 비교: T:13 heartbeat / T:11 PID 끄기 / T:11 0 정지).
+
 ## 지금 (2026-11-04 새벽) — 로그 체계 v0 + 안전(heartbeat) + **기어가기(브리지 v5 PWM)** + Nav2 저속 왕복 4/4. ← 새 대화는 여기부터
 - 원칙 (Jasper): **"조용하되 정확하게. 빠를 필요는 없다."** (집 안 로봇, 물류 로봇 아님)
 - 로그: `docs/design/logging.md` (3층: 사건·심박·블랙박스). nav.launch 종료 시 Pi 가 보고서(`~/scr_logs/reports`) + ntfy 알림,
