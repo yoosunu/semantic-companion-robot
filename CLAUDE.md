@@ -33,6 +33,25 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   → TODO: 이 repo의 자체 launch로 감싸서 원본 수정 없이 관리.
 - Gazebo bridge의 `/cmd_vel`은 `geometry_msgs/msg/TwistStamped`. `Twist`로 publish하면 로봇이 안 움직임.
 
+## 지금 (2026-11-06 새벽) — **RViz 실물 연결** + 탐색 모드(느슨한 도착) + 헛바퀴 위치 오류 원인·대책 + 방 지도. ← 새 대화는 여기부터
+- RViz: UTM 네트워크 **브리지됨(en0)** → VM 192.168.123.118 (DHCP, MAC 7A:0E:93:96:80:C4 — 바뀌면 공유기 예약). Mac `~/.ssh/config` scr-vm.
+  VM 창 터미널에서 `./scripts/rviz.sh` (`config/robot.rviz`: 지도·스캔·로봇·경로·로컬 비용·탐색 경계·충돌 상자·odom 자취). 대안 Foxglove(Mac 앱) 보류.
+  RViz 닫을 때 저장 안 함 (설정 파일 덮어씀). 시계 차 +0.23 s = 라이다 지연(정상). GLSL ERROR = UTM 그래픽 한계, 무시.
+- 탐색·투어링 모드 (`config/nav2_explore.yaml`, nav.launch 가 마지막에 덮어씀): 도착 0.20 m, 방향 안 봄, GoalAngleCritic 뺌.
+  근거: 목표에서 "위치+방향 동시 맞추기" = 0.13 rad/s 미만 회전 요구 → 4분 헤맴 (재현됨). 0.30 은 탐색기와 충돌(즉시 도착 → 같은 목표 283번).
+  순회 모드(엄격, 지도 완성 후 AMCL)는 따로 만들 것. 집 귀환 = Nav2 로 집 앞 40 cm → 전용 동작(회전 → 직진) `go_home.py` (예정).
+- 실패한 실험 (되돌림): 벽 붙기 설정 묶음(min_range 0.13 + inflation 0.25/12 + CostCritic footprint) → 구간 2분+ 헤맴. 한 번에 여러 개 바꾼 실수.
+- 몸 점 실측: 장착 상태 스캔 20장, 25 cm 안 점 0개 → obstacle/raytrace_min_range 0.18 → 0.11 (0.18 은 옆 6 cm 안 벽을 숨겼음).
+- 충돌 감시: 정지 상자 방향별 (velocity_polygon 전진/후진/회전) — 가구 틈에서 후진까지 막혀 64초 갇혔던 것.
+- **헛바퀴 위치 오류**: 카펫·턱에서 바퀴만 돌고(자이로 ~0, 브리지 자이로 루프가 PWM 85까지 올림) odom 거리(바퀴)가 쌓임 + SLAM 이
+  패키지 기본값(0.5 m/0.5 rad 마다 보정) → 못 가는 가구 턱 너머에 로봇이 있다고 판단. 대책: `config/slam_real.yaml` (0.15 m / 0.2 rad),
+  nav.launch 가 넘김. 11-06 탐색: 5개 목표, 완료 + 집 복귀 50 s, 벽 선명. 남은 것: 브리지 헛바퀴 감지(회전 명령 중 자이로 ~0 → 거리 안 쌓기·PWM 그만),
+  SLAM max_laser_range 20 → 12 (C1), 흰 통로는 LiDAR 가 턱 위로 본 것 (진짜 빈 높이) → 바닥 턱은 ToF 몫.
+- 탐색 끝 알림: `scripts/explore_watch.py --name room` (탐색기 실행 + 복귀하면 지도 자동 저장 + ntfy, 3분 안에 복귀 못 하면 경고).
+- 브리지 v5.3: TAP 은 직전 0.5 s 평균으로 결정 (MPPI 잡음 ± 은 쉼). 심박: Nav2 노드별 CPU (전부 7~17%씩, 원인 미상), 위치는 토픽 (SLAM /pose 는
+  보정 때만 갱신 → 개선 필요). robot-pull 이 심박·지도도 가져옴.
+- 지도: `~/maps/room_1106_explore` (Pi), Mac `logs/maps/`.
+
 ## 지금 (2026-11-05 저녁) — 부품 주문 완료 + "로봇의 하루" 목표 확정 + 도착 기준 0.10 (6/6). ← 새 대화는 여기부터
 - 궁극 목표: `docs/design/robot-architecture.md` "로봇의 하루" (기상 깨우기·브리핑 / 외출 중 순회·지도 갱신 / 마중 / 취침 요약).
   첫 완성 장면 = **아침 기상**. 지휘자 = task_manager. 평소 운행 = 저장 지도 + AMCL (SLAM 은 지도 그릴 때만).

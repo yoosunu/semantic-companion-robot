@@ -8,3 +8,4 @@ slam_toolbox:
     #   15 cm / 11° 마다 보정 → 거짓이 15 cm 넘게 쌓이기 전에 LiDAR 가 바로잡음. 대가: SLAM 계산 ↑ (지금 ~4%)
     minimum_travel_distance: 0.15
     minimum_travel_heading: 0.2
+    max_laser_range: 12.0                # [m] 기본 20 → RPLIDAR C1 사양 12 m (11-06 slam 경고 "exceeds the capabilities")
