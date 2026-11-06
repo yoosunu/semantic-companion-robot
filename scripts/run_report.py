@@ -216,7 +216,7 @@ class Builder:
                 kind = d.get("ev", "?")
                 self.sense_counts[kind] += 1
                 if kind != "touch":
-                    self.add(t, "WARN", "whisker", kind,
+                    self.add(t, "INFO" if kind == "ghost" else "WARN", "whisker", kind,
                              f"{d.get('dir', '?')} {d.get('g', d.get('dps', ''))} @({d.get('x')}, {d.get('y')})"
                              + (" 표시" if d.get("marked") else ""))
             elif msg.startswith("WHISKER "):

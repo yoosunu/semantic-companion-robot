@@ -42,6 +42,9 @@ MARK_HALF = 0.05              # m, 표시 반폭 → 점 3개, 폭 ~10 cm
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (출발 흔들림 0.17 g 은 우리 것)
 MOVING_V, MOVING_W = 0.025, 0.10   # m/s, rad/s — 직전 0.5 s 동안 "실제로" 이만큼 움직였으면 = 굴러가는 중 (거리계·자이로)
+CONFIRM_S = 0.3               # s, 의심 → 확인 창 (11-07: 흔들림만으로 판단하면 상황마다 예외가 늘어남 → 결과로 확인)
+CONFIRM_STALL = 0.5           #   부딪힘 확인: 이 창 동안 실제 진척 < 명령의 50% (바퀴가 실제로 멈춤)
+CONFIRM_TILT = 2.0            #   끄덕임·기우뚱 확인: 이 창 동안 각속도를 합쳐 2° 이상 실제로 기울어짐 (흔들림은 +− 출렁여 합 ≈ 0)
 START_BLOCK_S = 1.0           # s, 출발 명령 후 이 시간 동안 1 cm 눈금이 하나도 안 뜨면 = 앞이 막힘 (바퀴 떼기 0.3~0.8 s)
 BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) 바로 위, 연속으로 잔잔하게.
                                       #   11-06: 0.25 rad/s 는 출발 밀기 + 자이로 보정으로 과격. TAP 은 0.5 s 마다
@@ -95,6 +98,8 @@ class Whisker(Node):
         self.prev_motor = None
         self.motor_hist = collections.deque()   # (시각, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
         self.start = None                       # {"t", "pos"} 서 있다 출발한 순간
+        self.pending = None                     # 의심 중인 사건 (확인 창 0.3 s)
+        self.prev_imu_t = None
         # 지나온 길 (11-07): 빼기는 "방금 지나온 곳"으로만, 지나온 만큼만. 출발 직후엔 온 길이 없음 → 안 뺌
         self.trail = {"sign": 0, "len": 0.0, "last": None, "idle": None}
         self.last_self = 0.0                 # 우리가 마지막으로 모터를 바꾼 시각
@@ -295,6 +300,14 @@ class Whisker(Node):
             return
         d = [s[i] - self.base[i] for i in range(4)]
         horiz = math.hypot(d[0], d[1])
+        dt = 0.05 if self.prev_imu_t is None else min(0.2, max(0.0, now - self.prev_imu_t))
+        self.prev_imu_t = now
+        if self.pending:                       # 의심 중: 기울기 쌓고, 창이 끝나면 결과로 판정
+            self.pending["tilt_p"] += d[3] * dt
+            self.pending["tilt_r"] += d[2] * dt
+            if now - self.pending["t"] >= CONFIRM_S:
+                self.confirm()
+            return
         motors_on = abs(self.motor[0]) > 1 or abs(self.motor[1]) > 1
         settled = now - self.last_self > SELF_MASK
         if settled and horiz < self.touch_g and abs(d[2]) < self.rock_dps and abs(d[3]) < self.rock_dps:
@@ -328,7 +341,38 @@ class Whisker(Node):
             ang, src = (math.atan2(-by, -bx) if horiz > 1e-4 else 0.0), "imu"
         ev.update(dir=side_name(ang), src=src, ang=round(math.degrees(ang)), ax=round(d[0], 3), ay=round(d[1], 3),
                   cmd_x=round(self.motor[2], 3), cmd_z=round(self.motor[3], 2), state=self.state)
-        self.on_contact(ev, ang)
+        if ev["ev"] == "touch":                # 건드림은 기록만이라 확인 없이
+            self.on_contact(ev, ang)
+            return
+        # 의심 → 0.3 s 뒤 결과로 확인 (부딪힘 = 바퀴가 실제로 멈춤 / 끄덕임·기우뚱 = 차체가 실제로 기울어짐)
+        self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3]),
+                        "tilt_p": d[3] * dt, "tilt_r": d[2] * dt}
+
+    def confirm(self):
+        p, self.pending = self.pending, None
+        ev, kind = p["ev"], p["ev"]["ev"]
+        cx0, cz0 = p["cmd"]
+        cx1, cz1 = self.motor[2], self.motor[3]
+        if kind == "bump":
+            still_asked = abs(cx1) >= 0.8 * abs(cx0) and abs(cz1) >= 0.8 * abs(cz0)   # 명령이 줄었으면 = 우리가 선 것
+            if abs(cx0) >= 0.01:
+                want = abs(cx0) * CONFIRM_S
+                got = math.hypot(self.odom[0] - p["pos"][0], self.odom[1] - p["pos"][1]) if self.odom and p["pos"] else want
+            else:
+                want = abs(cz0) * CONFIRM_S
+                got = (abs(math.atan2(math.sin(self.odom[2] - p["pos"][2]), math.cos(self.odom[2] - p["pos"][2])))
+                       if self.odom and p["pos"] else want)
+            ok = still_asked and want > 0.005 and got < CONFIRM_STALL * want
+            ev["confirm"] = {"want": round(want, 3), "got": round(got, 3), "asked": still_asked}
+        else:
+            tilt = p["tilt_p"] if kind == "pitch" else p["tilt_r"]
+            ok = abs(tilt) >= CONFIRM_TILT
+            ev["confirm"] = {"tilt_deg": round(tilt, 1)}
+        if ok:
+            self.on_contact(ev, p["ang"])
+        else:                                  # 헛것: 결과가 없음 → 기록만 (지도·반응 없음)
+            ev["was"], ev["ev"], ev["feel"], ev["marked"] = kind, "ghost", "ghost", False
+            self.record(ev)
 
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
