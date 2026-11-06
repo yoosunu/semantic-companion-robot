@@ -72,6 +72,7 @@ class Builder:
         self.extrap = None         # explore TF 에러 묶음
         self.pending_reason = {}   # behavior 실패 이유
         self.coll_counts = defaultdict(int)  # 감속·접근 횟수
+        self.sense_counts = defaultdict(int)  # v7 IMU 감각 사건 수
 
     def add(self, t, lvl, src, ev, msg="", **kw):
         e = {"t": round(t, 2), "lvl": lvl, "src": src, "ev": ev}
@@ -195,6 +196,15 @@ class Builder:
         if node == "ugv02_bridge":
             if "odometry starts" in msg:
                 self.add(t, "INFO", "bridge", "start", msg)
+            elif msg.startswith("SENSE "):   # v7 (11-06) IMU 감각, 관찰 모드: 부딪힘·끄덕임·건드림·헛돌기
+                try:
+                    d = json.loads(msg[6:])
+                except ValueError:
+                    return
+                kind = d.pop("ev", "?")
+                self.sense_counts[kind] += 1
+                self.add(t, "WARN" if kind in ("bump", "stall") else "INFO", "sense", kind,
+                         " ".join(f"{k} {v}" for k, v in d.items()))
             return
 
     def end_collision(self, t):
@@ -307,6 +317,9 @@ def report(run_start, files, out_dir):
              f"ERROR {cnt['ERROR']}, WARN {cnt['WARN']}, INFO {cnt['INFO']}")
     cc = b.coll_counts
     L.append(f"- 충돌 감시 감속 {cc['slow']}회, 접근 {cc['approach']}회 (시간표엔 생략)")
+    sc = b.sense_counts
+    if sc:
+        L.append("- IMU 감각 (관찰 모드): " + ", ".join(f"{k} {v}회" for k, v in sorted(sc.items())))
     L.append(f"- 로그 파일 {len(files)}개: " + ", ".join(sorted({n for _, n, _ in files})))
     L.append("")
     L.append("## 움직임 (10초 한 칸 · `#` 움직이라는 명령 · `.` 0 명령 · 빈칸 명령 기록 없음)\n")

@@ -9,12 +9,14 @@
    "mem_mb":812, "procs":{"slam":9.1, "controller":12.3, ...}}
 
   - v      : 그 사이 /battery_state 평균 (모터가 당길 때 순간 처짐 제외용), v_min: 그 사이 최저
-  - x, y   : map 좌표 (slam_toolbox /pose 또는 /amcl_pose, 없으면 /odom), 못 찾으면 생략
+  - x, y   : map 좌표 = 마지막 SLAM/AMCL 위치 + 그 뒤 odom 이동 (11-06), 지도 없으면 odom. 못 찾으면 생략
   - cpu    : 전체 CPU % (코어 4개 합쳐 100%)
   - procs  : 프로세스 묶음별 CPU % (코어 하나 = 100%). SLAM ↔ AMCL 전후 비교용
   - 브리지가 안 떠 있어도 돈다 (v·위치만 빠짐). 배터리 실사용 시간 측정 = 이걸 켜두고 전압 곡선 보기.
 """
 import argparse
+import collections
+import math
 import json
 import os
 import time
@@ -83,12 +85,13 @@ class Heartbeat(Node):
         self.period = period
         self.volts = []
         self.create_subscription(BatteryState, "battery_state", lambda m: self.volts.append(m.voltage), 10)
-        # 위치: TF 를 통째로 듣던 것(11-05 주행 중 10% CPU) 대신 위치 토픽만. 지도 위치가 있으면 그걸, 없으면 odom.
-        self.poses = {}
-        for topic, frame, typ in (("pose", "map", PoseWithCovarianceStamped),       # slam_toolbox
-                                  ("amcl_pose", "map", PoseWithCovarianceStamped),  # AMCL
-                                  ("odom", "odom", Odometry)):                     # 브리지 (20 Hz)
-            self.create_subscription(typ, topic, lambda m, f=frame: self.poses.__setitem__(f, m.pose.pose.position), 10)
+        # 위치 (11-06 v2): TF 를 통째로 듣지 않고 (주행 중 10% CPU) — 지도 위치 = 마지막 SLAM/AMCL 위치 + 그 뒤 odom 이 움직인 만큼.
+        #   SLAM /pose 는 보정할 때만 나와서 (0.15 m 마다) 그 자체론 몇 분씩 멈춰 있었음 (11-05 심박 x,y 고정).
+        self.odom_hist = collections.deque(maxlen=20 * 180)   # (stamp s, x, y, yaw) 20 Hz × 3분
+        self.map_fix = None                                   # (stamp s, x, y, yaw) 마지막 SLAM/AMCL 위치
+        self.create_subscription(Odometry, "odom", self.on_odom, 10)
+        for topic in ("pose", "amcl_pose"):                   # slam_toolbox / AMCL
+            self.create_subscription(PoseWithCovarianceStamped, topic, self.on_map_pose, 10)
         self.prev_cpu = cpu_total()
         self.prev_procs = proc_times()
         self.prev_t = time.time()
@@ -100,12 +103,32 @@ class Heartbeat(Node):
         d.mkdir(parents=True, exist_ok=True)
         return d / "heartbeat.jsonl"
 
+    @staticmethod
+    def _xyyaw(stamp, pose):
+        q = pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        return (stamp.sec + stamp.nanosec * 1e-9, pose.position.x, pose.position.y, yaw)
+
+    def on_odom(self, m):
+        self.odom_hist.append(self._xyyaw(m.header.stamp, m.pose.pose))
+
+    def on_map_pose(self, m):
+        self.map_fix = self._xyyaw(m.header.stamp, m.pose.pose)
+
     def pose(self):
-        for frame in ("map", "odom"):
-            if frame in self.poses:
-                p = self.poses[frame]
-                return frame, p.x, p.y
-        return None
+        """지도 위치 = map_fix ⊕ (odom 이 map_fix 시각 이후 움직인 것). 지도 위치가 없으면 odom 그대로."""
+        if not self.odom_hist:
+            return None
+        _, ox, oy, oyaw = self.odom_hist[-1]
+        if not self.map_fix:
+            return "odom", ox, oy
+        ts, mx, my, myaw = self.map_fix
+        old = min(self.odom_hist, key=lambda r: abs(r[0] - ts))   # map_fix 시각의 odom
+        dx, dy = ox - old[1], oy - old[2]                         # odom 좌표에서 움직인 것 → 그때 로봇 기준으로
+        c, s_ = math.cos(-old[3]), math.sin(-old[3])
+        lx, ly = c * dx - s_ * dy, s_ * dx + c * dy
+        c, s_ = math.cos(myaw), math.sin(myaw)                    # → 지도 좌표
+        return "map", mx + c * lx - s_ * ly, my + s_ * lx + c * ly
 
     def beat(self):
         now = time.time()
