@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""scr_explore — 우리 탐색기. "다음에 어디로 가 볼까"를 정하고, 못 가는 곳은 이유와 함께 기억한다. (11-06 밤, explore_lite 대체)
+
+왜 직접: explore_lite 는 Whisker 를 모른다 → 분홍(닿아서 확인한 못 가는 곳) 너머 경계로 계속 보냄. 그리고 경계 중심이 1 cm 만
+움직여도 새 목표로 봐서 포기를 못 함 (11-06 카펫에서 3분 넘게 삽질). 우리 판단을 넣는다:
+
+  1. SLAM 지도에서 경계(아는 빈 칸 ↔ 모르는 칸)를 찾아 묶는다. 30 cm 미만 묶음은 무시
+  2. Whisker 표시 40 cm 안의 경계는 처음부터 제외 (이유: whisker) — 닿아서 확인했으니까
+  3. 점수 = 3 × 거리 − 1 × 크기 (가깝고 클수록 먼저) → 1등을 Nav2 목표로
+  4. 포기 (지역 단위 40 cm 로 기억 — 중심이 움직여도 같은 곳):
+       가는 중 Whisker 접촉 2번 → whisker / Nav2 가 길을 못 찾음 → no_path / 90 s 동안 5 cm 도 못 가까워짐 → no_progress /
+       도착했는데 그 경계가 그대로 → unseen (LiDAR 로 볼 수 없는 곳)
+     가는 중 그 경계가 지도에서 사라지면 (이미 보임) → 목표 바꿈
+  5. 경계 없음 → 집(0,0)으로 → 지도 + 경계(포기 이유) 자동 저장 + 폰 알림. 3분 동안 10 cm 도 못 움직이면 STUCK 알림
+  RViz (/scr_explore/markers): 파랑 = 남은 경계, 빨강 공 + 글자 = 포기(이유), 초록 공 = 지금 목표
+
+  [Pi] tmux new -d -s explore "bash -ic 'python3 ~/semantic-companion-robot/scripts/scr_explore.py --name room; exec bash'"
+  끄기: tmux send-keys -t explore C-c  (목표 취소 후 멈춤)
+"""
+import argparse
+import collections
+import json
+import math
+import subprocess
+import threading
+import time
+import urllib.request
+from pathlib import Path
+
+import numpy as np
+import rclpy
+from geometry_msgs.msg import Point, PoseStamped, PoseWithCovarianceStamped
+from nav2_msgs.action import NavigateToPose
+from nav_msgs.msg import OccupancyGrid, Odometry
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.signals import SignalHandlerOptions
+from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import ColorRGBA, String
+from visualization_msgs.msg import Marker, MarkerArray
+
+MIN_FRONTIER = 0.30      # m, 이보다 작은 경계 묶음 무시
+REGION = 0.40            # m, 같은 곳 / Whisker 표시 근처
+W_DIST, W_SIZE = 3.0, 1.0
+WHISKER_GIVEUP = 2       # 가는 중 접촉 이만큼이면 포기
+NO_PROGRESS_S, PROGRESS_M = 90.0, 0.05
+STUCK_S, STUCK_M = 180.0, 0.10
+CONTACTS = ("bump", "pitch", "roll", "slow", "stuck")
+
+
+def yaw_of(q):
+    return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+
+
+def ntfy(title, body, urgent=False):
+    env = Path.home() / ".scr.env"
+    topic = None
+    if env.exists():
+        for ln in env.read_text().splitlines():
+            if ln.startswith("NTFY_TOPIC="):
+                topic = ln.split("=", 1)[1].strip()
+    if not topic:
+        return
+    try:
+        urllib.request.urlopen(urllib.request.Request("https://ntfy.sh/" + topic, data=body.encode(), headers={
+            "Title": title, "Priority": "high" if urgent else "default", "Tags": "warning" if urgent else "robot"}), timeout=10)
+    except Exception:
+        pass
+
+
+class Explorer(Node):
+    def __init__(self, name):
+        super().__init__("scr_explore")
+        self.name = name
+        self.grid = None                         # OccupancyGrid
+        self.whisker = []                        # [(x, y)] Whisker 표시
+        self.gave_up = []                        # [{"x","y","reason"}]
+        self.reached = []                        # 도착했던 목표 (x, y)
+        self.frontiers = []                      # 마지막으로 찾은 [{"x","y","size","cells":[(x,y)]}]
+        self.goal = None                         # {"x","y","t0","best","best_t","contacts","handle"}
+        self.phase = "explore"                   # explore → home → done
+        self.odom_hist = collections.deque(maxlen=20 * 180)
+        self.map_fix = None
+        self.moved = {"p": None, "t": time.time(), "sent": False}
+        self.t0 = time.time()
+
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
+        self.create_subscription(OccupancyGrid, "map", lambda m: setattr(self, "grid", m), latched)
+        self.create_subscription(PointCloud2, "whisker/cloud", self.on_whisker_cloud, 1)
+        self.create_subscription(String, "sense", self.on_sense, 10)
+        self.create_subscription(Odometry, "odom", self.on_odom, 20)
+        for t in ("pose", "amcl_pose"):
+            self.create_subscription(PoseWithCovarianceStamped, t, self.on_map_pose, 10)
+        self.marker_pub = self.create_publisher(MarkerArray, "scr_explore/markers", 1)
+        self.nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        self.create_timer(1.0, self.step)
+        self.say("시작 — Nav2 기다리는 중")
+
+    def say(self, text, warn=False):
+        (self.get_logger().warn if warn else self.get_logger().info)("EXPLORE " + text)
+
+    # ------------------------------------------------------------------ 입력
+    def on_whisker_cloud(self, m):
+        raw = bytes(m.data)
+        self.whisker = [tuple(np.frombuffer(raw[i:i + 8], dtype="<f4")) for i in range(0, len(raw), m.point_step)]
+
+    def on_sense(self, m):
+        try:
+            d = json.loads(m.data)
+        except ValueError:
+            return
+        if self.goal and d.get("ev") in CONTACTS and not d.get("observe"):
+            self.goal["contacts"] += 1
+            self.say(f"가는 중 Whisker 접촉 {self.goal['contacts']}/{WHISKER_GIVEUP} ({d.get('ev')})")
+
+    def on_odom(self, m):
+        st, pp = m.header.stamp, m.pose.pose
+        o = (st.sec + st.nanosec * 1e-9, pp.position.x, pp.position.y, yaw_of(pp.orientation))
+        self.odom_hist.append(o)
+        if self.moved["p"] is None or math.hypot(o[1] - self.moved["p"][0], o[2] - self.moved["p"][1]) > STUCK_M:
+            self.moved.update(p=(o[1], o[2]), t=time.time(), sent=False)
+
+    def on_map_pose(self, m):
+        st, pp = m.header.stamp, m.pose.pose
+        self.map_fix = (st.sec + st.nanosec * 1e-9, pp.position.x, pp.position.y, yaw_of(pp.orientation))
+
+    def robot(self):
+        """지도 위치 = 마지막 SLAM 위치 + 그 뒤 odom 이동 (heartbeat·whisker 와 같은 방식)"""
+        if not self.odom_hist or not self.map_fix:
+            return None
+        _, ox, oy, _ = self.odom_hist[-1]
+        ts, mx, my, myaw = self.map_fix
+        old = min(self.odom_hist, key=lambda r: abs(r[0] - ts))
+        dx, dy = ox - old[1], oy - old[2]
+        c, s = math.cos(-old[3]), math.sin(-old[3])
+        lx, ly = c * dx - s * dy, s * dx + c * dy
+        c, s = math.cos(myaw), math.sin(myaw)
+        return mx + c * lx - s * ly, my + s * lx + c * ly
+
+    # ------------------------------------------------------------------ 경계 찾기
+    def find_frontiers(self):
+        g = self.grid
+        w, h, res = g.info.width, g.info.height, g.info.resolution
+        ox, oy = g.info.origin.position.x, g.info.origin.position.y
+        a = np.array(g.data, dtype=np.int16).reshape(h, w)
+        free, unk = a == 0, a == -1
+        pad = np.pad(unk, 1)
+        near_unk = pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+        fr = free & near_unk
+        seen = np.zeros_like(fr)
+        out = []
+        for r0, c0 in zip(*np.nonzero(fr)):
+            if seen[r0, c0]:
+                continue
+            cells, q = [], [(r0, c0)]
+            seen[r0, c0] = True
+            while q:                                      # 8방향으로 이어진 경계 칸 묶기
+                r, c = q.pop()
+                cells.append((r, c))
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        rr, cc = r + dr, c + dc
+                        if 0 <= rr < h and 0 <= cc < w and fr[rr, cc] and not seen[rr, cc]:
+                            seen[rr, cc] = True
+                            q.append((rr, cc))
+            size = len(cells) * res
+            if size < MIN_FRONTIER:
+                continue
+            pts = [(ox + (c + 0.5) * res, oy + (r + 0.5) * res) for r, c in cells]
+            cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            gx, gy = min(pts, key=lambda p: (p[0] - cx) ** 2 + (p[1] - cy) ** 2)   # 중심에 가장 가까운 경계 칸 = 목표
+            out.append({"x": gx, "y": gy, "size": size, "cells": pts})
+        return out
+
+    @staticmethod
+    def near(x, y, pts, r=REGION):
+        return any(math.hypot(x - p[0], y - p[1]) < r for p in pts)
+
+    def give_up(self, x, y, reason):
+        self.gave_up.append({"x": round(x, 3), "y": round(y, 3), "reason": reason})
+        self.say(f"포기 ({reason}) @({x:.2f}, {y:.2f}) — 지금까지 포기 {len(self.gave_up)}곳", warn=True)
+
+    # ------------------------------------------------------------------ 한 걸음 (1 s 마다)
+    def step(self):
+        if self.phase == "done":
+            return
+        if not self.nav.server_is_ready() or self.grid is None or self.robot() is None:
+            return
+        rx, ry = self.robot()
+        now = time.time()
+        if not self.moved["sent"] and now - self.moved["t"] > STUCK_S and self.phase != "done":
+            self.moved["sent"] = True
+            self.say(f"{STUCK_S / 60:.0f}분 동안 제자리 — 멈춘 것 같음", warn=True)
+            threading.Thread(target=ntfy, args=("robot: explore STUCK?", f"{STUCK_S / 60:.0f}분 동안 10 cm 도 못 움직임. RViz 확인", True),
+                             daemon=True).start()
+
+        self.frontiers = self.find_frontiers()
+        given = [(g["x"], g["y"]) for g in self.gave_up]
+        cands = []
+        for f in self.frontiers:
+            if self.near(f["x"], f["y"], given):
+                continue
+            if self.near(f["x"], f["y"], self.whisker):
+                self.give_up(f["x"], f["y"], "whisker")       # 닿아서 확인한 곳 → 처음부터 제외
+                given.append((f["x"], f["y"]))
+                continue
+            cands.append(f)
+        self.publish_markers()
+
+        if self.phase == "home":
+            return                                             # 결과 콜백이 마무리
+        g = self.goal
+        if g:
+            dist = math.hypot(rx - g["x"], ry - g["y"])
+            if dist < g["best"] - PROGRESS_M:
+                g["best"], g["best_t"] = dist, now
+            still = any(math.hypot(c[0] - g["x"], c[1] - g["y"]) < 0.3 for f in self.frontiers for c in f["cells"])
+            if g["contacts"] >= WHISKER_GIVEUP:
+                self.cancel_goal("whisker")
+            elif now - g["best_t"] > NO_PROGRESS_S:
+                self.cancel_goal("no_progress")
+            elif not still:
+                self.say("목표 경계가 이미 보임 → 다음 목표")
+                self.cancel_goal(None)
+            return
+        if not cands:
+            self.say(f"남은 경계 없음 (포기 {len(self.gave_up)}곳) → 집으로")
+            self.phase = "home"
+            self.send(0.0, 0.0, rx, ry, home=True)
+            return
+        best = min(cands, key=lambda f: W_DIST * math.hypot(f["x"] - rx, f["y"] - ry) - W_SIZE * f["size"])
+        if self.near(best["x"], best["y"], self.reached, 0.3):
+            self.give_up(best["x"], best["y"], "unseen")     # 이미 도착했는데 그대로 = LiDAR 로 못 보는 곳
+            return
+        self.send(best["x"], best["y"], rx, ry)
+
+    # ------------------------------------------------------------------ Nav2
+    def send(self, x, y, rx, ry, home=False):
+        ps = PoseStamped()
+        ps.header.frame_id = "map"
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x, ps.pose.position.y = float(x), float(y)
+        yaw = 0.0 if home else math.atan2(y - ry, x - rx)       # 가는 방향으로 (탐색 모드는 도착 방향 안 봄)
+        ps.pose.orientation.z, ps.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        goal = NavigateToPose.Goal()
+        goal.pose = ps
+        if not home:
+            self.goal = {"x": x, "y": y, "t0": time.time(), "best": math.hypot(x - rx, y - ry), "best_t": time.time(),
+                         "contacts": 0, "handle": None, "cancel_reason": None}
+            self.say(f"목표 ({x:.2f}, {y:.2f}) — 거리 {math.hypot(x - rx, y - ry):.2f} m")
+        fut = self.nav.send_goal_async(goal)
+        fut.add_done_callback(lambda f: self.on_accepted(f, home))
+
+    def on_accepted(self, fut, home):
+        h = fut.result()
+        if not h.accepted:
+            if home:
+                self.finish(False)
+            elif self.goal:
+                self.give_up(self.goal["x"], self.goal["y"], "rejected")
+                self.goal = None
+            return
+        if not home and self.goal:
+            self.goal["handle"] = h
+        h.get_result_async().add_done_callback(lambda f: self.on_result(f, home))
+
+    def cancel_goal(self, reason):
+        g = self.goal
+        if not g:
+            return
+        g["cancel_reason"] = reason or "replan"
+        if g["handle"]:
+            g["handle"].cancel_goal_async()
+
+    def on_result(self, fut, home):
+        status = fut.result().status            # 4 SUCCEEDED, 5 CANCELED, 6 ABORTED
+        if home:
+            self.finish(status == 4)
+            return
+        g, self.goal = self.goal, None
+        if not g:
+            return
+        if status == 4:
+            self.reached.append((g["x"], g["y"]))
+            self.say(f"도착 ({g['x']:.2f}, {g['y']:.2f})")
+        elif g.get("cancel_reason") and g["cancel_reason"] != "replan":
+            self.give_up(g["x"], g["y"], g["cancel_reason"])
+        elif status == 6:
+            self.give_up(g["x"], g["y"], "no_path")
+
+    # ------------------------------------------------------------------ 끝
+    def finish(self, home_ok):
+        if self.phase == "done":
+            return
+        self.phase = "done"
+        path = Path.home() / "maps" / f"{self.name}_{time.strftime('%Y%m%d_%H%M')}"
+        path.parent.mkdir(exist_ok=True)
+        r = subprocess.run(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", str(path),
+                            "--ros-args", "-p", "save_map_timeout:=10.0"], capture_output=True, text=True)
+        ok = "Map saved successfully" in (r.stdout + r.stderr)
+        reasons = collections.Counter(g["reason"] for g in self.gave_up)
+        Path(str(path) + "_frontiers.json").write_text(json.dumps({
+            "gave_up": self.gave_up, "open": [{"x": f["x"], "y": f["y"], "size": round(f["size"], 2)} for f in self.frontiers],
+            "whisker": [[round(float(x), 3), round(float(y), 3)] for x, y in self.whisker], "home_ok": home_ok}, ensure_ascii=False))
+        mins, secs = divmod(int(time.time() - self.t0), 60)
+        why = ", ".join(f"{k} {v}" for k, v in reasons.items()) or "없음"
+        body = f"{mins}분 {secs}초 · 포기 {len(self.gave_up)}곳 ({why}) · Whisker 표시 {len(self.whisker)}점\n지도: {path.name}"
+        title = "robot: explore done" + ("" if home_ok else ", NOT home") + ("" if ok else " (지도 저장 실패)")
+        self.say(f"끝 — {body.replace(chr(10), ' / ')}", warn=not (home_ok and ok))
+        threading.Thread(target=ntfy, args=(title, body, not (home_ok and ok)), daemon=True).start()
+
+    def publish_markers(self):
+        ma = MarkerArray()
+        clear = Marker()
+        clear.action = Marker.DELETEALL
+        ma.markers.append(clear)
+        stamp = self.get_clock().now().to_msg()
+
+        def mk(mid, typ, color, scale):
+            m = Marker()
+            m.header.frame_id, m.header.stamp = "map", stamp
+            m.ns, m.id, m.type, m.action = "scr_explore", mid, typ, Marker.ADD
+            m.color = ColorRGBA(r=color[0], g=color[1], b=color[2], a=color[3])
+            m.scale.x = m.scale.y = m.scale.z = scale
+            m.pose.orientation.w = 1.0
+            return m
+        fr = mk(0, Marker.POINTS, (0.2, 0.4, 1.0, 0.8), 0.05)
+        fr.points = [Point(x=x, y=y, z=0.02) for f in self.frontiers for x, y in f["cells"]]
+        ma.markers.append(fr)
+        for i, g in enumerate(self.gave_up):
+            s = mk(10 + 2 * i, Marker.SPHERE, (1.0, 0.1, 0.1, 0.8), 0.12)
+            s.pose.position = Point(x=g["x"], y=g["y"], z=0.05)
+            t = mk(11 + 2 * i, Marker.TEXT_VIEW_FACING, (1.0, 0.3, 0.3, 1.0), 0.08)
+            t.pose.position = Point(x=g["x"], y=g["y"], z=0.2)
+            t.text = g["reason"]
+            ma.markers += [s, t]
+        if self.goal:
+            s = mk(1, Marker.SPHERE, (0.1, 1.0, 0.2, 0.9), 0.15)
+            s.pose.position = Point(x=self.goal["x"], y=self.goal["y"], z=0.05)
+            ma.markers.append(s)
+        self.marker_pub.publish(ma)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--name", default="explore", help="지도 이름 앞부분")
+    a = ap.parse_args()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)   # Ctrl+C 를 우리가 잡아야 목표 취소를 보낼 수 있음
+    n = Explorer(a.name)
+    try:
+        rclpy.spin(n)
+    except KeyboardInterrupt:
+        if n.goal and n.goal.get("handle"):
+            n.goal["handle"].cancel_goal_async()
+            rclpy.spin_once(n, timeout_sec=0.5)
+        n.say("Ctrl+C — 목표 취소, 멈춤", warn=True)
+    finally:
+        n.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == "__main__":
+    main()

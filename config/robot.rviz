@@ -522,7 +522,7 @@ Visualization Manager:
       Value: /waypoints
     Value: false
   - Class: rviz_default_plugins/MarkerArray
-    Enabled: true
+    Enabled: false
     Name: Explore frontiers
     Namespaces: {}
     Topic:
@@ -531,7 +531,7 @@ Visualization Manager:
       History Policy: Keep Last
       Reliability Policy: Reliable
       Value: /explore/frontiers
-    Value: true
+    Value: false
   - Class: rviz_default_plugins/Polygon
     Enabled: true
     Name: Collision stop
@@ -614,6 +614,17 @@ Visualization Manager:
     Decay Time: 0
     Position Transformer: XYZ
     Use Fixed Frame: true
+    Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Enabled: true
+    Name: SCR explore
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /scr_explore/markers
     Value: true
   Enabled: true
   Global Options:

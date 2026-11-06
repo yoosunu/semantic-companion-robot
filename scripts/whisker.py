@@ -4,7 +4,8 @@
   느끼기   /imu + /motor_out(브리지가 방금 모터를 바꿨나 = efference copy) → 부딪힘 / 끄덕임 / 건드림
            + 예상보다 느림(odom): 명령만큼 안 움직임 → 충격 없는 막힘 (손·쿠션·동물)
   단단/부드러움  충격·끄덕임 = 단단 → 영구 표시 / 느려짐·한쪽 들림(밟음) = 부드러움 → 바로 물러남, 표시 1분
-  (느려짐은 11-06 현재 관찰만: slow_react=False)
+  느려짐 (출발 1.5 s 뒤부터): 한 번 = 부드러운 것에 막힘 → 바로 5 cm 물러남 + 1분 표시 /
+           5 s·20 cm 안에 2번 이상 = stuck (헛바퀴·카펫 가장자리) → 바로 10 cm 빼기 + 차체 폭 영구 표시
   힘 제한  브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 실패해도 짓누르지 않게 (협동 로봇의 힘 제한 원칙)
   방향     직진 중 = 가던 쪽 (확실 → 표시). 회전·정지 중 = IMU 참고 (11-06: 박을 때 출렁임 + IMU ~10 Hz → 못 믿음, 표시 안 함)
   반응     멈춤 → 왔던 쪽으로 10 cm 빼기 (회전 중이었으면 15° 되돌리기) → 성공하면 Nav2 에 돌려줌
@@ -45,10 +46,14 @@ BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) �
                                       #   모터가 바뀌어 감지가 0.4 s 씩 가려짐 → 빼는 중 다시 박아도 놓침 → 안 씀
 STEP_TIMEOUT = 8.0            # s, 빼기 한 번 최대
 SLOW_WINDOW = 0.5             # s, "예상보다 느림" 판단 창 (0.05 m/s 면 1 cm 눈금 2.5개가 떠야 함)
-SLOW_SETTLE = 0.8             # s, 명령이 이만큼 이어진 뒤부터 판단 (출발 밀기 0.3 s 지난 뒤)
+SLOW_SETTLE = 1.5             # s, 명령이 이만큼 이어진 뒤부터 판단. 11-06: 0.8 → 1.5 (출발 헛것이 1.2~1.7 s 에 뜸).
+                              #   그 사이 안전은 힘 제한(PWM 40/55)이 지킴
 SLOW_RATIO = 0.3              # 예상 이동의 30% 도 못 가면 = 막힘
 SOFT_TTL = 60.0               # s, 부드러운 것(손·발·동물일 수도) 표시는 1분 뒤 사라짐
 RELEASE_FRAC = 0.6            # 빼기 거리의 앞 60% 동안 사건 무시 = 올라탔던 것에서 내려오는 흔들림
+STUCK_N, STUCK_S, STUCK_R = 2, 5.0, 0.20   # "느림"이 5 s 안에, 20 cm 안에서 2번 이상 = 진짜 막힘·헛바퀴 (11-06 카펫:
+                                           #   1초마다 연속 / 출발 헛것은 한 번만) → 못 가는 구역
+STUCK_HALF = 0.12             # m, 막힘 표시 반폭 → 차체 폭 ~25 cm (카펫 가장자리·턱 = 선)
 
 
 def yaw_of(q):
@@ -70,8 +75,8 @@ class Whisker(Node):
         self.bump_g = p("bump_g", 0.06).value          # 주행 중 수평 가속 튐 (상자 0.09, 주행 잡음 0.02)
         self.pitch_dps = p("pitch_dps", 5.5).value     # 주행 중 앞뒤 끄덕임 (카펫 7)
         self.roll_dps = p("roll_dps", 5.0).value       # 주행 중 좌우 기우뚱 = 한쪽 궤도가 뭔가를 밟음 (주행 중 gx 최대 ~2.7)
-        self.slow_react = p("slow_react", False).value # "예상보다 느림" 에 반응할지. 11-06: 빼기(바닥선 속도) 중 헛것 →
-                                                       #   일단 관찰만 (화면·로그에 got/want), 숫자 모은 뒤 켬
+        self.slow_react = p("slow_react", True).value  # "예상보다 느림" 에 반응. 11-06 밤: 관찰만(False)으로 뒀더니 카펫 가장자리에서
+                                                       #   17번 알고도 안 움직임 → Jasper 의도("부드러운 건 바로 물러남, 헛돌면 못 가는 곳")대로 켬
         self.touch_g = p("touch_g", 0.025).value       # 정지 중 건드림 (톡 0.04)
         self.rock_dps = p("rock_dps", 4.0).value       # 정지 중 기우뚱 (톡 6)
         self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리 (단단한 것)
@@ -104,6 +109,7 @@ class Whisker(Node):
         self.trapped = 0
         self.left_hits, self.right_hits = 0, 0
         self.cmd_since = time.time()       # 지금 명령이 시작된 시각 (느려짐 판단용)
+        self.slow_hist = collections.deque(maxlen=10)   # (시각, x, y) — 느림이 연달아 뜨는지
         self.cmd_now = (0.0, 0.0)
         # 기억
         self.points = []                   # (x, y, 만료 시각 또는 None=영구)
@@ -167,7 +173,19 @@ class Whisker(Node):
             got, want = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))), abs(cz) * dt
         if got < SLOW_RATIO * want:
             self.last_event = now
-            if not self.slow_react:    # 관찰만: 화면·로그에 숫자만 (반응·표시 없음)
+            # 연달아 뜨면 진짜: 5 s 안·20 cm 안에서 2번 이상 → stuck (헛바퀴·카펫 가장자리) = 반응 + 넓은 영구 표시
+            if self.odom:
+                self.slow_hist.append((now, self.odom[0], self.odom[1]))
+            near = [h for h in self.slow_hist if now - h[0] <= STUCK_S and self.odom
+                    and math.hypot(h[1] - self.odom[0], h[2] - self.odom[1]) <= STUCK_R]
+            if len(near) >= STUCK_N and straight:
+                self.slow_hist.clear()
+                ang = 0.0 if cx > 0 else math.pi
+                ev = {"ev": "stuck", "got": round(got, 3), "want": round(want, 3), "n": len(near), "dir": side_name(ang),
+                      "src": "motion", "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
+                self.on_contact(ev, ang)
+                return
+            if not self.slow_react:    # 한 번만 = 관찰만: 화면·로그에 숫자만 (출발 헛것일 수 있음)
                 self.record({"ev": "slow", "observe": True, "got": round(got, 3), "want": round(want, 3),
                              "kind": "straight" if straight else "turn", "dir": "-", "feel": "soft", "cmd_x": round(cx, 3),
                              "cmd_z": round(cz, 2), "state": self.state, "marked": False})
@@ -233,9 +251,11 @@ class Whisker(Node):
         # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
         #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
         #   roll(한쪽 궤도만 들림) = 뭔가를 밟음 (손가락·물건일 수도) → 부드러움 쪽으로 (표시 1분). pitch(양쪽) = 턱·레일 → 단단
-        ev["feel"] = "soft" if kind in ("slow", "roll") else ("hard" if kind in ("bump", "pitch") else "touch")
+        ev["feel"] = ("soft" if kind in ("slow", "roll") else
+                      "hard" if kind in ("bump", "pitch", "stuck") else "touch")   # stuck(헛바퀴 반복) = 못 가는 구역
         ttl = SOFT_TTL if ev["feel"] == "soft" else None
-        marked = kind in ("bump", "pitch", "roll", "slow") and ev.get("src") == "motion" and self.mark(ang, ttl)   # 확실한 것만
+        marked = (kind in ("bump", "pitch", "roll", "slow", "stuck") and ev.get("src") == "motion"
+                  and self.mark(ang, ttl, STUCK_HALF if kind == "stuck" else MARK_HALF))   # 확실한 것만
         ev["marked"] = marked
         self.record(ev)
         if kind == "touch" or not self.react:
@@ -249,7 +269,7 @@ class Whisker(Node):
             self.last_cmd = (self.motor[2], self.motor[3])
             self.trapped = 0
             # 바로 물러남: 부드러움(손·발일 수도) / 밟음·들림(pitch·roll — 올라탄 채 서 있지 않게). 부딪힘만 0.5 s 멈춘 뒤 빼기
-            self.go("stop" if kind == "bump" else "back")
+            self.go("stop" if kind == "bump" else "back")   # stuck 도 바로 빼기 (헛돌며 버티지 않게)
         elif self.state == "back":          # 빼다가 또 닿음 = 앞뒤 다 막힘 → 기다림. 빼는 방향은 처음 그대로 (안 뒤집음)
             self.trapped += 1
             if self.trapped > 3:            # 시도 1·2·3 다 실패
@@ -375,7 +395,7 @@ class Whisker(Node):
         c, s = math.cos(myaw), math.sin(myaw)
         return "map", mx + c * lx - s * ly, my + s * lx + c * ly, myaw + (oyaw - old[3])
 
-    def mark(self, ang, ttl=None):
+    def mark(self, ang, ttl=None, half=MARK_HALF):
         """충격 방향의 몸 둘레 점 + 3 cm 바깥에, 방향과 직각으로 점 3개 (~10 cm)"""
         pose = self.map_pose()
         if not pose or pose[0] != "map":
@@ -383,7 +403,8 @@ class Whisker(Node):
         _, x, y, yaw = pose
         ca, sa = math.cos(ang), math.sin(ang)
         r = min(HALF_L / abs(ca) if abs(ca) > 1e-6 else 9, HALF_W / abs(sa) if abs(sa) > 1e-6 else 9) + MARK_GAP
-        for off in (-MARK_HALF, 0.0, MARK_HALF):
+        n = max(1, round(half / 0.05))           # 5 cm 간격 (지도 칸)
+        for off in [half * i / n for i in range(-n, n + 1)]:
             bx, by = r * ca - off * sa, r * sa + off * ca            # 몸 기준
             self.points.append((x + math.cos(yaw) * bx - math.sin(yaw) * by,
                                 y + math.sin(yaw) * bx + math.cos(yaw) * by, time.time() + ttl if ttl else None))

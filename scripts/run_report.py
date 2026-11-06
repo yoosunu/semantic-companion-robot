@@ -193,6 +193,20 @@ class Builder:
             return
 
         # --- 브리지
+        if node == "scr_explore" and msg.startswith("EXPLORE "):   # 11-06 우리 탐색기
+            m = msg[8:]
+            if m.startswith("시작"):
+                self.add(t, "INFO", "run", "start", "scr_explore 시작")
+            elif m.startswith("포기"):
+                self.add(t, "WARN", "explore", "gave_up", m)
+            elif m.startswith("남은 경계 없음"):
+                self.add(t, "INFO", "explore", "return_home", m)
+            elif m.startswith("끝"):
+                self.add(t, "INFO" if "NOT" not in m else "WARN", "explore", "done", m)
+            elif "STUCK" in m or "제자리" in m:
+                self.add(t, "ERROR", "explore", "stuck", m)
+            return
+
         if node == "whisker":   # 11-06 Whisker: 촉각 사건 + 상태 (빼기·갇힘·구조 요청)
             if msg.startswith("SENSE "):
                 try:
