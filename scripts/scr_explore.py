@@ -127,9 +127,13 @@ class Explorer(Node):
 
     def robot(self):
         """지도 위치 = 마지막 SLAM 위치 + 그 뒤 odom 이동 (heartbeat·whisker 와 같은 방식)"""
-        if not self.odom_hist or not self.map_fix:
+        if not self.odom_hist:
             return None
         _, ox, oy, _ = self.odom_hist[-1]
+        if not self.map_fix:
+            # 11-06: SLAM 은 0.15 m 움직여야 첫 /pose 를 냄 → 출발 전엔 없음 → 탐색기가 영원히 "기다리는 중" 이었음.
+            # SLAM 시작 땐 지도 = 출발 자리 기준이라 odom ≈ map → odom 위치를 그대로 씀 (첫 보정이 오면 그걸로)
+            return ox, oy
         ts, mx, my, myaw = self.map_fix
         old = min(self.odom_hist, key=lambda r: abs(r[0] - ts))
         dx, dy = ox - old[1], oy - old[2]
@@ -185,7 +189,11 @@ class Explorer(Node):
     def step(self):
         if self.phase == "done":
             return
-        if not self.nav.server_is_ready() or self.grid is None or self.robot() is None:
+        waiting = [w for w, ok in (("Nav2", self.nav.server_is_ready()), ("지도", self.grid is not None),
+                                   ("odom", self.robot() is not None)) if not ok]
+        if waiting:
+            if int(time.time() - self.t0) % 5 == 0:
+                self.say("기다리는 중: " + ", ".join(waiting))
             return
         rx, ry = self.robot()
         now = time.time()
