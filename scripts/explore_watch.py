@@ -10,9 +10,11 @@
   - "Exploration stopped"            : 더 볼 곳 없음 → 집으로 복귀 시작 (알림 안 함, 화면에만)
   - "returned to initial pose"       : 복귀까지 끝 → 지도 자동 저장 ~/maps/<name>_<날짜_시각> + ntfy 알림
   - 복귀가 3분 안에 안 끝나면         : 저장 + "복귀 못 함" 알림 (막혔을 수 있음)
+  - 탐색 중 3분 동안 10 cm 도 못 움직이면: "멈춘 것 같음" 알림 (끝나지도 않고 서 버린 경우. 다시 움직이면 다시 감시) — 11-06
 알림 주제는 ~/.scr.env 의 NTFY_TOPIC (저장소 밖). 탐색기 자체는 그대로 둠 → 끄는 건 평소처럼 Ctrl+C.
 """
 import argparse
+import math
 import os
 import subprocess
 import threading
@@ -22,6 +24,29 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 RETURN_LIMIT = 180.0   # s, "Exploration stopped" 뒤 복귀를 기다리는 최대 시간
+STUCK_LIMIT = 180.0    # s, 탐색 중 이 시간 동안 STUCK_DIST 도 못 움직이면 알림
+STUCK_DIST = 0.10      # m
+
+
+def odom_watch(state):
+    """/odom 을 듣는 작은 노드 (별도 스레드). 마지막으로 10 cm 이상 움직인 시각을 state 에 적는다."""
+    import rclpy
+    from nav_msgs.msg import Odometry
+    rclpy.init()
+    n = rclpy.create_node("explore_watch")
+    anchor = {"p": None}
+
+    def on_odom(m):
+        p = (m.pose.pose.position.x, m.pose.pose.position.y)
+        if anchor["p"] is None or math.dist(p, anchor["p"]) > STUCK_DIST:
+            anchor["p"] = p
+            state["moved_at"] = time.time()
+            state["stuck_sent"] = False
+    n.create_subscription(Odometry, "odom", on_odom, 10)
+    try:
+        rclpy.spin(n)
+    except Exception:
+        pass
 
 
 def ntfy(title, body, urgent=False):
@@ -62,7 +87,7 @@ def main():
            "--params-file", str(REPO / "config" / "explore.yaml"), "-p", "use_sim_time:=false"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     t0 = time.time()
-    state = {"stopped_at": None, "done": False}   # (목표 개수는 탐색기가 DEBUG 로만 찍어서 못 셈)
+    state = {"stopped_at": None, "done": False, "moved_at": time.time(), "stuck_sent": False}   # (목표 개수는 탐색기가 DEBUG 로만 찍어서 못 셈)
 
     def finish(title, urgent):
         if state["done"]:
@@ -74,11 +99,18 @@ def main():
         print(f"\n[watch] ===== {title} — {body.replace(chr(10), ' / ')} =====\n", flush=True)
         ntfy(title, body, urgent or not ok)
 
-    def return_timer():   # 복귀가 너무 오래 걸리면 그래도 알린다
+    def return_timer():   # 복귀가 너무 오래 걸리면 그래도 알린다 + 탐색 중 멈춤 감시
         while not state["done"]:
             if state["stopped_at"] and time.time() - state["stopped_at"] > RETURN_LIMIT:
                 finish("robot: explore done, NOT home", True)
+            if (not state["stopped_at"] and not state["stuck_sent"]
+                    and time.time() - state["moved_at"] > STUCK_LIMIT):
+                state["stuck_sent"] = True
+                mins = int((time.time() - t0) // 60)
+                print(f"\n[watch] ===== {STUCK_LIMIT / 60:.0f}분 동안 제자리 — 멈춘 것 같음 ({mins}분째) =====\n", flush=True)
+                ntfy("robot: explore STUCK?", f"{STUCK_LIMIT / 60:.0f}분 동안 10 cm 도 못 움직임 (탐색 {mins}분째). RViz 로 확인", True)
             time.sleep(2)
+    threading.Thread(target=odom_watch, args=(state,), daemon=True).start()
     threading.Thread(target=return_timer, daemon=True).start()
 
     try:

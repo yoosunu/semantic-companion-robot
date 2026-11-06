@@ -11,12 +11,13 @@
     costmap_updates_topic: map_updates
     visualize: true                    # RViz에 경계 표시 (MarkerArray: /explore/frontiers)
     planner_frequency: 0.15            # [Hz] 다음 경계를 다시 고르는 주기
-    progress_timeout: 30.0             # [s] 이 시간 동안 경계에 못 가까워지면 그 경계는 포기
+    progress_timeout: 180.0            # [s] 이 시간 동안 경계에 못 가까워지면 그 경계는 포기. 11-06 30 → 180:
+                                       #   Whisker 가 박고 → 빼고 → 표시하고 다시 시도할 시간 (30초면 카펫·레일에서 너무 일찍 포기)
     potential_scale: 3.0               # 거리 가중치 (클수록 가까운 경계 선호)
     gain_scale: 1.0                    # 크기 가중치 (클수록 큰 경계 선호)
     orientation_scale: 0.0
     min_frontier_size: 0.30            # [m] 이보다 작은 경계는 무시. 11-05 0.75 → 0.30: 방(2.8×3.2 m)에선 가구 뒤·구석 경계가
                                        #   다 0.75 m 보다 작아서 출발 13초 만에 "No frontiers found" (구석 회색 그대로). 못 가는 경계는
-                                       #   progress_timeout 30 s 뒤 포기하니 무한 반복은 안 함
+                                       #   progress_timeout(180 s) 뒤 포기하니 무한 반복은 안 함
     transform_tolerance: 0.3
     return_to_init: true               # 다 탐색하면 출발점으로 복귀 (순회와 같은 조건으로 표류 비교)

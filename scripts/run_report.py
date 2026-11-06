@@ -193,10 +193,30 @@ class Builder:
             return
 
         # --- 브리지
+        if node == "whisker":   # 11-06 Whisker: 촉각 사건 + 상태 (빼기·갇힘·구조 요청)
+            if msg.startswith("SENSE "):
+                try:
+                    d = json.loads(msg[6:])
+                except ValueError:
+                    return
+                kind = d.get("ev", "?")
+                self.sense_counts[kind] += 1
+                if kind != "touch":
+                    self.add(t, "WARN", "whisker", kind,
+                             f"{d.get('dir', '?')} {d.get('g', d.get('dps', ''))} @({d.get('x')}, {d.get('y')})"
+                             + (" 표시" if d.get("marked") else ""))
+            elif msg.startswith("WHISKER "):
+                st = msg.split()[1].rstrip(":")
+                if st in ("trapped", "help"):
+                    self.add(t, "ERROR" if st == "help" else "WARN", "whisker", st, msg[8:])
+                elif st == "drive":
+                    self.sense_counts["escaped"] += 1
+            return
+
         if node == "ugv02_bridge":
             if "odometry starts" in msg:
                 self.add(t, "INFO", "bridge", "start", msg)
-            elif msg.startswith("SENSE "):   # v7 (11-06) IMU 감각, 관찰 모드: 부딪힘·끄덕임·건드림·헛돌기
+            elif msg.startswith("SENSE "):   # (v7 브리지 시절 형식, 11-06 v8 부터는 whisker 노드가 냄)
                 try:
                     d = json.loads(msg[6:])
                 except ValueError:
@@ -319,7 +339,7 @@ def report(run_start, files, out_dir):
     L.append(f"- 충돌 감시 감속 {cc['slow']}회, 접근 {cc['approach']}회 (시간표엔 생략)")
     sc = b.sense_counts
     if sc:
-        L.append("- IMU 감각 (관찰 모드): " + ", ".join(f"{k} {v}회" for k, v in sorted(sc.items())))
+        L.append("- Whisker: " + ", ".join(f"{k} {v}회" for k, v in sorted(sc.items())))
     L.append(f"- 로그 파일 {len(files)}개: " + ", ".join(sorted({n for _, n, _ in files})))
     L.append("")
     L.append("## 움직임 (10초 한 칸 · `#` 움직이라는 명령 · `.` 0 명령 · 빈칸 명령 기록 없음)\n")

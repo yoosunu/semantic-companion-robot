@@ -51,6 +51,22 @@ behavior_server:                         # 복구 동작 (spin / backup) 도 기
 local_costmap:
   local_costmap:
     ros__parameters:
+      plugins: ["obstacle_layer", "voxel_layer", "whisker_layer", "inflation_layer"]   # 11-06 + whisker_layer
+      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (scripts/whisker.py) — LiDAR 가 못 보는 것
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: false  # 몸 밑이라고 지우지 않음
+        observation_sources: whisker
+        whisker:
+          topic: /whisker/cloud
+          data_type: "PointCloud2"
+          marking: true
+          clearing: false                  # LiDAR 도, 이 소스도 지우지 않음 (유리 너머 빔이 지우면 안 됨). 지우기 = /whisker/clear
+          obstacle_max_range: 50.0         # 점 원점이 map (0,0) 이라 멀리 있어도 받게
+          obstacle_min_range: 0.0
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"   # 252×230 mm (+약간), robot_radius 대신
       inflation_layer:
         inflation_radius: 0.30           # [m] 시뮬 0.5 → 방이 좁음
@@ -68,6 +84,22 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
+      plugins: ["static_layer", "obstacle_layer", "voxel_layer", "whisker_layer", "inflation_layer"]   # 11-06 + whisker_layer
+      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (scripts/whisker.py) — LiDAR 가 못 보는 것
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: false  # 몸 밑이라고 지우지 않음
+        observation_sources: whisker
+        whisker:
+          topic: /whisker/cloud
+          data_type: "PointCloud2"
+          marking: true
+          clearing: false                  # LiDAR 도, 이 소스도 지우지 않음 (유리 너머 빔이 지우면 안 됨). 지우기 = /whisker/clear
+          obstacle_max_range: 50.0         # 점 원점이 map (0,0) 이라 멀리 있어도 받게
+          obstacle_min_range: 0.0
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"
       inflation_layer:
         inflation_radius: 0.30

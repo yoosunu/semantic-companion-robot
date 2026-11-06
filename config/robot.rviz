@@ -579,6 +579,24 @@ Visualization Manager:
     Covariance:
       Value: false
     Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Enabled: true
+    Name: Whisker contacts
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /whisker/cloud
+    Style: Spheres
+    Size (m): 0.05
+    Color Transformer: FlatColor
+    Color: 255; 0; 255
+    Alpha: 1
+    Decay Time: 0
+    Position Transformer: XYZ
+    Use Fixed Frame: true
+    Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

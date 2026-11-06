@@ -23,8 +23,10 @@
 // v5.3 TAP decides from the AVERAGE ask of the last 0.5 s, not the latest one (11-05 explore: stuck 18 cm from home next to
 //      a wall, MPPI asked x ±0.005 z ±0.02-0.06 flipping sign every tick → every flip became a real tap → back-and-forth
 //      and head-shaking for 80 s). Flipping noise averages to ~0 → rest. A real slow ask keeps its sign → still taps.
-// v7  sensing (11-06): bump / pitch / touch / stall from the IMU, OBSERVE ONLY (log "SENSE {...}" + /sense).
-//     Ignores the IMU right after our own motor changes (efference copy). docs/calibration/imu-touch-2026-11-06.md
+// v8  Whisker hooks (11-06), the bridge stays thin — all touch logic lives in scripts/whisker.py (Python, no rebuild):
+//     ① /motor_out [pwm_l, pwm_r, cmd_x, cmd_z, whisker] every feedback line → whisker's "efference copy" (our own jolts)
+//     ② /whisker/cmd_vel has PRIORITY over /cmd_vel while it keeps coming (0.3 s): stop, back off, wait — Nav2 is ignored.
+//        A zero command from whisker = stop NOW (no tap tail). When whisker goes quiet, Nav2 drives again.
 // v6  /imu (11-06): raw IMU every feedback line → touch/bump/terrain sensing (scripts/imu_lab.py measures it).
 // v1  feedback T:1001 → wheel odometry (dead reckoning) → /odom, TF, battery.
 //     Known limit: dt is measured from ARRIVAL time on the Pi, so two lines read in the same tick get dt≈0
@@ -52,7 +54,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
 #include "sensor_msgs/msg/imu.hpp"
-#include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 #include "tf2/LinearMath/Quaternion.hpp"       // yaw → quaternion
 #include "tf2_ros/transform_broadcaster.hpp"   // sends the odom → base_footprint TF
 
@@ -99,19 +101,20 @@ public:
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", 10);
     battery_pub_ = create_publisher<sensor_msgs::msg::BatteryState>("battery_state", 10);
     imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("imu", 20);   // v6 (11-06): raw IMU for touch/bump sensing
-    sense_pub_ = create_publisher<std_msgs::msg::String>("sense", 10);   // v7 (11-06): touch/bump/pitch/stall events (JSON)
-    // v7 sensing thresholds (11-06 imu_lab: rest noise ~0.005 g, cruise ~0.02 g, finger tap 0.04 g, soft-box bump 0.09 g,
-    // carpet edge pitch 7 deg/s). OBSERVE ONLY: logs + /sense, never stops the robot (yet). Tune live: ros2 param set.
-    sense_bump_g_ = declare_parameter<double>("sense_bump_g", 0.06);      // moving, not our own push: horizontal accel jump
-    sense_touch_g_ = declare_parameter<double>("sense_touch_g", 0.025);   // standing still: horizontal accel jump
-    sense_rock_dps_ = declare_parameter<double>("sense_rock_dps", 4.0);   // standing still: roll/pitch rate (tap on the side)
-    sense_pitch_dps_ = declare_parameter<double>("sense_pitch_dps", 5.5); // moving: nose up/down rate (carpet / ledge)
+    motor_pub_ = create_publisher<std_msgs::msg::Float32MultiArray>("motor_out", 20);   // v8: what WE told the motors
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     // Input (down direction): when a /cmd_vel message arrives, call on_cmd_vel with it.
     cmd_vel_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
       "cmd_vel", 10,
       [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {on_cmd_vel(msg);});
+    // v8: Whisker (scripts/whisker.py) takes over while it talks.
+    whisker_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+      "whisker/cmd_vel", 10,
+      [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
+        last_whisker_time_ = now();
+        apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
+      });
 
     // Two heartbeats with different jobs:
     //   20 ms → on_read  : read feedback (arrives every 50 ms; read faster than it comes so nothing piles up)
@@ -136,11 +139,17 @@ private:
   // Why T:1 and not T:13 (forward + turn): only T:1 refreshes the firmware heartbeat (see constructor).
   // The split is the same one the firmware did for T:13: L = x - z*track/2, R = x + z*track/2.
   void on_cmd_vel(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
+    if (whisker_active()) {return;}   // v8: Whisker is handling a touch → Nav2 waits
+    apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
+  }
+
+  bool whisker_active() {
+    return last_whisker_time_.nanoseconds() != 0 && (now() - last_whisker_time_).seconds() < kWhiskerHold;
+  }
+
+  void apply_cmd(const double x, const double z) {   // x: forward speed m/s, z: turn speed rad/s (+ = left)
     stopped_ = false;
     last_cmd_vel_time_ = now();
-
-    const double x = msg->twist.linear.x;    // forward speed, m/s
-    const double z = msg->twist.angular.z;   // turn speed, rad/s (+ = left)
 
     const double left = x - z * track_width_ / 2.0;    // m/s
     const double right = x + z * track_width_ / 2.0;   // m/s
@@ -173,6 +182,13 @@ private:
       cmd_x_ = cmd_z_ = 0.0; turn_trim_ = 0.0; turn_trim_dir_ = 0;
       tap_t_ = 0.0; tap_sum_x_ = tap_sum_z_ = 0.0; tap_n_ = 0; tap_x_ = tap_z_ = tap_duty_ = 0.0;   // resume = fresh tap
       send_stop("cmd_vel timeout");
+    }
+    if (drive_mode_ == "pwm" && !stopped_ && whisker_active() && cmd_x_ == 0.0 && cmd_z_ == 0.0) {
+      // v8: Whisker says "stop" → PWM 0 right now (the tap mode would otherwise finish its current push)
+      wheel_l_ = Wheel{}; wheel_r_ = Wheel{}; turn_trim_ = 0.0; turn_trim_dir_ = 0;
+      tap_t_ = 0.0; tap_sum_x_ = tap_sum_z_ = 0.0; tap_n_ = 0; tap_x_ = tap_z_ = tap_duty_ = 0.0;
+      serial_.write_line("{\"T\":11,\"L\":0,\"R\":0}");
+      return;
     }
     if (drive_mode_ == "pwm" && !stopped_) {
       pwm_step();
@@ -379,7 +395,7 @@ private:
       publish_odom();
       publish_battery(fb);
       publish_imu(fb);
-      sense(fb);
+      publish_motor();
     }
   }
 
@@ -477,76 +493,14 @@ private:
     imu_pub_->publish(m);
   }
 
-  // v7 (11-06) SENSING — "the sensitive robot", observe-only first (log + /sense, no stopping) to count false alarms.
-  // Efference copy: the bridge KNOWS when it changes the motors (start, stop, tap pushes, turn changes) and ignores the
-  // IMU for kSelfMask after each change — those jolts are ours (11-06: our own start = 0.17 g, bigger than a bump 0.09 g).
-  //   bump   moving, not our own change, horizontal accel off its baseline > sense_bump_g   → direction = sign of ax/ay
-  //   pitch  moving, not our own change, |gy| > sense_pitch_dps (nose up/down = carpet edge, ledge)
-  //   touch  motors off and settled, horizontal accel > sense_touch_g or roll/pitch rate > sense_rock_dps (tap, push, lift)
-  //   stall  turning asked, a wheel pushed hard (PWM ≥ 45) for 1 s, but the gyro says we are not turning (carpet, stuck)
-  // Axes are the BOARD's (11-06: a side tap shows on gx = roll → x ≈ forward/back; signs not yet measured → reported raw).
-  void sense(const scr_ugv02::Feedback & fb) {
-    const rclcpp::Time t = now();
-    constexpr double kG = 1.0 / 8500.0;
-    const double ax = fb.ax * kG, ay = fb.ay * kG;
-    const double gx = fb.gx / scr_ugv02::kGyroUnitsPerDegS, gy = fb.gy / scr_ugv02::kGyroUnitsPerDegS;
-    if (!sense_base_ready_) {
-      base_ax_ = ax; base_ay_ = ay; base_gx_ = gx; base_gy_ = gy; sense_base_ready_ = true;
-      last_self_change_ = t; last_sense_event_ = t; return;
-    }
-    // Did WE just change something? (PWM mode: wheel outputs; PID mode: the command)
+  // v8: efference copy for whisker.py — the motor outputs WE chose (PWM mode) and the command we follow.
+  void publish_motor() {
+    std_msgs::msg::Float32MultiArray m;
     const bool pwm = drive_mode_ == "pwm";
-    const double out_l = pwm ? wheel_l_.out : cmd_x_ * 100.0, out_r = pwm ? wheel_r_.out : cmd_z_ * 100.0;
-    if (std::abs(out_l - prev_out_l_) > 8.0 || std::abs(out_r - prev_out_r_) > 8.0 ||
-        std::abs(cmd_x_ - prev_cmd_x_) > 0.02 || std::abs(cmd_z_ - prev_cmd_z_) > 0.05) {
-      last_self_change_ = t;
-    }
-    prev_out_l_ = out_l; prev_out_r_ = out_r; prev_cmd_x_ = cmd_x_; prev_cmd_z_ = cmd_z_;
-
-    const bool motors_on = std::abs(out_l) > 1.0 || std::abs(out_r) > 1.0;
-    const bool settled = (t - last_self_change_).seconds() > kSelfMask;
-    const double dax = ax - base_ax_, day = ay - base_ay_, dgx = gx - base_gx_, dgy = gy - base_gy_;
-    const double horiz = std::hypot(dax, day);
-
-    // Baseline follows slowly only while nothing is happening (so a long push does not become "normal").
-    if (settled && horiz < sense_touch_g_ && std::abs(dgx) < sense_rock_dps_ && std::abs(dgy) < sense_rock_dps_) {
-      constexpr double a = 0.02;   // ≈ 2.5 s at 20 Hz
-      base_ax_ += a * dax; base_ay_ += a * day; base_gx_ += a * dgx; base_gy_ += a * dgy;
-    }
-
-    // Stall while turning: asked to turn, pushing hard, gyro says no.
-    if (std::abs(cmd_z_) > 0.1 && std::max(std::abs(out_l), std::abs(out_r)) >= 45.0 && std::abs(w_) < 0.03) {
-      if (turn_stall_since_.nanoseconds() == 0) {turn_stall_since_ = t;}
-    } else {
-      turn_stall_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
-    }
-
-    if ((t - last_sense_event_).seconds() < kSenseDebounce || !settled) {return;}
-    char json[200];
-    json[0] = 0;
-    if (motors_on && horiz > sense_bump_g_) {
-      std::snprintf(json, sizeof(json), "{\"ev\":\"bump\",\"g\":%.3f,\"ax\":%.3f,\"ay\":%.3f,\"cmd_x\":%.3f,\"cmd_z\":%.2f}",
-                    horiz, dax, day, cmd_x_, cmd_z_);
-    } else if (motors_on && std::abs(dgy) > sense_pitch_dps_) {
-      std::snprintf(json, sizeof(json), "{\"ev\":\"pitch\",\"dps\":%.1f,\"cmd_x\":%.3f}", dgy, cmd_x_);
-    } else if (!motors_on && (horiz > sense_touch_g_ || std::abs(dgx) > sense_rock_dps_ || std::abs(dgy) > sense_rock_dps_)) {
-      std::snprintf(json, sizeof(json), "{\"ev\":\"touch\",\"g\":%.3f,\"ax\":%.3f,\"ay\":%.3f,\"gx\":%.1f,\"gy\":%.1f}",
-                    horiz, dax, day, dgx, dgy);
-    } else if (turn_stall_since_.nanoseconds() != 0 && (t - turn_stall_since_).seconds() > 1.0) {
-      std::snprintf(json, sizeof(json), "{\"ev\":\"stall\",\"cmd_z\":%.2f,\"gyro\":%.2f,\"pwm_l\":%.0f,\"pwm_r\":%.0f}",
-                    cmd_z_, w_, out_l, out_r);
-      turn_stall_since_ = t;   // report again only if it goes on
-    }
-    if (json[0]) {
-      last_sense_event_ = t;
-      RCLCPP_WARN(get_logger(), "SENSE %s", json);
-      std_msgs::msg::String m;
-      m.data = json;
-      sense_pub_->publish(m);
-    }
+    m.data = {static_cast<float>(pwm ? wheel_l_.out : 0.0), static_cast<float>(pwm ? wheel_r_.out : 0.0),
+              static_cast<float>(cmd_x_), static_cast<float>(cmd_z_), whisker_active() ? 1.0f : 0.0f};
+    motor_pub_->publish(m);
   }
-  static constexpr double kSelfMask = 0.4;        // s after our own motor change: the IMU jolt is ours, ignore it
-  static constexpr double kSenseDebounce = 1.0;   // s, at most one event per second
 
   void publish_odom() {
     const rclcpp::Time stamp = now();
@@ -608,15 +562,10 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sense_pub_;
-  double sense_bump_g_{0.06}, sense_touch_g_{0.025}, sense_rock_dps_{4.0}, sense_pitch_dps_{5.5};
-  // v7 sensing state
-  double base_ax_{0.0}, base_ay_{0.0}, base_gx_{0.0}, base_gy_{0.0};   // "what the IMU says when nothing happens" (slow average)
-  bool sense_base_ready_{false};
-  double prev_out_l_{0.0}, prev_out_r_{0.0}, prev_cmd_x_{0.0}, prev_cmd_z_{0.0};
-  rclcpp::Time last_self_change_{0, 0, RCL_ROS_TIME};      // last time WE changed what the motors do
-  rclcpp::Time last_sense_event_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time turn_stall_since_{0, 0, RCL_ROS_TIME};
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr motor_pub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr whisker_sub_;
+  rclcpp::Time last_whisker_time_{0, 0, RCL_ROS_TIME};
+  static constexpr double kWhiskerHold = 0.3;   // s, whisker keeps priority this long after its last command
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr read_timer_;

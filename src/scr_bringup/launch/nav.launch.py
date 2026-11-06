@@ -4,6 +4,7 @@
 
   켜지는 것                 하는 일
   robot.launch.py          브리지(odom: 자이로 + 주행거리계), 라이다 /scan, 로봇 모델 TF
+  whisker.py               촉각: 닿으면 멈춤·10 cm 빼기·갇히면 대기·구조 요청 + 자리 표시 → costmap whisker_layer (11-06)
   slam_toolbox (async)     /map, map → odom  (설정: 패키지 기본값 + config/slam_real.yaml)
   Nav2 (navigation_launch) 경로 계획(NavFn), 따라가기(MPPI), 속도 부드럽게, 충돌 감시
   - map_server·AMCL 없음 (지도는 SLAM 이 실시간으로)
@@ -22,7 +23,7 @@ import subprocess
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction,
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction,
                             RegisterEventHandler, TimerAction)
 from launch.event_handlers import OnShutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -96,6 +97,8 @@ def generate_launch_description():
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(nav2, "launch", "navigation_launch.py")),
                 launch_arguments={"use_sim_time": "false", "params_file": params, "autostart": "true"}.items()),
+            # 11-06 Whisker: 촉각 (느끼기·멈춤·빼기·갇힘·구조 요청·지도 표시). 브리지 v8 은 /imu·/motor_out 만 주고 /whisker/cmd_vel 을 우선 따름
+            ExecuteProcess(cmd=["python3", os.path.join(REPO, "scripts", "whisker.py")], output="screen"),
         ]),
 
         RegisterEventHandler(OnShutdown(on_shutdown=[OpaqueFunction(function=report_after_shutdown)])),
