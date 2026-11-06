@@ -4,7 +4,7 @@
 # 로봇은 먼저 "집" 자리에 (지도 기준이 됨). 보기: tmux attach -t explore (나오기 Ctrl+b → d). 멈추기: scripts/stop_all.sh
 NAME="${1:-room}"
 REPO=~/semantic-companion-robot
-"$REPO/scripts/stop_all.sh" quiet
+bash "$REPO/scripts/stop_all.sh" quiet
 cd "$REPO" && git pull --ff-only -q || { echo "git pull 실패"; exit 1; }
 echo "nav 켜는 중 (25초)…"
 tmux new -d -s nav "bash -ic 'ros2 launch scr_bringup nav.launch.py ugv_port:=/dev/ttyAMA0; exec bash'"
@@ -16,4 +16,4 @@ tmux new -d -s hb "bash -ic 'python3 $REPO/scripts/heartbeat.py --period 30; exe
 tmux new -d -s explore "bash -ic 'python3 $REPO/scripts/scr_explore.py --name $NAME; exec bash'"
 sleep 8
 tmux capture-pane -J -pt explore | grep EXPLORE | tail -3
-echo "보기: tmux attach -t explore  |  Whisker: tmux capture-pane -J -pt nav | grep -E 'SENSE|WHISKER' | tail  |  멈추기: $REPO/scripts/stop_all.sh"
+echo "보기: tmux attach -t explore  |  Whisker: tmux capture-pane -J -pt nav | grep -E 'SENSE|WHISKER' | tail  |  멈추기: bash $REPO/scripts/stop_all.sh"
