@@ -52,6 +52,8 @@ REACH_COST = 75          # 전역 비용지도(0~100) 이 미만 = 로봇 중심
 VIEW_COST = 40           # 관찰점은 더 넉넉히 (벽·가구에서 떨어진 곳)
 SEE_R = 0.35             # m, 갈 수 있는 곳에서 이 안의 경계만 = 그 너머는 좁은 틈·구석
 VIEW_MIN, VIEW_MAX = 0.20, 1.50   # m, 관찰점 ↔ 경계 거리
+SETTLE_S = 7.0           # s, 관찰점 도착 후 SLAM 지도 갱신(5 s) 기다림 (11-07 02:25: 도착 즉시 unseen 으로 전부 포기)
+NOVIEW_S = 30.0          # s, 갈 자리가 이만큼 계속 없을 때만 포기 (처음엔 지도가 작아서 잠깐 없을 수 있음)
 CONTACTS = ("bump", "pitch", "roll", "stuck")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
 CANCEL_WAIT = 15.0       # s, 취소 보냈는데 Nav2 답이 없으면 우리가 정리
 STATUS_S = 30.0          # s, 상태 한 줄 주기
@@ -111,6 +113,8 @@ class Explorer(Node):
         self.moved = {"p": None, "t": time.time(), "sent": False}
         self.t0 = time.time()
         self.errors = 0
+        self.settle_until = 0.0
+        self.no_view = {}                        # (x, y) 경계 → 처음 "갈 자리 없음" 본 시각 (보류)
         self.last_status = time.time()
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
@@ -255,7 +259,8 @@ class Explorer(Node):
             v = a[lr, lc]
             if ((v >= 0) & (v < 100)).all():
                 return int(sr[i]), int(sc[i])
-        return None
+        i = int(np.argmin(d_f)) if len(d_f) else None    # 시선이 다 막힘 → 경계에 가장 가까운 안전한 칸으로 다가감
+        return (int(sr[i]), int(sc[i])) if i is not None else None
 
     @staticmethod
     def near(x, y, pts, r=REGION):
@@ -287,7 +292,7 @@ class Explorer(Node):
 
         self.frontiers = self.find_frontiers()
         given = [(g["x"], g["y"]) for g in self.gave_up]
-        cands = []
+        cands, held = [], []
         for f in self.frontiers:
             if self.near(f["x"], f["y"], given):
                 continue
@@ -295,15 +300,23 @@ class Explorer(Node):
                 self.give_up(f["x"], f["y"], "whisker")       # 닿아서 확인한 곳 → 처음부터 제외
                 given.append((f["x"], f["y"]))
                 continue
-            if f["vx"] is None:
-                self.give_up(f["x"], f["y"], "no_view")       # 보이는 안전한 자리가 없음 → 가 보지도 않음
-                given.append((f["x"], f["y"]))
+            if f["vx"] is None:                                # 근처에 안전한 자리가 없음 → 보류, 30 s 계속이면 포기
+                key = next((k for k in self.no_view if math.hypot(k[0] - f["x"], k[1] - f["y"]) < REGION), None)
+                if key is None:
+                    self.no_view[(f["x"], f["y"])] = now
+                elif now - self.no_view[key] > NOVIEW_S:
+                    self.give_up(f["x"], f["y"], "no_view")
+                    given.append((f["x"], f["y"]))
+                    del self.no_view[key]
+                held.append(f)
                 continue
             cands.append(f)
         self.publish_markers()
 
         if self.phase == "home":
             return                                             # 결과 콜백이 마무리
+        if now < self.settle_until:
+            return                                             # 관찰점 도착 — 지도가 새로 그려질 때까지
         g = self.goal
         if g and g.get("cancel_t") and now - g["cancel_t"] > CANCEL_WAIT:
             # 취소를 보냈는데 Nav2 가 답을 안 함 → 우리가 정리하고 다음으로 (멈춰 서 있지 않게)
@@ -331,6 +344,10 @@ class Explorer(Node):
             elif not still:
                 self.say("목표 경계가 이미 보임 → 다음 목표")
                 self.cancel_goal(None)
+            return
+        if not cands and held:
+            if int(now) % 5 == 0:
+                self.say(f"갈 자리 없는 경계 {len(held)}곳 보류 중 ({NOVIEW_S:.0f}초 지나면 포기)")
             return
         if not cands:
             self.say(f"남은 경계 없음 (포기 {len(self.gave_up)}곳) → 집으로")
@@ -400,7 +417,8 @@ class Explorer(Node):
         self.say(f"Nav2 답: {dict(((4, '도착'), (5, '취소됨'), (6, '실패'))).get(status, status)}")
         if status == 4:
             self.reached.append((g["x"], g["y"]))
-            self.say(f"도착 ({g['x']:.2f}, {g['y']:.2f})")
+            self.settle_until = time.time() + SETTLE_S
+            self.say(f"관찰점 도착 (경계 {g['x']:.2f}, {g['y']:.2f}) — 지도 갱신 {SETTLE_S:.0f}초 기다림")
         elif g.get("cancel_reason") and g["cancel_reason"] != "replan":
             self.give_up(g["x"], g["y"], g["cancel_reason"])
         elif status == 6:
