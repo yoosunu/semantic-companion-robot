@@ -23,6 +23,7 @@
 // v5.3 TAP decides from the AVERAGE ask of the last 0.5 s, not the latest one (11-05 explore: stuck 18 cm from home next to
 //      a wall, MPPI asked x ±0.005 z ±0.02-0.06 flipping sign every tick → every flip became a real tap → back-and-forth
 //      and head-shaking for 80 s). Flipping noise averages to ~0 → rest. A real slow ask keeps its sign → still taps.
+// v8.1 FORCE LIMIT (11-06): PWM ≤ 40 straight / ≤ 55 turning (params push_cap_*) — blocked wheels no longer push harder.
 // v8  Whisker hooks (11-06), the bridge stays thin — all touch logic lives in scripts/whisker.py (Python, no rebuild):
 //     ① /motor_out [pwm_l, pwm_r, cmd_x, cmd_z, whisker] every feedback line → whisker's "efference copy" (our own jolts)
 //     ② /whisker/cmd_vel has PRIORITY over /cmd_vel while it keeps coming (0.3 s): stop, back off, wait — Nav2 is ignored.
@@ -75,6 +76,11 @@ public:
     heartbeat_ms_ = declare_parameter<int>("heartbeat_ms", 500);             // firmware auto-stop if no T:1 for this long
     drive_mode_ = declare_parameter<std::string>("drive_mode", "pid");       // "pid" (T:1, firmware PID) | "pwm" (T:11, our control, v5)
     pwm_max_ = declare_parameter<double>("pwm_max", 100.0);                  // safety cap for PWM mode (80 ≈ 0.34 m/s)
+    // v8.1 (11-06) FORCE LIMIT — "can't crush what it can't detect" (Jasper: a child's hand, a pet's paw). Blocked wheels used
+    // to get PWM raised up to 100 by the break-away push (it pushed Jasper's hand). Crawling needs PWM 30 (0.08 m/s), a
+    // break-away 35-40, an on-the-spot turn 40-50 → cap there. Too low = can't climb a rug edge → Whisker feels the stall.
+    push_cap_straight_ = declare_parameter<double>("push_cap_straight", 40.0);
+    push_cap_turn_ = declare_parameter<double>("push_cap_turn", 55.0);
     if (drive_mode_ != "pid" && drive_mode_ != "pwm") {
       throw std::runtime_error("drive_mode must be 'pid' or 'pwm'");
     }
@@ -239,7 +245,7 @@ private:
     return on_the_spot ? lookup(spin, z) : 40.0 * z;   // 40 PWM per rad/s ≈ slope of the spin table
   }
 
-  void control_wheel(Wheel & w, double desired, const rclcpp::Time & t) {   // desired = signed PWM before the push logic
+  void control_wheel(Wheel & w, double desired, const rclcpp::Time & t, double cap) {   // desired = signed PWM; cap = force limit
     if (std::abs(desired) < kPwmDeadzone) {     // nothing worth sending (also tiny Nav2 corrections)
       w.out = 0.0; w.dir = 0; w.rolling = false;
       return;
@@ -260,12 +266,12 @@ private:
       if (moving && w.push >= mag) {             // it turns → drop to the holding PWM (the "kick" ends here)
         w.rolling = true;
       } else {
-        w.push = std::min(std::max(w.push, mag - kPushStep) + kPushStep, pwm_max_);   // gentle: raise until it moves
+        w.push = std::min(std::max(w.push, mag - kPushStep) + kPushStep, cap);   // gentle: raise until it moves (≤ force cap)
       }
     } else if ((t - w.last_move).seconds() > kStallTime) {   // stuck while rolling (rug edge) → push again
       w.rolling = false; w.push = mag - kPushStep;
     }
-    w.out = dir * std::min(w.rolling ? mag : std::max(w.push, mag), pwm_max_);
+    w.out = dir * std::min({w.rolling ? mag : std::max(w.push, mag), cap, pwm_max_});
   }
 
   void pwm_step() {
@@ -300,8 +306,9 @@ private:
     } else {
       turn_trim_ = 0.0; turn_trim_dir_ = 0;
     }
-    control_wheel(wheel_l_, fwd - dif, t);
-    control_wheel(wheel_r_, fwd + dif, t);
+    const double cap = turn ? push_cap_turn_ : push_cap_straight_;   // v8.1 force limit
+    control_wheel(wheel_l_, fwd - dif, t, cap);
+    control_wheel(wheel_r_, fwd + dif, t, cap);
 
     char json[64];
     std::snprintf(json, sizeof(json), "{\"T\":11,\"L\":%d,\"R\":%d}",
@@ -565,6 +572,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr motor_pub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr whisker_sub_;
   rclcpp::Time last_whisker_time_{0, 0, RCL_ROS_TIME};
+  double push_cap_straight_{40.0}, push_cap_turn_{55.0};   // v8.1 force limit (PWM)
   static constexpr double kWhiskerHold = 0.3;   // s, whisker keeps priority this long after its last command
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;

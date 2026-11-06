@@ -2,6 +2,9 @@
 """Whisker (수염) — 기어다니는 로봇의 촉각. LiDAR(19.5 cm) 아래 것(의자 다리, 건조대 다리, 레일, 턱)을 닿아서 안다.
 
   느끼기   /imu + /motor_out(브리지가 방금 모터를 바꿨나 = efference copy) → 부딪힘 / 끄덕임 / 건드림
+           + 예상보다 느림(odom): 명령만큼 안 움직임 → 충격 없는 막힘 (손·쿠션·동물)
+  단단/부드러움  충격·끄덕임 = 단단 → 영구 표시 / 느려짐만 = 부드러움 → 밀지 않고 물러남, 표시는 1분 뒤 사라짐
+  힘 제한  브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 실패해도 짓누르지 않게 (협동 로봇의 힘 제한 원칙)
   방향     직진 중 = 가던 쪽 (확실 → 표시). 회전·정지 중 = IMU 참고 (11-06: 박을 때 출렁임 + IMU ~10 Hz → 못 믿음, 표시 안 함)
   반응     멈춤 → 왔던 쪽으로 10 cm 빼기 (회전 중이었으면 15° 되돌리기) → 성공하면 Nav2 에 돌려줌
   갇힘     빼다가 또 닿음 → 10초 가만히 → 다시 빼기 (1: 같은 방법, 2: 15° 돌고 빼기, 3: 반대로 15° 돌고 빼기)
@@ -40,6 +43,10 @@ BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) �
                                       #   11-06: 0.25 rad/s 는 출발 밀기 + 자이로 보정으로 과격. TAP 은 0.5 s 마다
                                       #   모터가 바뀌어 감지가 0.4 s 씩 가려짐 → 빼는 중 다시 박아도 놓침 → 안 씀
 STEP_TIMEOUT = 8.0            # s, 빼기 한 번 최대
+SLOW_WINDOW = 0.5             # s, "예상보다 느림" 판단 창 (0.05 m/s 면 1 cm 눈금 2.5개가 떠야 함)
+SLOW_SETTLE = 0.8             # s, 명령이 이만큼 이어진 뒤부터 판단 (출발 밀기 0.3 s 지난 뒤)
+SLOW_RATIO = 0.3              # 예상 이동의 30% 도 못 가면 = 막힘
+SOFT_TTL = 60.0               # s, 부드러운 것(손·발·동물일 수도) 표시는 1분 뒤 사라짐
 
 
 def yaw_of(q):
@@ -87,8 +94,10 @@ class Whisker(Node):
         self.last_cmd = (0.0, 0.0)           # 닿기 직전 우리가 따르던 명령 (x, z)
         self.trapped = 0
         self.left_hits, self.right_hits = 0, 0
+        self.cmd_since = time.time()       # 지금 명령이 시작된 시각 (느려짐 판단용)
+        self.cmd_now = (0.0, 0.0)
         # 기억
-        self.points = []
+        self.points = []                   # (x, y, 만료 시각 또는 None=영구)
         self.contacts = 0
 
         self.create_subscription(Imu, "imu", self.on_imu, 50)
@@ -100,6 +109,7 @@ class Whisker(Node):
         self.create_subscription(Empty, "whisker/resume", self.on_resume, 1)
         self.cmd_pub = self.create_publisher(TwistStamped, "whisker/cmd_vel", 10)
         self.cloud_pub = self.create_publisher(PointCloud2, "whisker/cloud", 1)
+        self.soft_pub = self.create_publisher(PointCloud2, "whisker/soft_cloud", 1)   # RViz 색 구분용 (임시 표시만)
         self.sense_pub = self.create_publisher(String, "sense", 10)
         self.create_timer(0.05, self.tick)
         self.create_timer(1.0, self.publish_cloud)
@@ -116,12 +126,42 @@ class Whisker(Node):
             pl, pr, cx, cz = self.prev_motor[:4]
             if (abs(d[0] - pl) > 8 or abs(d[1] - pr) > 8 or abs(d[2] - cx) > 0.02 or abs(d[3] - cz) > 0.05):
                 self.last_self = time.time()
+        if abs(d[2] - self.cmd_now[0]) > 0.02 or abs(d[3] - self.cmd_now[1]) > 0.05:
+            self.cmd_now, self.cmd_since = (d[2], d[3]), time.time()
         self.prev_motor = d[:5]
 
     def on_odom(self, m):
         st, pp = m.header.stamp, m.pose.pose
         self.odom = (pp.position.x, pp.position.y, yaw_of(pp.orientation))
         self.odom_hist.append((st.sec + st.nanosec * 1e-9, *self.odom))
+        self.check_slow()
+
+    def check_slow(self):
+        """예상보다 느림 = 막힘. 충격이 없어도(손·쿠션·동물) 잡는다. 11-06: 빼다가 손을 밀어버림 → 추가.
+        직진: 바퀴 1 cm 눈금이 예상만큼 안 뜸 / 회전: 자이로 각도가 예상만큼 안 돎 (자이로는 헛돌아도 정직)"""
+        now = time.time()
+        cx, cz = self.cmd_now
+        straight, turning = abs(cx) >= 0.04, abs(cx) < 0.01 and abs(cz) >= 0.12   # 바닥선 아래(톡톡 주행)는 판단 안 함
+        if not (straight or turning) or now - self.cmd_since < SLOW_SETTLE or now - self.last_event < 1.0:
+            return
+        if self.state not in ("drive", "back") or len(self.odom_hist) < 5:
+            return
+        t1, x1, y1, a1 = self.odom_hist[-1]
+        old = next((r for r in reversed(self.odom_hist) if t1 - r[0] >= SLOW_WINDOW), None)
+        if not old:
+            return
+        dt = t1 - old[0]
+        if straight:
+            got, want = math.hypot(x1 - old[1], y1 - old[2]), abs(cx) * dt
+        else:
+            got, want = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))), abs(cz) * dt
+        if got < SLOW_RATIO * want:
+            self.last_event = now
+            ang = (0.0 if cx > 0 else math.pi) if straight else 0.0
+            ev = {"ev": "slow", "got": round(got, 3), "want": round(want, 3), "kind": "straight" if straight else "turn",
+                  "dir": side_name(ang) if straight else "turn", "src": "motion" if straight else "turn",
+                  "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
+            self.on_contact(ev, ang)
 
     def on_map_pose(self, m):
         st, pp = m.header.stamp, m.pose.pose
@@ -169,7 +209,11 @@ class Whisker(Node):
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
         kind = ev["ev"]
-        marked = kind in ("bump", "pitch") and ev.get("src") == "motion" and self.mark(ang)   # 확실한 것만 지도에
+        # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
+        #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
+        ev["feel"] = "soft" if kind == "slow" else ("hard" if kind in ("bump", "pitch") else "touch")
+        ttl = SOFT_TTL if kind == "slow" else None
+        marked = kind in ("bump", "pitch", "slow") and ev.get("src") == "motion" and self.mark(ang, ttl)   # 확실한 것만 지도에
         ev["marked"] = marked
         self.record(ev)
         if kind == "touch" or not self.react:
@@ -289,7 +333,7 @@ class Whisker(Node):
         c, s = math.cos(myaw), math.sin(myaw)
         return "map", mx + c * lx - s * ly, my + s * lx + c * ly, myaw + (oyaw - old[3])
 
-    def mark(self, ang):
+    def mark(self, ang, ttl=None):
         """충격 방향의 몸 둘레 점 + 3 cm 바깥에, 방향과 직각으로 점 3개 (~10 cm)"""
         pose = self.map_pose()
         if not pose or pose[0] != "map":
@@ -300,7 +344,7 @@ class Whisker(Node):
         for off in (-MARK_HALF, 0.0, MARK_HALF):
             bx, by = r * ca - off * sa, r * sa + off * ca            # 몸 기준
             self.points.append((x + math.cos(yaw) * bx - math.sin(yaw) * by,
-                                y + math.sin(yaw) * bx + math.cos(yaw) * by))
+                                y + math.sin(yaw) * bx + math.cos(yaw) * by, time.time() + ttl if ttl else None))
         self.contacts += 1
         self.publish_cloud()
         return True
@@ -322,15 +366,21 @@ class Whisker(Node):
         self.publish_cloud()
 
     def publish_cloud(self):
+        now = time.time()
+        self.points = [p for p in self.points if p[2] is None or p[2] > now]   # 부드러운 표시는 만료되면 사라짐
+        self.cloud_pub.publish(self.cloud([(x, y) for x, y, _ in self.points]))
+        self.soft_pub.publish(self.cloud([(x, y) for x, y, exp in self.points if exp is not None]))
+
+    def cloud(self, pts):
         m = PointCloud2()
         m.header.stamp = self.get_clock().now().to_msg()
         m.header.frame_id = "map"
-        m.height, m.width = 1, len(self.points)
+        m.height, m.width = 1, len(pts)
         m.fields = [PointField(name=n, offset=4 * i, datatype=PointField.FLOAT32, count=1) for i, n in enumerate("xyz")]
         m.is_bigendian, m.point_step, m.is_dense = False, 12, True
-        m.row_step = 12 * len(self.points)
-        m.data = b"".join(struct.pack("<fff", px, py, MARK_Z) for px, py in self.points)
-        self.cloud_pub.publish(m)
+        m.row_step = 12 * len(pts)
+        m.data = b"".join(struct.pack("<fff", px, py, MARK_Z) for px, py in pts)
+        return m
 
     @staticmethod
     def ntfy(title, body):

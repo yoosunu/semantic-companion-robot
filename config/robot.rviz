@@ -581,7 +581,7 @@ Visualization Manager:
     Value: true
   - Class: rviz_default_plugins/PointCloud2
     Enabled: true
-    Name: Whisker contacts
+    Name: Whisker hard (영구)
     Topic:
       Depth: 5
       Durability Policy: Volatile
@@ -592,6 +592,24 @@ Visualization Manager:
     Size (m): 0.05
     Color Transformer: FlatColor
     Color: 255; 0; 255
+    Alpha: 1
+    Decay Time: 0
+    Position Transformer: XYZ
+    Use Fixed Frame: true
+    Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Enabled: true
+    Name: Whisker soft (1 min)
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /whisker/soft_cloud
+    Style: Spheres
+    Size (m): 0.06
+    Color Transformer: FlatColor
+    Color: 255; 170; 0
     Alpha: 1
     Decay Time: 0
     Position Transformer: XYZ
