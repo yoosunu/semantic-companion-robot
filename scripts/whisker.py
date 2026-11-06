@@ -69,7 +69,8 @@ class Whisker(Node):
         self.pitch_dps = p("pitch_dps", 5.5).value     # 주행 중 앞뒤 끄덕임 (카펫 7)
         self.touch_g = p("touch_g", 0.025).value       # 정지 중 건드림 (톡 0.04)
         self.rock_dps = p("rock_dps", 4.0).value       # 정지 중 기우뚱 (톡 6)
-        self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리
+        self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리 (단단한 것)
+        self.soft_dist = p("soft_dist", 0.05).value    # m, 부드러운 것: 즉시 이만큼 물러남
         self.back_turn = math.radians(p("back_turn_deg", 15.0).value)
         self.wait_s = p("trapped_wait", 10.0).value
         self.ax_forward = p("ax_forward", 1.0).value   # 보드 +x 가 로봇 앞이면 +1 — 11-06 정면 박기 2번이 반대 부호라 미확정
@@ -90,7 +91,9 @@ class Whisker(Node):
         self.state = "drive"                 # drive / stop / back / trapped / help
         self.state_t = 0.0
         self.step = None                     # 지금 빼기 계획 {"kind": "lin"/"rot", "sign", "goal", "start", "pre_rot"}
-        self.contact_ang = 0.0               # 마지막 충격 방향 (몸 기준 rad, 0 = 앞, + = 왼쪽)
+        self.contact_ang = 0.0               # "처음" 닿은 방향 (몸 기준 rad, 0 = 앞) — 갇혀도 안 바꿈 (11-06 핑퐁 수정)
+        self.contact_feel = "hard"
+        self.plan_text = ""
         self.last_cmd = (0.0, 0.0)           # 닿기 직전 우리가 따르던 명령 (x, z)
         self.trapped = 0
         self.left_hits, self.right_hits = 0, 0
@@ -111,6 +114,7 @@ class Whisker(Node):
         self.cloud_pub = self.create_publisher(PointCloud2, "whisker/cloud", 1)
         self.soft_pub = self.create_publisher(PointCloud2, "whisker/soft_cloud", 1)   # RViz 색 구분용 (임시 표시만)
         self.sense_pub = self.create_publisher(String, "sense", 10)
+        self.state_pub = self.create_publisher(String, "whisker/state", 10)   # 상태·계획 (whisker_lab.py 가 보여줌)
         self.create_timer(0.05, self.tick)
         self.create_timer(1.0, self.publish_cloud)
         d = Path.home() / "scr_logs" / "whisker"
@@ -223,13 +227,13 @@ class Whisker(Node):
         elif ang < -0.3:
             self.right_hits += 1
         if self.state == "drive":
-            self.contact_ang = ang
+            self.contact_ang, self.contact_feel = ang, ev["feel"]
             self.last_cmd = (self.motor[2], self.motor[3])
             self.trapped = 0
-            self.go("stop")
-        elif self.state == "back":          # 빼다가 또 닿음 = 갇힘
+            # 부드러움(손·발일 수도) = 멈춰 있지 말고 바로 물러남 / 단단함 = 0.5 s 멈춘 뒤 빼기
+            self.go("back" if ev["feel"] == "soft" else "stop")
+        elif self.state == "back":          # 빼다가 또 닿음 = 앞뒤 다 막힘 → 기다림. 빼는 방향은 처음 그대로 (안 뒤집음)
             self.trapped += 1
-            self.contact_ang = ang
             if self.trapped > 3:            # 시도 1·2·3 다 실패
                 self.go("help")
             else:
@@ -239,9 +243,11 @@ class Whisker(Node):
         self.state, self.state_t = state, time.time()
         if state == "back":
             self.plan_step()
-        msg = {"stop": "멈춤", "back": "빼기", "trapped": f"갇힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
-               "help": "구조 요청 — 3번 다 갇힘", "drive": "Nav2 에 돌려줌"}[state]
+        msg = {"stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
+               "trapped": f"앞뒤 다 막힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
+               "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "빠짐 → Nav2 에 돌려줌"}[state]
         self.get_logger().warn(f"WHISKER {state}: {msg}")
+        self.state_pub.publish(String(data=json.dumps({"state": state, "msg": msg, "try": self.trapped}, ensure_ascii=False)))
         if state == "help":
             where = self.map_pose()
             threading.Thread(target=self.ntfy, daemon=True, args=("robot: WHISKER 구조 요청",
@@ -257,13 +263,19 @@ class Whisker(Node):
             pre = -self.back_turn if self.left_hits > self.right_hits else self.back_turn
         elif self.trapped >= 3:
             pre = self.back_turn if self.left_hits > self.right_hits else -self.back_turn
+        dist = self.soft_dist if self.contact_feel == "soft" else self.back_dist
         if rotating:   # 돌다가 닿음 → 돌던 반대로 15°
             self.step = {"kind": "rot", "sign": -math.copysign(1, z0), "goal": self.back_turn, "pre": pre}
-        else:          # 가다가 닿음 → 충격 반대쪽으로 직선 (앞에서 닿았으면 후진)
+            main = f"{'왼쪽' if self.step['sign'] > 0 else '오른쪽'}으로 {math.degrees(self.back_turn):.0f}° 되돌리기"
+        else:          # 가다가 닿음 → 처음 닿은 쪽의 반대로 직선 (앞에서 닿았으면 후진)
             sign = -1.0 if math.cos(self.contact_ang) > 0 else 1.0
-            self.step = {"kind": "lin", "sign": sign, "goal": self.back_dist, "pre": pre}
+            self.step = {"kind": "lin", "sign": sign, "goal": dist, "pre": pre}
+            main = f"{'뒤' if sign < 0 else '앞'}로 {dist * 100:.0f} cm"
         self.step["start"] = self.odom
         self.step["phase"] = "pre" if pre else "main"
+        head = f"시도 {self.trapped}: " if self.trapped else ""
+        turn = f"{'왼쪽' if pre > 0 else '오른쪽'} {math.degrees(abs(pre)):.0f}° 돈 뒤 " if pre else ""
+        self.plan_text = f"{head}{turn}{main} ({self.contact_feel})"
 
     def tick(self):
         if self.state == "drive":
@@ -287,12 +299,16 @@ class Whisker(Node):
                 turned = abs(math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0)))
                 if turned >= abs(st["pre"]):
                     st["phase"], st["start"] = "main", self.odom
+                    x0, y0, yaw0 = self.odom
                 else:
                     z = math.copysign(TURN_SPEED, st["pre"])
             if st["phase"] == "main":
                 if st["kind"] == "lin":
                     done = math.hypot(x1 - x0, y1 - y0) >= st["goal"]
                     x = 0.0 if done else st["sign"] * BACK_SPEED
+                    # 방향 유지: 시작 방향에서 틀어진 만큼 살짝 되돌림 (11-06: 좌우 바퀴가 따로 풀려 비스듬히 빠짐)
+                    err = math.atan2(math.sin(yaw0 - yaw1), math.cos(yaw0 - yaw1))
+                    z = 0.0 if done else max(-0.12, min(0.12, 1.5 * err))
                 else:
                     done = abs(math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0))) >= st["goal"]
                     z = 0.0 if done else st["sign"] * TURN_SPEED
@@ -314,8 +330,9 @@ class Whisker(Node):
         m.twist.linear.x, m.twist.angular.z = float(x), float(z)
         self.cmd_pub.publish(m)
 
-    def on_resume(self, _):
+    def on_resume(self, _):   # 사람이 풀어줌 / whisker_lab 이 Ctrl+C 로 끝낼 때
         self.trapped = 0
+        self.send(0.0, 0.0)
         self.go("drive")
 
     # ------------------------------------------------------------------ 기억
