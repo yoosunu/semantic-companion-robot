@@ -19,11 +19,13 @@
 """
 import argparse
 import collections
+import functools
 import json
 import math
 import subprocess
 import threading
 import time
+import traceback
 import urllib.request
 from pathlib import Path
 
@@ -46,7 +48,9 @@ W_DIST, W_SIZE = 3.0, 1.0
 WHISKER_GIVEUP = 2       # 가는 중 접촉 이만큼이면 포기
 NO_PROGRESS_S, PROGRESS_M = 90.0, 0.05
 STUCK_S, STUCK_M = 180.0, 0.10
-CONTACTS = ("bump", "pitch", "roll", "slow", "stuck", "blocked")
+CONTACTS = ("bump", "pitch", "roll", "stuck", "tilt")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
+CANCEL_WAIT = 15.0       # s, 취소 보냈는데 Nav2 답이 없으면 우리가 정리
+STATUS_S = 30.0          # s, 상태 한 줄 주기
 
 
 def yaw_of(q):
@@ -69,6 +73,23 @@ def ntfy(title, body, urgent=False):
         pass
 
 
+def safe(fn):
+    """콜백이 오류를 내도 탐색기가 죽지 않게: 전체 오류를 로그에 남기고, 처음 한 번은 폰으로 알림.
+    (11-07 00:36: 90 s no_progress 취소 직후 소리 없이 멈춤 — 오류 내용이 tmux 화면에만 있다 사라짐)"""
+    @functools.wraps(fn)
+    def run(self, *a, **k):
+        try:
+            return fn(self, *a, **k)
+        except Exception:
+            tb = traceback.format_exc()
+            self.get_logger().error(f"EXPLORE 오류 ({fn.__name__}) — 계속 돎\n{tb}")
+            self.errors += 1
+            if self.errors == 1:
+                threading.Thread(target=ntfy, args=("robot: 탐색기 오류", f"{fn.__name__}: {tb.strip().splitlines()[-1]}", True),
+                                 daemon=True).start()
+    return run
+
+
 class Explorer(Node):
     def __init__(self, name):
         super().__init__("scr_explore")
@@ -84,6 +105,8 @@ class Explorer(Node):
         self.map_fix = None
         self.moved = {"p": None, "t": time.time(), "sent": False}
         self.t0 = time.time()
+        self.errors = 0
+        self.last_status = time.time()
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid, "map", lambda m: setattr(self, "grid", m), latched)
@@ -101,10 +124,12 @@ class Explorer(Node):
         (self.get_logger().warn if warn else self.get_logger().info)("EXPLORE " + text)
 
     # ------------------------------------------------------------------ 입력
+    @safe
     def on_whisker_cloud(self, m):
         raw = bytes(m.data)
         self.whisker = [tuple(np.frombuffer(raw[i:i + 8], dtype="<f4")) for i in range(0, len(raw), m.point_step)]
 
+    @safe
     def on_sense(self, m):
         try:
             d = json.loads(m.data)
@@ -186,6 +211,7 @@ class Explorer(Node):
         self.say(f"포기 ({reason}) @({x:.2f}, {y:.2f}) — 지금까지 포기 {len(self.gave_up)}곳", warn=True)
 
     # ------------------------------------------------------------------ 한 걸음 (1 s 마다)
+    @safe
     def step(self):
         if self.phase == "done":
             return
@@ -219,7 +245,21 @@ class Explorer(Node):
         if self.phase == "home":
             return                                             # 결과 콜백이 마무리
         g = self.goal
+        if g and g.get("cancel_t") and now - g["cancel_t"] > CANCEL_WAIT:
+            # 취소를 보냈는데 Nav2 가 답을 안 함 → 우리가 정리하고 다음으로 (멈춰 서 있지 않게)
+            self.say(f"취소 답이 {CANCEL_WAIT:.0f}초 넘게 없음 → 우리가 정리", warn=True)
+            if g["cancel_reason"] != "replan":
+                self.give_up(g["x"], g["y"], g["cancel_reason"])
+            self.goal = None
+            return                                             # 다음 걸음에서 포기 목록을 반영해 새로 고름
+        if now - self.last_status > STATUS_S:
+            self.last_status = now
+            self.say(f"상태: {self.phase}, 위치 ({rx:.2f}, {ry:.2f}), 경계 {len(cands)}곳, 포기 {len(self.gave_up)}곳" +
+                     (f", 목표 ({g['x']:.2f}, {g['y']:.2f}) 남은 {math.hypot(rx - g['x'], ry - g['y']):.2f} m, "
+                      f"진척 {now - g['best_t']:.0f}초 전, 접촉 {g['contacts']}" if g else ", 목표 없음"))
         if g:
+            if g.get("cancel_t"):
+                return                                         # 취소 답 기다리는 중
             dist = math.hypot(rx - g["x"], ry - g["y"])
             if dist < g["best"] - PROGRESS_M:
                 g["best"], g["best_t"] = dist, now
@@ -257,38 +297,45 @@ class Explorer(Node):
             self.goal = {"x": x, "y": y, "t0": time.time(), "best": math.hypot(x - rx, y - ry), "best_t": time.time(),
                          "contacts": 0, "handle": None, "cancel_reason": None}
             self.say(f"목표 ({x:.2f}, {y:.2f}) — 거리 {math.hypot(x - rx, y - ry):.2f} m")
+        g = None if home else self.goal
         fut = self.nav.send_goal_async(goal)
-        fut.add_done_callback(lambda f: self.on_accepted(f, home))
+        fut.add_done_callback(lambda f: self.on_accepted(f, home, g))
 
-    def on_accepted(self, fut, home):
+    @safe
+    def on_accepted(self, fut, home, g):
         h = fut.result()
         if not h.accepted:
             if home:
                 self.finish(False)
-            elif self.goal:
-                self.give_up(self.goal["x"], self.goal["y"], "rejected")
+            elif g is not None and self.goal is g:
+                self.give_up(g["x"], g["y"], "rejected")
                 self.goal = None
             return
-        if not home and self.goal:
-            self.goal["handle"] = h
-        h.get_result_async().add_done_callback(lambda f: self.on_result(f, home))
+        if g is not None:
+            g["handle"] = h
+            if g.get("cancel_reason") and self.goal is g:   # 받아지기 전에 취소하기로 했던 것
+                h.cancel_goal_async()
+        h.get_result_async().add_done_callback(lambda f: self.on_result(f, home, g))
 
     def cancel_goal(self, reason):
         g = self.goal
-        if not g:
-            return
-        g["cancel_reason"] = reason or "replan"
+        if not g or g.get("cancel_t"):
+            return                                   # 이미 취소 보냄 (매초 다시 보내지 않음)
+        g["cancel_reason"], g["cancel_t"] = reason or "replan", time.time()
+        self.say(f"목표 취소 ({g['cancel_reason']}) — Nav2 답 기다림")
         if g["handle"]:
             g["handle"].cancel_goal_async()
 
-    def on_result(self, fut, home):
+    @safe
+    def on_result(self, fut, home, g=None):
         status = fut.result().status            # 4 SUCCEEDED, 5 CANCELED, 6 ABORTED
         if home:
             self.finish(status == 4)
             return
-        g, self.goal = self.goal, None
-        if not g:
-            return
+        if g is None or self.goal is not g:
+            return                               # 이미 정리한 옛 목표의 늦은 답
+        self.goal = None
+        self.say(f"Nav2 답: {dict(((4, '도착'), (5, '취소됨'), (6, '실패'))).get(status, status)}")
         if status == 4:
             self.reached.append((g["x"], g["y"]))
             self.say(f"도착 ({g['x']:.2f}, {g['y']:.2f})")
@@ -298,6 +345,7 @@ class Explorer(Node):
             self.give_up(g["x"], g["y"], "no_path")
 
     # ------------------------------------------------------------------ 끝
+    @safe
     def finish(self, home_ok):
         if self.phase == "done":
             return

@@ -43,8 +43,9 @@ def main():
 
     def on_sense(m):
         d = json.loads(m.data)
-        if d.get("ev") == "slow":
-            extra = f"{d.get('kind')} 예상 {d.get('want')} / 실제 {d.get('got')}" + ("  [관찰만, 반응 안 함]" if d.get("observe") else "")
+        if d.get("ev") == "stuck":
+            extra = (f"명령 {d.get('want_cm')} cm / LiDAR {d.get('scan_cm')} cm, 자이로 {d.get('turned_deg')}°"
+                     + ("  [같은 곳 또 → 영구]" if d.get("again") else ""))
         else:
             extra = d.get("g", d.get("dps", ""))
         say(f"⚡ {d.get('ev')} {d.get('dir', '')} ({d.get('feel', '')}) {extra}"

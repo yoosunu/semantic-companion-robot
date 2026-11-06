@@ -217,7 +217,10 @@ class Builder:
                 self.sense_counts[kind] += 1
                 if kind != "touch":
                     self.add(t, "INFO" if kind == "ghost" else "WARN", "whisker", kind,
-                             f"{d.get('dir', '?')} {d.get('g', d.get('dps', ''))} @({d.get('x')}, {d.get('y')})"
+                             f"{d.get('dir', '?')} {d.get('g', d.get('dps', ''))}"
+                             + (f" 명령 {d.get('want_cm')} cm/LiDAR {d.get('scan_cm')} cm" if kind == "stuck" else "")
+                             + (" 같은 곳 또" if d.get("again") else "")
+                             + f" @({d.get('x')}, {d.get('y')})"
                              + (" 표시" if d.get("marked") else ""))
             elif msg.startswith("WHISKER "):
                 st = msg.split()[1].rstrip(":")

@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-"""Whisker (수염) — 기어다니는 로봇의 촉각. LiDAR(19.5 cm) 아래 것(의자 다리, 건조대 다리, 레일, 턱)을 닿아서 안다.
+"""Whisker (수염) v9 — 기어다니는 로봇의 촉각. 11-07: 감각 셋, 탈출 하나 (상황별 예외를 걷어냄).
 
-  느끼기   /imu + /motor_out(브리지가 방금 모터를 바꿨나 = efference copy) → 부딪힘 / 끄덕임 / 건드림
-           + 예상보다 느림(odom): 명령만큼 안 움직임 → 충격 없는 막힘 (손·쿠션·동물)
-  단단/부드러움  충격·끄덕임 = 단단 → 영구 표시 / 느려짐·한쪽 들림(밟음) = 부드러움 → 바로 물러남, 표시 1분
-  느려짐 (출발 1.5 s 뒤부터): 한 번 = 부드러운 것에 막힘 → 바로 5 cm 물러남 + 1분 표시 /
-           5 s·20 cm 안에 2번 이상 = stuck (헛바퀴·카펫 가장자리) → 바로 10 cm 빼기 + 차체 폭 영구 표시
-  힘 제한  브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 실패해도 짓누르지 않게 (협동 로봇의 힘 제한 원칙)
-  방향     직진 중 = 가던 쪽 (확실 → 표시). 회전·정지 중 = IMU 참고 (11-06: 박을 때 출렁임 + IMU ~10 Hz → 못 믿음, 표시 안 함)
-  반응     멈춤 → 왔던 쪽으로 10 cm 빼기 (회전 중이었으면 15° 되돌리기) → 성공하면 Nav2 에 돌려줌
-  갇힘     빼다가 또 닿음 → 10초 가만히 → 다시 빼기 (1: 같은 방법, 2: 15° 돌고 빼기, 3: 반대로 15° 돌고 빼기)
-           → 3번 다 실패하면 구조 요청 (ntfy) + 정지. 풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
-  기억     닿은 점을 장애물 지도에 (/whisker/cloud → costmap whisker_layer, LiDAR 가 못 지움). 좁게: 닿은 점 ~10 cm.
-           지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
-  기록     ~/scr_logs/whisker/<날짜>.jsonl, 로그 줄 "SENSE {...}" (run_report 가 셈)
+  감각 — 출발·톡톡·곡선·빼기 어디서나 같은 규칙
+    부딪힘     실제로 굴러가다 가속 튐 → 0.3 s 안에 바퀴가 실제로 멈췄나 확인
+               (Jasper: "움직이다 박는 것"과 "서 있다 출발하는 흔들림"은 다르다)
+    카펫 기울기 차체가 평소보다 1.5° 이상 기운 채 0.3 s (가속도 0.4 s 중앙값 = 중력 방향) → 올라가기 전에 되감기 (Jasper 11-07)
+               여유가 작아(카펫 1.6~1.9° / 맨바닥 ≤1.1°) 확실하지 않은 감각 → 처음 1분 표시, 같은 곳 또 = 영구
+    들림       기울어지는 각속도 → 0.3 s 동안 실제로 2° 이상 기울었나 확인 = 발·문턱처럼 크게 들리는 것
+               11-07: 얇은 카펫은 이 IMU(10 Hz)로 맨바닥과 구별 안 됨 (기록 18개, 0.3 s 유지 기울기:
+               카펫 1.6~1.9° / 맨바닥 1.1° / 밀어붙이기 1.6°) → 카펫은 아래 "안 움직임"이 맡음
+    안 움직임  움직이라는 명령이 2.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 명령의 30% 미만이고 자이로도 3° 도 안 돎
+               = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
+  탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
+               헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
+               최대 15 cm, 들어온 방향에서 30° 까지 → 끝나면 Nav2 에 돌려줌. 지나온 길이 없으면(출발 직후) 표시만 하고 돌려줌
+  갇힘         빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
+               (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
+               풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
+  표시         부딪힘 = 점 10 cm 영구 / 들림 앞뒤 = 선 30 cm 영구 / 들림 한쪽 = 점 10 cm 1분 /
+               안 움직임·카펫 기울기 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
+               /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
+  힘 제한      브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 늦어도 짓누르지 않게
+  기록         ~/scr_logs/whisker/<날짜>.jsonl, 로그 줄 "SENSE {...}" (run_report 가 셈)
 
 브리지는 얇게 (v8): /imu, /motor_out 을 내고, /whisker/cmd_vel 이 오는 동안은 Nav2 를 무시한다. 판단은 전부 여기.
-문턱값·거리는 ROS 파라미터 → 재빌드 없이 `ros2 param set /whisker bump_g 0.05`. 측정 근거: docs/calibration/imu-touch-2026-11-06.md
-IMU 로 충격 방향 알기는 연구 과제로 남김 (펌웨어 IMU 갱신 속도 확인 → 다시 도전). ax_forward / ay_left 는 그때 쓸 것.
+문턱값은 ROS 파라미터 → 재빌드 없이 `ros2 param set /whisker bump_g 0.05`. 근거: docs/calibration/imu-touch-2026-11-06.md
 """
 import collections
 import json
@@ -28,45 +35,58 @@ import time
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from sensor_msgs.msg import Imu, PointCloud2, PointField
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import Imu, LaserScan, PointCloud2, PointField
 from std_msgs.msg import Empty, Float32MultiArray, String
 
 G = 9.81
 HALF_L, HALF_W = 0.13, 0.12   # m, 차체 반길이·반폭 (footprint)
 MARK_GAP = 0.03               # m, 몸 바깥으로
-MARK_HALF = 0.05              # m, 표시 반폭 → 점 3개, 폭 ~10 cm
+MARK_HALF = 0.05              # m, 점 표시 반폭 → 폭 ~10 cm (의자 다리)
+LINE_HALF = 0.15              # m, 선 표시 반폭 → 폭 ~30 cm (카펫 가장자리·턱은 길다. 11-07 00:36: 10 cm 옆으로 다시 올라탐)
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
-SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (출발 흔들림 0.17 g 은 우리 것)
-MOVING_V, MOVING_W = 0.025, 0.10   # m/s, rad/s — 직전 0.5 s 동안 "실제로" 이만큼 움직였으면 = 굴러가는 중 (거리계·자이로)
-CONFIRM_S = 0.3               # s, 의심 → 확인 창 (11-07: 흔들림만으로 판단하면 상황마다 예외가 늘어남 → 결과로 확인)
-CONFIRM_STALL = 0.5           #   부딪힘 확인: 이 창 동안 실제 진척 < 명령의 50% (바퀴가 실제로 멈춤)
-CONFIRM_TILT = 2.0            #   끄덕임·기우뚱 확인: 이 창 동안 각속도를 합쳐 2° 이상 실제로 기울어짐 (흔들림은 +− 출렁여 합 ≈ 0)
-START_BLOCK_S = 1.0           # s, 출발 명령 후 이 시간 동안 1 cm 눈금이 하나도 안 뜨면 = 앞이 막힘 (바퀴 떼기 0.3~0.8 s)
-BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) 바로 위, 연속으로 잔잔하게.
-                                      #   11-06: 0.25 rad/s 는 출발 밀기 + 자이로 보정으로 과격. TAP 은 0.5 s 마다
-                                      #   모터가 바뀌어 감지가 0.4 s 씩 가려짐 → 빼는 중 다시 박아도 놓침 → 안 씀
-STEP_TIMEOUT = 8.0            # s, 빼기 한 번 최대
-SLOW_WINDOW = 0.5             # s, "예상보다 느림" 판단 창 (0.05 m/s 면 1 cm 눈금 2.5개가 떠야 함)
-SLOW_SETTLE = 1.5             # s, 명령이 이만큼 이어진 뒤부터 판단. 11-06: 0.8 → 1.5 (출발 헛것이 1.2~1.7 s 에 뜸).
-                              #   그 사이 안전은 힘 제한(PWM 40/55)이 지킴
-SLOW_RATIO = 0.3              # 예상 이동의 30% 도 못 가면 = 막힘
-SOFT_TTL = 60.0               # s, 부드러운 것(손·발·동물일 수도) 표시는 1분 뒤 사라짐
-RELEASE_FRAC = 0.6            # 빼기 거리의 앞 60% 동안 사건 무시 = 올라탔던 것에서 내려오는 흔들림
-STUCK_N, STUCK_S, STUCK_R = 2, 5.0, 0.20   # "느림"이 5 s 안에, 20 cm 안에서 2번 이상 = 진짜 막힘·헛바퀴 (11-06 카펫:
-                                           #   1초마다 연속 / 출발 헛것은 한 번만) → 못 가는 구역
-STUCK_HALF = 0.12             # m, 막힘 표시 반폭 → 차체 폭 ~25 cm (카펫 가장자리·턱 = 선)
+SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (efference copy)
+MOVING_V, MOVING_W = 0.025, 0.10   # 직전 0.5 s 실제로 이만큼 움직였으면 = 굴러가는 중 (부딪힘 조건)
+CONFIRM_S, CONFIRM_STALL, CONFIRM_TILT = 0.3, 0.5, 2.0   # 의심 → 확인 창 / 바퀴 멈춤(진척 < 명령의 50%) / 실제 기울기 2°
+NOMO_S = 2.5                  # s, 안 움직임 판단 창
+NOMO_MIN_LIN, NOMO_MIN_ROT = 0.05, 0.3   # 창 동안 명령의 합(부호 포함): 5 cm 이상 또는 0.3 rad 이상 가라고 했어야 판단
+NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
+NOMO_MOVE, NOMO_RATIO = 0.015, 0.3   # LiDAR 로 잰 이동이 명령의 30% (최소 1.5 cm) 미만 = 안 움직임
+NOMO_SHARP = 0.003            # m, 스캔 맞추기 답이 ±3 cm 옆보다 평균 잔차가 이만큼은 작아야 믿음 (특징 없는 곳이면 판단 안 함)
+NOMO_RANGE = 10.0             # m
+NOMO_PTS = 240                # 스캔 한 장에서 쓸 점 수
+REPEAT_R = 0.30               # m, 안 움직임이 같은 곳에서 또 → 영구
+BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선 바로 위, 연속으로 잔잔하게
+HEAD_K, HEAD_MAX = 1.5, 0.60  # 방향 보정. z 0.5 면 바퀴 −0.10 / 0.00 = 한쪽만 굴림 (헛도는 쪽을 세게, 잡힌 쪽은 멈춤)
+HEAD_ROT = math.radians(10)   # 되감기 끝에 방향이 이보다 남으면 제자리에서 맞춤 (돌던 중 닿은 것 되돌리기)
+REPLAY_MAX = 0.15             # m, 되감기 최대 거리
+REPLAY_ROT = math.radians(30)  # 되감기는 들어온 방향에서 30° 까지만 거슬러 감
+HIST_S = 10.0                 # s, 지나온 길 기록 길이
+IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 시작
+REBOUND_MAX = 0.05            # m
+STEP_TIMEOUT = 12.0           # s, 빼기 한 번 최대
+TILT_DEG = 1.5                # °, 차체가 평소보다 이만큼 기운 채 TILT_HOLD 동안 = 카펫 가장자리에 올라타는 중 (11-07 Jasper)
+TILT_HOLD = 0.3               # s     기록 18개 (0.4 s 중앙값, 0.3 s 유지): 카펫 1.6~1.9° / 맨바닥·출발·서기·제자리 회전 ≤ 1.1°
+TILT_WIN = 0.4                # s, 가속도 중앙값 창 (출발·박기 튐 0.17 g 같은 순간값 제거)
+TILT_REARM = 0.8              # °, 이 아래로 내려와야 다시 감지 (같은 기울기로 연달아 안 뜨게)
+SOFT_TTL = 60.0               # s, 부드러운 것(발·손일 수도) / 처음 막힌 곳 표시는 1분 뒤 사라짐
 
 
 def yaw_of(q):
     return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
 
 
+def wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
 def side_name(ang):
-    a = math.degrees(math.atan2(math.sin(ang), math.cos(ang)))
+    a = math.degrees(wrap(ang))
     for lo, hi, n in ((-45, 45, "front"), (45, 135, "left"), (-135, -45, "right")):
         if lo <= a < hi:
             return n
@@ -78,57 +98,61 @@ class Whisker(Node):
         super().__init__("whisker")
         p = self.declare_parameter
         self.bump_g = p("bump_g", 0.06).value          # 주행 중 수평 가속 튐 (상자 0.09, 주행 잡음 0.02)
-        self.pitch_dps = p("pitch_dps", 5.5).value     # 주행 중 앞뒤 끄덕임 (카펫 7)
-        self.roll_dps = p("roll_dps", 5.0).value       # 주행 중 좌우 기우뚱 = 한쪽 궤도가 뭔가를 밟음 (주행 중 gx 최대 ~2.7)
-        self.slow_react = p("slow_react", True).value  # "예상보다 느림" 에 반응. 11-06 밤: 관찰만(False)으로 뒀더니 카펫 가장자리에서
-                                                       #   17번 알고도 안 움직임 → Jasper 의도("부드러운 건 바로 물러남, 헛돌면 못 가는 곳")대로 켬
+        self.pitch_dps = p("pitch_dps", 5.5).value     # 앞뒤 기울어지는 각속도 (의심)
+        self.roll_dps = p("roll_dps", 5.0).value       # 좌우 = 한쪽 궤도가 뭔가를 밟음
         self.touch_g = p("touch_g", 0.025).value       # 정지 중 건드림 (톡 0.04)
         self.rock_dps = p("rock_dps", 4.0).value       # 정지 중 기우뚱 (톡 6)
-        self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리 (단단한 것)
-        self.soft_dist = p("soft_dist", 0.05).value    # m, 부드러운 것: 즉시 이만큼 물러남
         self.back_turn = math.radians(p("back_turn_deg", 15.0).value)
         self.wait_s = p("trapped_wait", 10.0).value
-        self.ax_forward = p("ax_forward", 1.0).value   # 보드 +x 가 로봇 앞이면 +1 — 11-06 정면 박기 2번이 반대 부호라 미확정
-        self.ay_left = p("ay_left", 1.0).value         #   (IMU 방향은 회전·정지 중 참고용으로만 씀)
-        self.react = p("react", True).value            # False = 느끼고 기록만 (관찰 모드)
+        self.ax_forward = p("ax_forward", 1.0).value   # IMU 방향은 정지 중 참고용 (미확정)
+        self.ay_left = p("ay_left", 1.0).value
+        self.react = p("react", True).value            # False = 느끼고 기록만
+        self.laser_yaw = math.radians(p("laser_yaw_deg", 180.0).value)   # URDF laser_yaw (10-29 실측: 라이다 0° = 로봇 뒤)
 
-        # 감각 상태
-        self.base = None                     # [ax, ay, gx, gy] 평소 값 (천천히 따라감)
-        self.motor = [0.0, 0.0, 0.0, 0.0, 0.0]
-        self.prev_motor = None
-        self.motor_hist = collections.deque()   # (시각, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
-        self.start = None                       # {"t", "pos"} 서 있다 출발한 순간
-        self.pending = None                     # 의심 중인 사건 (확인 창 0.3 s)
+        # 감각
+        self.base = None                     # [ax, ay, gx, gy] 평소 값
+        self.motor = [0.0] * 5               # /motor_out [pwm_l, pwm_r, cmd_x, cmd_z, whisker_active]
+        self.motor_hist = collections.deque()          # (t, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
+        self.cmd_hist = collections.deque()            # (t, cmd_x, cmd_z) 최근 NOMO_S + 1 s
+        self.scans = collections.deque()               # (t, 스캔 점들 (x, y) 몸 기준)
+        self.yaw_hist = collections.deque()            # (t, 자이로 방향)
+        self.grav = collections.deque()      # (t, ax, ay, az) g — 차체 기울기 (중력 방향)
+        self.grav_ref = None                 # 평소 중력 방향 (단위 벡터, 아주 천천히 따라감)
+        self.tilt_since = None
+        self.tilt_armed = True
+        self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
-        # 지나온 길 (11-07): 빼기는 "방금 지나온 곳"으로만, 지나온 만큼만. 출발 직후엔 온 길이 없음 → 안 뺌
-        self.trail = {"sign": 0, "len": 0.0, "last": None, "idle": None}
-        self.last_self = 0.0                 # 우리가 마지막으로 모터를 바꾼 시각
+        self.last_self = 0.0
         self.last_event = 0.0
+        self.nomo_t = 0.0
+        self.nomo_check = 0.0
+        self.stuck_spots = []                # 안 움직임이 났던 곳 (지도)
+        # 지나온 길 (Nav2 가 운전하는 동안): (t, x, y, yaw), 한 방향(앞/뒤)으로만 이어짐
+        self.path = collections.deque()
+        self.path_sign = 0
+        self.idle_since = None
         # 위치
-        self.odom = None                     # (x, y, yaw) odom
-        self.odom_hist = collections.deque(maxlen=20 * 180)
+        self.odom = None
+        self.odom_hist = collections.deque(maxlen=20 * 180)   # (stamp, x, y, yaw) — 지도 위치 계산용
         self.map_fix = None
-        # 반응 상태 기계
+        # 반응
         self.state = "drive"                 # drive / stop / back / trapped / help
         self.state_t = 0.0
-        self.step = None                     # 지금 빼기 계획 {"kind": "lin"/"rot", "sign", "goal", "start", "pre_rot"}
-        self.contact_ang = 0.0               # "처음" 닿은 방향 (몸 기준 rad, 0 = 앞) — 갇혀도 안 바꿈 (11-06 핑퐁 수정)
-        self.contact_feel = "hard"
+        self.esc = None                      # 되감기 원본 {"dir", "wps": [(s, yaw)], "len", "done"}
+        self.step = None                     # 지금 빼기 {"dir", "wps", "len", "pre", "phase", "start", "hold", "rebound"}
         self.contact_kind = "bump"
+        self.contact_feel = "hard"
         self.plan_text = ""
-        self.last_cmd = (0.0, 0.0)           # 닿기 직전 우리가 따르던 명령 (x, z)
         self.trapped = 0
         self.left_hits, self.right_hits = 0, 0
-        self.cmd_since = time.time()       # 지금 명령이 시작된 시각 (느려짐 판단용)
-        self.slow_hist = collections.deque(maxlen=10)   # (시각, x, y) — 느림이 연달아 뜨는지
-        self.cmd_now = (0.0, 0.0)
         # 기억
-        self.points = []                   # (x, y, 만료 시각 또는 None=영구)
+        self.points = []                     # (x, y, 만료 시각 또는 None=영구)
         self.contacts = 0
 
         self.create_subscription(Imu, "imu", self.on_imu, 50)
         self.create_subscription(Float32MultiArray, "motor_out", self.on_motor, 50)
         self.create_subscription(Odometry, "odom", self.on_odom, 20)
+        self.create_subscription(LaserScan, "scan", self.on_scan, qos_profile_sensor_data)
         for t in ("pose", "amcl_pose"):
             self.create_subscription(PoseWithCovarianceStamped, t, self.on_map_pose, 10)
         self.create_subscription(Empty, "whisker/clear", self.on_clear, 1)
@@ -137,68 +161,63 @@ class Whisker(Node):
         self.cloud_pub = self.create_publisher(PointCloud2, "whisker/cloud", 1)
         self.soft_pub = self.create_publisher(PointCloud2, "whisker/soft_cloud", 1)   # RViz 색 구분용 (임시 표시만)
         self.sense_pub = self.create_publisher(String, "sense", 10)
-        self.state_pub = self.create_publisher(String, "whisker/state", 10)   # 상태·계획 (whisker_lab.py 가 보여줌)
+        self.state_pub = self.create_publisher(String, "whisker/state", 10)
         self.create_timer(0.05, self.tick)
         self.create_timer(1.0, self.publish_cloud)
         d = Path.home() / "scr_logs" / "whisker"
         d.mkdir(parents=True, exist_ok=True)
         self.log_path = d / f"{time.strftime('%Y-%m-%d')}.jsonl"
-        self.get_logger().info(f"whisker ready (react={self.react}) → log {self.log_path}")
+        self.get_logger().info(f"whisker v9 ready (react={self.react}) → log {self.log_path}")
 
     # ------------------------------------------------------------------ 입력
     def on_motor(self, m):
-        d = list(m.data) + [0.0] * 5
-        self.motor = d[:5]
-        # efference copy: "방금 우리가 모터를 바꿨나". 11-07 수정: 한 샘플 차이만 보면 Nav2 의 부드러운 가속(매 틱 조금씩)과
-        #   바퀴 떼기 밀기(매 틱 +3 PWM)를 못 잡아서, 출발 흔들림(0.17 g)을 부딪힘으로 오해 (imu_lab 은 계단 명령이라 안 드러남).
-        #   → 0.4 s 전과 비교 + 멈춰 있다 출발하면 1 s 동안 가림
+        d = (list(m.data) + [0.0] * 5)[:5]
+        self.motor = d
         now = time.time()
+        # efference copy: 0.4 s 전과 비교해 우리가 모터를 바꿨으면 그 흔들림은 우리 것
         self.motor_hist.append((now, d[0], d[1], d[2], d[3]))
         while self.motor_hist and now - self.motor_hist[0][0] > SELF_MASK:
             self.motor_hist.popleft()
         o = self.motor_hist[0]
-        if (abs(d[0] - o[1]) > 8 or abs(d[1] - o[2]) > 8 or abs(d[2] - o[3]) > 0.02 or abs(d[3] - o[4]) > 0.05):
+        if abs(d[0] - o[1]) > 8 or abs(d[1] - o[2]) > 8 or abs(d[2] - o[3]) > 0.02 or abs(d[3] - o[4]) > 0.05:
             self.last_self = max(self.last_self, now)
-        # 출발 기록: 모터가 꺼져 있다 켜진 순간의 시각·자리 → "출발했는데 안 나가짐" 판단용
-        on = abs(d[0]) > 1 or abs(d[1]) > 1
-        was_on = self.prev_motor is not None and (abs(self.prev_motor[0]) > 1 or abs(self.prev_motor[1]) > 1)
-        if on and not was_on and self.odom:
-            self.start = {"t": now, "pos": self.odom}
-        elif not on:
-            self.start = None
-        if abs(d[2] - self.cmd_now[0]) > 0.02 or abs(d[3] - self.cmd_now[1]) > 0.05:
-            self.cmd_now, self.cmd_since = (d[2], d[3]), time.time()
-        self.prev_motor = d[:5]
+        self.cmd_hist.append((now, d[2], d[3]))
+        while self.cmd_hist and now - self.cmd_hist[0][0] > NOMO_S + 1.0:
+            self.cmd_hist.popleft()
 
     def on_odom(self, m):
         st, pp = m.header.stamp, m.pose.pose
         self.odom = (pp.position.x, pp.position.y, yaw_of(pp.orientation))
         self.odom_hist.append((st.sec + st.nanosec * 1e-9, *self.odom))
-        self.update_trail()
-        self.check_start_blocked()
-        self.check_slow()
+        now = time.time()
+        self.yaw_hist.append((now, self.odom[2]))
+        while self.yaw_hist and now - self.yaw_hist[0][0] > NOMO_S + 1.0:
+            self.yaw_hist.popleft()
+        self.update_path(now)
 
-    def update_trail(self):
-        """Nav2 가 운전하는 동안(drive) 같은 방향(앞/뒤)으로 이어서 간 거리. 방향이 바뀌거나 1 s 넘게 서 있으면 처음부터"""
-        if self.state != "drive" or not self.odom:
+    def update_path(self, now):
+        """Nav2 가 운전하는 동안 지나온 길. 앞/뒤 방향이 바뀌거나 1 s 넘게 서 있으면 새로 시작"""
+        if self.state != "drive":
             return
-        tr, cx, now = self.trail, self.motor[2], time.time()
+        cx, cz = self.motor[2], self.motor[3]
         sign = 1 if cx > 0.01 else (-1 if cx < -0.01 else 0)
-        pos = self.odom[:2]
-        if sign == 0:
-            tr["idle"] = tr["idle"] or now
-            if now - tr["idle"] > 1.0:
-                tr.update(sign=0, len=0.0, last=pos)
+        if sign == 0 and abs(cz) < 0.05:
+            self.idle_since = self.idle_since or now
+            if now - self.idle_since > IDLE_RESET:
+                self.path.clear()
+                self.path_sign = 0
             return
-        tr["idle"] = None
-        if sign != tr["sign"] or tr["last"] is None:
-            tr.update(sign=sign, len=0.0, last=pos)
-        else:
-            tr["len"] += math.hypot(pos[0] - tr["last"][0], pos[1] - tr["last"][1])
-            tr["last"] = pos
+        self.idle_since = None
+        if sign and self.path_sign and sign != self.path_sign:
+            self.path.clear()
+        if sign:
+            self.path_sign = sign
+        self.path.append((now, *self.odom))
+        while self.path and now - self.path[0][0] > HIST_S:
+            self.path.popleft()
 
     def moving_now(self):
-        """직전 0.5 s 동안 실제로 움직였나 (바퀴 거리계 / 자이로) — 명령이 아니라 측정"""
+        """직전 0.5 s 동안 실제로 움직였나 (거리계·자이로) — 부딪힘의 "굴러가던 중" 조건"""
         if len(self.odom_hist) < 3:
             return False
         t1, x1, y1, a1 = self.odom_hist[-1]
@@ -206,95 +225,115 @@ class Whisker(Node):
         if not old:
             return False
         dt = t1 - old[0]
-        v = math.hypot(x1 - old[1], y1 - old[2]) / dt
-        w = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))) / dt
-        return v >= MOVING_V or w >= MOVING_W
-
-    def check_start_blocked(self):
-        """출발했는데 안 나가짐: 명령 후 1 s 동안 1 cm 눈금도, 3° 회전도 없음 = 앞(또는 뒤)이 막힘. (집에서 나오는데 앞에 뭐가 있을 때)"""
-        st, now = self.start, time.time()
-        if not st or not self.odom or self.state not in ("drive", "back") or now - st["t"] < START_BLOCK_S:
-            return
-        self.start = None                                   # 출발 한 번에 한 번만
-        x0, y0, a0 = st["pos"]
-        moved = math.hypot(self.odom[0] - x0, self.odom[1] - y0)
-        turned = abs(math.atan2(math.sin(self.odom[2] - a0), math.cos(self.odom[2] - a0)))
-        if moved >= 0.01 or turned >= 0.05:
-            return
-        cx, cz = self.motor[2], self.motor[3]
-        if abs(cx) < 0.02 and abs(cz) < 0.1:
-            return
-        straight = abs(cx) >= 0.02
-        ang = (0.0 if cx > 0 else math.pi) if straight else 0.0
-        self.last_event = now
-        self.slow_hist.append((now, self.odom[0], self.odom[1]))     # 같은 자리에서 또 막히면 → stuck (못 가는 곳, 영구)
-        near = [h for h in self.slow_hist if now - h[0] <= STUCK_S * 2
-                and math.hypot(h[1] - self.odom[0], h[2] - self.odom[1]) <= STUCK_R]
-        if len(near) >= STUCK_N and straight:
-            self.slow_hist.clear()
-            self.on_contact({"ev": "stuck", "n": len(near), "dir": side_name(ang), "src": "motion", "cmd_x": round(cx, 3),
-                             "cmd_z": round(cz, 2), "state": self.state, "why": "출발 막힘 반복"}, ang)
-            return
-        ev = {"ev": "blocked", "moved": round(moved, 3), "kind": "straight" if straight else "turn",
-              "dir": side_name(ang) if straight else "turn", "src": "motion" if straight else "turn",
-              "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
-        self.on_contact(ev, ang)
-
-    def check_slow(self):
-        """예상보다 느림 = 막힘. 충격이 없어도(손·쿠션·동물) 잡는다. 11-06: 빼다가 손을 밀어버림 → 추가.
-        직진: 바퀴 1 cm 눈금이 예상만큼 안 뜸 / 회전: 자이로 각도가 예상만큼 안 돎 (자이로는 헛돌아도 정직)"""
-        now = time.time()
-        cx, cz = self.cmd_now
-        # 직진 = 회전 성분이 거의 없을 때만. 11-06 23:57: 곡선(x 0.068, z -0.23)은 안쪽 바퀴가 거의 안 굴러 거리계 평균이
-        #   명령의 절반 아래 → "막힘" 헛것. 곡선 중엔 판단 안 함. 제자리 회전은 자이로로 (헛돌아도 정직)
-        straight = abs(cx) >= 0.04 and abs(cz) < 0.08
-        turning = abs(cx) < 0.01 and abs(cz) >= 0.12   # 바닥선 아래(톡톡 주행)는 판단 안 함
-        if not (straight or turning) or now - self.cmd_since < SLOW_SETTLE or now - self.last_event < 1.0:
-            return
-        if self.state not in ("drive", "back") or len(self.odom_hist) < 5:
-            return
-        t1, x1, y1, a1 = self.odom_hist[-1]
-        old = next((r for r in reversed(self.odom_hist) if t1 - r[0] >= SLOW_WINDOW), None)
-        if not old:
-            return
-        dt = t1 - old[0]
-        if straight:
-            got, want = math.hypot(x1 - old[1], y1 - old[2]), abs(cx) * dt
-        else:
-            got, want = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))), abs(cz) * dt
-        if got < SLOW_RATIO * want:
-            self.last_event = now
-            # 연달아 뜨면 진짜: 5 s 안·20 cm 안에서 2번 이상 → stuck (헛바퀴·카펫 가장자리) = 반응 + 넓은 영구 표시
-            if self.odom:
-                self.slow_hist.append((now, self.odom[0], self.odom[1]))
-            near = [h for h in self.slow_hist if now - h[0] <= STUCK_S and self.odom
-                    and math.hypot(h[1] - self.odom[0], h[2] - self.odom[1]) <= STUCK_R]
-            if len(near) >= STUCK_N and straight:
-                self.slow_hist.clear()
-                ang = 0.0 if cx > 0 else math.pi
-                ev = {"ev": "stuck", "got": round(got, 3), "want": round(want, 3), "n": len(near), "dir": side_name(ang),
-                      "src": "motion", "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
-                self.on_contact(ev, ang)
-                return
-            if not self.slow_react:    # 한 번만 = 관찰만: 화면·로그에 숫자만 (출발 헛것일 수 있음)
-                self.record({"ev": "slow", "observe": True, "got": round(got, 3), "want": round(want, 3),
-                             "kind": "straight" if straight else "turn", "dir": "-", "feel": "soft", "cmd_x": round(cx, 3),
-                             "cmd_z": round(cz, 2), "state": self.state, "marked": False})
-                return
-            ang = (0.0 if cx > 0 else math.pi) if straight else 0.0
-            ev = {"ev": "slow", "got": round(got, 3), "want": round(want, 3), "kind": "straight" if straight else "turn",
-                  "dir": side_name(ang) if straight else "turn", "src": "motion" if straight else "turn",
-                  "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
-            self.on_contact(ev, ang)
+        return (math.hypot(x1 - old[1], y1 - old[2]) / dt >= MOVING_V or abs(wrap(a1 - old[3])) / dt >= MOVING_W)
 
     def on_map_pose(self, m):
         st, pp = m.header.stamp, m.pose.pose
         self.map_fix = (st.sec + st.nanosec * 1e-9, pp.position.x, pp.position.y, yaw_of(pp.orientation))
 
+    def on_scan(self, m):
+        now = time.time()
+        r = np.asarray(m.ranges, dtype=float)
+        a = m.angle_min + np.arange(len(r)) * m.angle_increment + self.laser_yaw   # 몸 기준 (앞 = +x)
+        ok = np.isfinite(r) & (r > max(m.range_min, 0.05)) & (r < NOMO_RANGE)
+        pts = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
+        if len(pts) > NOMO_PTS:
+            pts = pts[:: int(math.ceil(len(pts) / NOMO_PTS))]
+        self.scans.append((now, pts))
+        while self.scans and now - self.scans[0][0] > NOMO_S + 1.0:
+            self.scans.popleft()
+        if now - self.nomo_check >= 0.5:
+            self.nomo_check = now
+            self.check_nomo(now)
+            self.update_scan_backed(now)
+
+    @staticmethod
+    def scan_match(old, new, dyaw, reach):
+        """옛 스캔을 몸 앞뒤로 밀어 보며 지금 스캔과 가장 잘 겹치는 거리 → (몇 cm 갔나, 그 답이 얼마나 분명한가 m).
+        방향 차이는 자이로 값으로 먼저 맞춤. 지금 스캔은 이웃 점끼리 이은 선분으로 비교 (점↔점이면 빔 간격이 "움직임"처럼 보임).
+        옆벽 점은 밀어도 벽 위를 미끄러질 뿐이라 판단에 안 끼고 앞·뒤의 것들이 정함 (거리 중앙값 비교는 옆벽에 속음).
+        2 cm 간격으로 훑고 1 cm 로 다듬음 (Pi 부담: 0.5 s 마다 ~10 ms)"""
+        c, s = math.cos(-dyaw), math.sin(-dyaw)
+        if len(old) > 120:
+            old = old[:: int(math.ceil(len(old) / 120))]
+        old = np.stack([c * old[:, 0] - s * old[:, 1], s * old[:, 0] + c * old[:, 1]], axis=1)
+        ux, uy = c, s                                   # 옛 몸 x 축을 지금 몸 기준으로
+        a, b = new[:-1], new[1:]
+        joined = np.hypot(*(b - a).T) < 0.15
+        a = np.concatenate([a[joined], new])            # 이어진 선분 + 점 하나짜리(길이 0) 선분
+        ab = np.concatenate([b[joined], new]) - a
+        L2 = np.maximum((ab ** 2).sum(axis=1), 1e-12)
+        cost = {}
+
+        def at(i):
+            if i not in cost:
+                q = old - np.array([ux, uy]) * (i * 0.01)
+                aq = q[:, None, :] - a[None, :, :]
+                t = np.clip((aq * ab[None]).sum(axis=2) / L2[None], 0.0, 1.0)
+                d = np.sqrt(((aq - t[..., None] * ab[None]) ** 2).sum(axis=2)).min(axis=1)
+                cost[i] = float(np.minimum(d, 0.05).mean())
+            return cost[i]
+        n = int(round(reach / 0.01))
+        best = min(range(-n - (n % 2), n + 1, 2), key=at)
+        best = min((best - 1, best, best + 1), key=at)
+        sharp = min(at(best - 3), at(best + 3)) - at(best)
+        return best * 0.01, sharp
+
+    def update_scan_backed(self, now):
+        """빼는 동안 실제로 몇 cm 뺐나를 LiDAR 로 (거리계는 헛도는 바퀴만큼 부풀림 — 11-07 흉내 시험에서 드러남)"""
+        st = self.step
+        if self.state != "back" or not st or st["phase"] != "main" or st.get("scan0") is None or not self.scans:
+            return
+        shift, sharp = self.scan_match(st["scan0"], self.scans[-1][1], wrap(self.odom[2] - st["start"][2]),
+                                       min(0.30, st["len"] + 0.08))
+        if sharp >= NOMO_SHARP:                          # 분명한 답이 있을 때만 (특징 없는 곳이면 거리계)
+            st["scan_s"], st["scan_t"] = abs(shift), now
+
+    def check_nomo(self, now):
+        """안 움직임: 명령은 2.5 s 내내 "가라"였는데 세상(LiDAR)도 방향(자이로)도 그대로"""
+        if self.state not in ("drive", "back") or now - self.nomo_t < NOMO_S:
+            return
+        if self.state == "back" and now - self.state_t < NOMO_S:   # 창이 빼기 안에 다 들어와야
+            return
+        if not self.cmd_hist or self.cmd_hist[0][0] > now - NOMO_S + 0.2:
+            return
+        win = [c for c in self.cmd_hist if c[0] >= now - NOMO_S]
+        if len(win) < 5 or any(abs(cx) < 0.01 and abs(cz) < 0.05 for _, cx, cz in win):
+            return                                   # 중간에 "서라"가 있었음 = 판단 안 함
+        lin = sum(c[1] * (n[0] - c[0]) for c, n in zip(win, win[1:]))
+        rot = sum(c[2] * (n[0] - c[0]) for c, n in zip(win, win[1:]))
+        if abs(lin) < NOMO_MIN_LIN and abs(rot) < NOMO_MIN_ROT:
+            return                                   # 가라고 한 게 너무 적음 (제자리 떨림 등)
+        yw = [(t, y) for t, y in self.yaw_hist if t >= now - NOMO_S]
+        if len(yw) < 5:
+            return
+        turned = sum(abs(wrap(b[1] - a[1])) for a, b in zip(yw, yw[1:]))
+        if turned >= NOMO_TURN:
+            return                                   # 자이로가 돎 = 움직임 (자이로는 헛바퀴에 안 속음)
+        old = next((p for t, p in self.scans if t >= now - NOMO_S), None)
+        if old is None or len(self.scans) < 2 or len(old) < 30 or len(self.scans[-1][1]) < 30:
+            return
+        shift, sharp = self.scan_match(old, self.scans[-1][1], wrap(yw[-1][1] - yw[0][1]), min(0.25, abs(lin) + 0.05))
+        # Nav2 주행 중엔 "명령의 30% 도 못 감" = 걸림. 빼는 중엔 느려도 나가고 있으면 됨 → "1.5 cm 도 못 감"만
+        #   (흉내 시험: 한쪽 궤도 30% 접지로 되감으면 1 cm/s 남짓 — 느리지만 빠져나가는 중)
+        need = NOMO_MOVE if self.state == "back" else max(NOMO_MOVE, NOMO_RATIO * abs(lin))
+        if sharp < NOMO_SHARP or abs(shift) >= need:
+            return                                   # 스캔으로 판단 못 함 / 실제로 갔음
+        self.nomo_t = now
+        linear = abs(lin) >= NOMO_MIN_LIN
+        ang = (0.0 if lin > 0 else math.pi) if linear else 0.0
+        ev = {"ev": "stuck", "scan_cm": round(shift * 100, 1), "sharp_mm": round(sharp * 1000, 1),
+              "turned_deg": round(math.degrees(turned), 1), "want_cm": round(abs(lin) * 100, 1),
+              "want_deg": round(math.degrees(abs(rot))), "dir": side_name(ang) if linear else "turn",
+              "src": "motion" if linear else "turn", "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2),
+              "state": self.state}
+        self.on_contact(ev, ang, cut=now - NOMO_S)       # 창 동안은 실제로 안 움직였으니 되감기에서 뺌
+
     def on_imu(self, m):
         now = time.time()
         a, w = m.linear_acceleration, m.angular_velocity
         s = [a.x / G, a.y / G, math.degrees(w.x), math.degrees(w.y)]
+        self.check_tilt(now, a.x / G, a.y / G, a.z / G)
         if self.base is None:
             self.base = s[:]
             return
@@ -309,44 +348,74 @@ class Whisker(Node):
                 self.confirm()
             return
         motors_on = abs(self.motor[0]) > 1 or abs(self.motor[1]) > 1
+        asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
         settled = now - self.last_self > SELF_MASK
         if settled and horiz < self.touch_g and abs(d[2]) < self.rock_dps and abs(d[3]) < self.rock_dps:
             self.base = [self.base[i] + 0.02 * d[i] for i in range(4)]   # 평소 값은 조용할 때만 천천히
         if not settled or now - self.last_event < 1.0:
             return
         ev = None
-        # 11-07 (Jasper): 부딪힘은 "움직이다 박는 것" — 직전에 실제로 굴러가고 있었을 때만. 서 있다 출발할 때의 흔들림(0.17 g)은
-        #   속도가 0 에서 막 올라가는 중이라 여기 안 걸림 (시간으로 가리는 게 아니라 물리 조건으로 거름)
-        rolling = motors_on and self.moving_now()
-        if rolling and horiz > self.bump_g:
+        if motors_on and horiz > self.bump_g and self.moving_now():      # 움직이다 박음 (Jasper 11-07)
             ev = {"ev": "bump", "g": round(horiz, 3)}
-        elif rolling and abs(d[3]) > self.pitch_dps:
+        elif (motors_on or asked) and self.state == "drive" and abs(d[3]) > self.pitch_dps:
             ev = {"ev": "pitch", "dps": round(d[3], 1)}
-        elif rolling and abs(d[2]) > self.roll_dps:   # 11-06: 바퀴 밑 손가락 = 한쪽만 들림 → 끄덕임보다 기우뚱
+        elif (motors_on or asked) and self.state == "drive" and abs(d[2]) > self.roll_dps:
             ev = {"ev": "roll", "dps": round(d[2], 1)}
-        elif not motors_on and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
+        elif not motors_on and not asked and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
             ev = {"ev": "touch", "g": round(horiz, 3), "gx": round(d[2], 1), "gy": round(d[3], 1)}
         if not ev:
             return
         self.last_event = now
-        # 충격 방향 (몸 기준).
-        #   11-06 실측: 같은 정면 박기가 ax +0.09 / −0.07 로 반대 — 박는 순간 차체가 출렁이고, IMU 값은 ~10 Hz 로만 갱신
-        #   (피드백 20 Hz 에 같은 값 두 번) → 한 샘플·0.15 s 합 모두 방향을 못 믿음.
-        #   그래서: 직진 중이면 "가던 쪽" (앞으로 가다 뒤를 박을 순 없음) = 확실 → 빼기 + 표시.
-        #           회전 중·정지 중이면 IMU 방향은 참고만 (src=imu) → 표시 안 함, 회전은 되돌리기만.
+        # 방향: 직진 성분이 있으면 가던 쪽 (확실 → 표시). 없으면 IMU 참고만 (11-06: 방향 부호를 못 믿음 → 표시 안 함)
         if abs(self.motor[2]) >= 0.01:
             ang, src = (0.0 if self.motor[2] > 0 else math.pi), "motion"
         else:
             bx, by = self.ax_forward * d[0], self.ay_left * d[1]
             ang, src = (math.atan2(-by, -bx) if horiz > 1e-4 else 0.0), "imu"
-        ev.update(dir=side_name(ang), src=src, ang=round(math.degrees(ang)), ax=round(d[0], 3), ay=round(d[1], 3),
+        ev.update(dir=side_name(ang), src=src, ax=round(d[0], 3), ay=round(d[1], 3),
                   cmd_x=round(self.motor[2], 3), cmd_z=round(self.motor[3], 2), state=self.state)
-        if ev["ev"] == "touch":                # 건드림은 기록만이라 확인 없이
+        if ev["ev"] == "touch":
             self.on_contact(ev, ang)
             return
-        # 의심 → 0.3 s 뒤 결과로 확인 (부딪힘 = 바퀴가 실제로 멈춤 / 끄덕임·기우뚱 = 차체가 실제로 기울어짐)
         self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3]),
                         "tilt_p": d[3] * dt, "tilt_r": d[2] * dt}
+
+    def check_tilt(self, now, ax, ay, az):
+        """카펫 기울기: 0.4 s 중앙값 중력 방향이 평소보다 1.5° 이상 기운 채 0.3 s = 가장자리에 올라타는 중 → 올라가기 전에 되감기.
+        얇은 카펫은 기울기가 작아(1.6~1.9°) 맨바닥(≤1.1°)과 여유가 0.5° 뿐 → 확실하지 않은 감각이라
+        처음엔 1분 표시, 같은 곳에서 또면 영구 (안 움직임과 같은 규칙). 놓치면 헛바퀴는 "안 움직임"이 잡음"""
+        self.grav.append((now, ax, ay, az))
+        while self.grav and now - self.grav[0][0] > TILT_WIN:
+            self.grav.popleft()
+        if len(self.grav) < 4:
+            return
+        v = np.median(np.array([g[1:] for g in self.grav]), axis=0)
+        v = v / max(np.linalg.norm(v), 1e-6)
+        if self.grav_ref is None:
+            self.grav_ref = v
+            return
+        tilt = math.degrees(math.acos(float(np.clip(np.dot(v, self.grav_ref), -1.0, 1.0))))
+        if tilt < TILT_DEG * 0.5 and self.state == "drive":   # 평소 방향은 평평할 때만 아주 천천히 (집마다 바닥 기울기 다름)
+            self.grav_ref = self.grav_ref + 0.002 * (v - self.grav_ref)
+            self.grav_ref = self.grav_ref / np.linalg.norm(self.grav_ref)
+        if tilt < TILT_REARM:
+            self.tilt_armed = True
+        asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
+        if tilt < TILT_DEG or self.state != "drive" or not asked or not self.tilt_armed:
+            self.tilt_since = None
+            return
+        self.tilt_since = self.tilt_since or now
+        if now - self.tilt_since < TILT_HOLD:
+            return
+        self.tilt_since, self.tilt_armed = None, False
+        d = np.degrees(v - self.grav_ref)                     # 어느 축으로 기울었나 (참고: 부호는 보드 방향 미확정)
+        linear = abs(self.motor[2]) >= 0.01
+        ang = (0.0 if self.motor[2] > 0 else math.pi) if linear else 0.0
+        self.last_event = now
+        ev = {"ev": "tilt", "deg": round(tilt, 1), "dx_deg": round(float(d[0]), 1), "dy_deg": round(float(d[1]), 1),
+              "dir": side_name(ang) if linear else "turn", "src": "motion" if linear else "turn",
+              "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
+        self.on_contact(ev, ang)
 
     def confirm(self):
         p, self.pending = self.pending, None
@@ -354,14 +423,13 @@ class Whisker(Node):
         cx0, cz0 = p["cmd"]
         cx1, cz1 = self.motor[2], self.motor[3]
         if kind == "bump":
-            still_asked = abs(cx1) >= 0.8 * abs(cx0) and abs(cz1) >= 0.8 * abs(cz0)   # 명령이 줄었으면 = 우리가 선 것
+            still_asked = abs(cx1) >= 0.8 * abs(cx0) and abs(cz1) >= 0.8 * abs(cz0)
             if abs(cx0) >= 0.01:
                 want = abs(cx0) * CONFIRM_S
                 got = math.hypot(self.odom[0] - p["pos"][0], self.odom[1] - p["pos"][1]) if self.odom and p["pos"] else want
             else:
                 want = abs(cz0) * CONFIRM_S
-                got = (abs(math.atan2(math.sin(self.odom[2] - p["pos"][2]), math.cos(self.odom[2] - p["pos"][2])))
-                       if self.odom and p["pos"] else want)
+                got = abs(wrap(self.odom[2] - p["pos"][2])) if self.odom and p["pos"] else want
             ok = still_asked and want > 0.005 and got < CONFIRM_STALL * want
             ev["confirm"] = {"want": round(want, 3), "got": round(got, 3), "asked": still_asked}
         else:
@@ -369,27 +437,35 @@ class Whisker(Node):
             ok = abs(tilt) >= CONFIRM_TILT
             ev["confirm"] = {"tilt_deg": round(tilt, 1)}
         if ok:
-            self.on_contact(ev, p["ang"])
-        else:                                  # 헛것: 결과가 없음 → 기록만 (지도·반응 없음)
+            self.on_contact(ev, p["ang"], cut=p["t"] if kind == "bump" else None)   # 부딪힌 뒤 0.3 s 는 안 움직였음
+        else:
             ev["was"], ev["ev"], ev["feel"], ev["marked"] = kind, "ghost", "ghost", False
             self.record(ev)
 
     # ------------------------------------------------------------------ 반응
-    def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
-        if self.state == "back" and self.backed_frac() < RELEASE_FRAC:
-            # 빼기 초반의 흔들림 = 올라탔던 것(손가락·턱)에서 내려오는 것 (11-06: 손가락을 밟고 빼다가 "bump rear" → 갇힘 오해)
-            self.get_logger().info(f"WHISKER 빼는 초반 흔들림 무시 (내려오는 중, {self.backed_frac() * 100:.0f}%)")
-            return
+    def on_contact(self, ev, ang, cut=None):
         kind = ev["ev"]
-        # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
-        #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
-        #   roll(한쪽 궤도만 들림) = 뭔가를 밟음 (손가락·물건일 수도) → 부드러움 쪽으로 (표시 1분). pitch(양쪽) = 턱·레일 → 단단
-        ev["feel"] = ("soft" if kind in ("slow", "roll", "blocked") else
-                      "hard" if kind in ("bump", "pitch", "stuck") else "touch")   # stuck(헛바퀴 반복) = 못 가는 구역
-        ttl = SOFT_TTL if ev["feel"] == "soft" else None
-        marked = (kind in ("bump", "pitch", "roll", "slow", "stuck", "blocked") and ev.get("src") == "motion"
-                  and self.mark(ang, ttl, STUCK_HALF if kind == "stuck" else MARK_HALF))   # 확실한 것만
-        ev["marked"] = marked
+        if self.state == "back" and kind in ("pitch", "roll", "tilt"):
+            return                                   # 빼는 중 기울어짐 = 올라탔던 것에서 내려오는 중
+        if self.state in ("stop", "trapped", "help") and kind != "touch":
+            return
+        half, ttl, feel = MARK_HALF, None, "hard"
+        if kind == "pitch":
+            half = LINE_HALF                         # 앞뒤로 들림 = 턱·가장자리 = 선
+        elif kind == "roll":
+            ttl, feel = SOFT_TTL, "soft"             # 한쪽만 = 발·물건일 수도
+        elif kind in ("stuck", "tilt"):              # 확실하지 않은 감각: 처음 1분, 같은 곳에서 또면 영구
+            half = LINE_HALF
+            pose = self.map_pose()
+            again = bool(pose) and any(math.hypot(pose[1] - x, pose[2] - y) < REPEAT_R for x, y in self.stuck_spots)
+            if pose:
+                self.stuck_spots.append((pose[1], pose[2]))
+            ev["again"] = again
+            ttl, feel = (None, "hard") if again else (SOFT_TTL, "soft")
+        elif kind == "touch":
+            feel = "touch"
+        ev["feel"] = feel
+        ev["marked"] = kind != "touch" and ev.get("src") == "motion" and self.mark(ang, ttl, half)
         self.record(ev)
         if kind == "touch" or not self.react:
             return
@@ -398,133 +474,166 @@ class Whisker(Node):
         elif ang < -0.3:
             self.right_hits += 1
         if self.state == "drive":
-            self.contact_ang, self.contact_feel, self.contact_kind = ang, ev["feel"], kind
-            self.last_cmd = (self.motor[2], self.motor[3])
+            self.contact_kind, self.contact_feel = kind, feel
             self.trapped = 0
-            # 바로 물러남: 부드러움(손·발일 수도) / 밟음·들림(pitch·roll — 올라탄 채 서 있지 않게). 부딪힘만 0.5 s 멈춘 뒤 빼기
-            self.go("stop" if kind == "bump" else "back")   # stuck 도 바로 빼기 (헛돌며 버티지 않게)
-        elif self.state == "back" and self.step and self.step["kind"] == "lin" and not self.step.get("rebound") \
-                and self.backed() >= 0.02:
-            # 빼다가 반대쪽에 닿음 (11-07 Jasper: "뒤에 박았으면 바로 앞으로 빼고 다음으로") → 기다리지 않고 바로 반대로,
-            #   방금 뺀 만큼만 (최대 5 cm) — 그 길은 방금 지나왔으니 비어 있음
-            back, sign = min(0.05, self.backed()), -self.step["sign"]
-            self.step = {"kind": "lin", "sign": sign, "goal": back, "pre": 0.0, "start": self.odom, "phase": "main",
-                         "rebound": True}
-            self.plan_text = f"반대쪽에도 닿음 → 바로 {'앞으' if sign > 0 else '뒤'}로 {back * 100:.0f} cm (방금 지나온 길)"
+            self.esc = self.plan_replay(time.time() if cut is None else cut)
+            self.path.clear()
+            self.path_sign = 0
+            self.go("stop" if kind == "bump" else "back")
+        elif self.state == "back" and self.step and not self.step["rebound"] and self.backed() >= 0.02:
+            # 빼다가 반대쪽에 막힘 → 기다리지 않고 방금 뺀 길로 반대로 (그 길은 방금 지나와서 비어 있음)
+            done = self.backed()
+            self.esc["done"] += done
+            self.step = {"dir": -self.step["dir"], "wps": [(0.0, None)], "len": min(REBOUND_MAX, done), "pre": 0.0,
+                         "phase": "main", "start": self.odom, "hold": self.odom[2], "rebound": True,
+                         "scan0": self.last_scan()}
+            self.plan_text = f"반대쪽도 막힘 → 방금 뺀 길로 {self.step['len'] * 100:.0f} cm"
             self.state_t = time.time()
-            self.get_logger().warn(f"WHISKER back: 빼기 — {self.plan_text}")
-            self.state_pub.publish(String(data=json.dumps({"state": "back", "msg": "빼기 — " + self.plan_text,
-                                                           "try": self.trapped}, ensure_ascii=False)))
-        elif self.state == "back":          # 빼고, 되돌아 나오는 것까지 막힘 = 진짜 앞뒤 다 막힘 → 기다림
+            self.say_state("back", "빼기 — " + self.plan_text)
+        elif self.state == "back":
+            if self.step and not self.step["rebound"]:
+                self.esc["done"] += self.backed()
+            elif self.step:
+                self.esc["done"] = max(0.0, self.esc["done"] - self.backed())
             self.trapped += 1
-            if self.trapped > 3:            # 시도 1·2·3 다 실패
-                self.go("help")
-            else:
-                self.go("trapped")
+            self.go("help" if self.trapped > 3 else "trapped")
+
+    def plan_replay(self, cut):
+        """지나온 길(cut 이전)을 거꾸로: [(되감은 거리 s, 그 지점의 자이로 방향)], 최대 15 cm·30°"""
+        pts = [p for p in self.path if p[0] <= cut]
+        if not pts:
+            return {"dir": 0, "wps": [(0.0, None)], "len": 0.0, "done": 0.0}
+        yaw_end = pts[-1][3]
+        wps, s = [(0.0, yaw_end)], 0.0
+        for new, old in zip(reversed(pts), reversed(pts[:-1])):
+            if abs(wrap(old[3] - yaw_end)) > REPLAY_ROT:
+                break
+            s += math.hypot(new[1] - old[1], new[2] - old[2])
+            if s >= REPLAY_MAX:
+                wps.append((REPLAY_MAX, old[3]))
+                s = REPLAY_MAX
+                break
+            wps.append((s, old[3]))
+        return {"dir": -self.path_sign, "wps": wps, "len": s if self.path_sign else 0.0, "done": 0.0}
+
+    def start_step(self):
+        """이번 빼기 계획. 처음·시도 1 = 남은 되감기 / 시도 2 = 덜 막힌 쪽으로 15° 돌고 / 시도 3 = 반대로 15°"""
+        b = self.esc
+        if not b or not self.odom:
+            self.plan_text = "계획 없음 → Nav2 에 돌려줌"
+            return False
+        rem = max(0.0, b["len"] - b["done"])
+        if self.trapped <= 1:
+            wps = [(0.0, self.wp_yaw(b["wps"], b["done"], None))] + [(s - b["done"], y) for s, y in b["wps"] if s > b["done"]]
+            turn = max(abs(wrap(y - self.odom[2])) for _, y in wps if y is not None) if any(y is not None for _, y in wps) else 0
+            if rem < 0.02 and turn < HEAD_ROT:
+                if self.trapped == 0:
+                    self.plan_text = "지나온 길 없음 → 빼지 않고 멈춤, Nav2 에 돌려줌 (표시는 남김)"
+                    return False
+                wps, rem = [(0.0, None)], 0.05
+            pre = 0.0
+            curve = math.degrees(max(abs(wrap(y - wps[0][1])) for _, y in wps if y is not None)) if wps[0][1] is not None else 0
+            main = f"되감기 {rem * 100:.0f} cm" + (f" (곡선 {curve:.0f}°)" if curve >= 5 else "")
+        else:
+            side = 1 if (self.trapped == 2) == (self.left_hits <= self.right_hits) else -1
+            pre, wps, rem = side * self.back_turn, [(0.0, None)], max(rem, 0.05)
+            main = f"{'왼쪽' if pre > 0 else '오른쪽'} {math.degrees(self.back_turn):.0f}° 돈 뒤 {rem * 100:.0f} cm"
+        dirn = b["dir"] or -1
+        self.step = {"dir": dirn, "wps": wps, "len": rem, "pre": pre, "phase": "pre" if pre else "main",
+                     "start": self.odom, "hold": self.odom[2], "rebound": False, "scan0": self.last_scan()}
+        head = f"시도 {self.trapped}: " if self.trapped else ""
+        self.plan_text = f"{head}{'뒤' if dirn < 0 else '앞'}로 {main} ({self.contact_kind})"
+        return True
+
+    def last_scan(self):
+        return self.scans[-1][1] if self.scans and time.time() - self.scans[-1][0] < 0.5 else None
+
+    @staticmethod
+    def wp_yaw(wps, s, hold):
+        y = lambda v: hold if v is None else v
+        if s <= wps[0][0]:
+            return y(wps[0][1])
+        for (s0, y0), (s1, y1) in zip(wps, wps[1:]):
+            if s <= s1:
+                a, b = y(y0), y(y1)
+                if a is None or b is None:
+                    return a if b is None else b
+                return a + (s - s0) / max(s1 - s0, 1e-6) * wrap(b - a)
+        return y(wps[-1][1])
 
     def go(self, state):
-        if state == "back" and not self.plan_step():   # 지나온 길이 없음 (출발 직후 등) → 빼지 않고 멈춘 채 Nav2 에
+        if state == "back" and not self.start_step():
             self.send(0.0, 0.0)
-            self.get_logger().warn(f"WHISKER back: {self.plan_text}")
-            self.state_pub.publish(String(data=json.dumps({"state": "back", "msg": self.plan_text, "try": self.trapped},
-                                                          ensure_ascii=False)))
+            self.say_state("back", self.plan_text)
             state = "drive"
         self.state, self.state_t = state, time.time()
         msg = {"stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
                "trapped": f"앞뒤 다 막힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
-               "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "빠짐 → Nav2 에 돌려줌"}[state]
-        self.get_logger().warn(f"WHISKER {state}: {msg}")
-        self.state_pub.publish(String(data=json.dumps({"state": state, "msg": msg, "try": self.trapped}, ensure_ascii=False)))
+               "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "Nav2 에 돌려줌"}[state]
+        self.say_state(state, msg)
         if state == "help":
             where = self.map_pose()
             threading.Thread(target=self.ntfy, daemon=True, args=("robot: WHISKER 구조 요청",
-                      f"앞뒤가 막혀 3번 빠져나오지 못함. 위치 {where[1]:.2f}, {where[2]:.2f} ({where[0]})" if where else
-                      "앞뒤가 막혀 3번 빠져나오지 못함")).start()
+                             f"3번 빠져나오지 못함. 위치 {where[1]:.2f}, {where[2]:.2f} ({where[0]})" if where else
+                             "3번 빠져나오지 못함")).start()
 
-    def plan_step(self):
-        """빼기 계획. 처음·시도 1: 그대로 / 시도 2: 덜 박힌 쪽으로 15° 먼저 / 시도 3: 반대로 15° 먼저"""
-        x0, z0 = self.last_cmd
-        rotating = abs(x0) < 0.01 and abs(z0) > 0.05
-        pre = 0.0
-        if self.trapped == 2:
-            pre = -self.back_turn if self.left_hits > self.right_hits else self.back_turn
-        elif self.trapped >= 3:
-            pre = self.back_turn if self.left_hits > self.right_hits else -self.back_turn
-        dist = self.soft_dist if self.contact_kind in ("slow", "blocked") else self.back_dist   # 밟은 건(roll·pitch) 10 cm
-        if rotating:   # 돌다가 닿음 → 돌던 반대로 15°
-            self.step = {"kind": "rot", "sign": -math.copysign(1, z0), "goal": self.back_turn, "pre": pre}
-            main = f"{'왼쪽' if self.step['sign'] > 0 else '오른쪽'}으로 {math.degrees(self.back_turn):.0f}° 되돌리기"
-        else:          # 가다가 닿음 → 왔던 길로, 온 만큼만 (최대 10 cm, 부드러운 건 5 cm)
-            sign = -1.0 if math.cos(self.contact_ang) > 0 else 1.0
-            came = self.trail["len"] if self.trail["sign"] == -sign else 0.0      # 그 방향으로 지나온 거리
-            dist = min(dist, came)
-            if dist < 0.02:
-                self.step = None
-                self.plan_text = f"지나온 길 없음 ({came * 100:.0f} cm) → 빼지 않고 멈춤, Nav2 에 돌려줌 (표시는 남김)"
-                return False
-            self.step = {"kind": "lin", "sign": sign, "goal": dist, "pre": pre}
-            main = f"{'뒤' if sign < 0 else '앞으'}로 {dist * 100:.0f} cm (지나온 {came * 100:.0f} cm 안에서)"
-        self.step["start"] = self.odom
-        self.step["phase"] = "pre" if pre else "main"
-        head = f"시도 {self.trapped}: " if self.trapped else ""
-        turn = f"{'왼쪽' if pre > 0 else '오른쪽'} {math.degrees(abs(pre)):.0f}° 돈 뒤 " if pre else ""
-        self.plan_text = f"{head}{turn}{main} ({self.contact_feel})"
-        return True
+    def say_state(self, state, msg):
+        self.get_logger().warn(f"WHISKER {state}: {msg}")
+        self.state_pub.publish(String(data=json.dumps({"state": state, "msg": msg, "try": self.trapped}, ensure_ascii=False)))
 
     def backed(self):
+        """이번 빼기에서 실제로 간 거리: LiDAR 스캔 맞추기 값이 있으면 그것 (헛바퀴에 안 속음), 없으면 거리계"""
         st = self.step
-        if not st or st.get("phase") != "main" or not self.odom or not st.get("start"):
+        if not st or st["phase"] != "main" or not self.odom:
             return 0.0
+        if st.get("scan_t") and time.time() - st["scan_t"] < 1.0:
+            return st["scan_s"]
         return math.hypot(self.odom[0] - st["start"][0], self.odom[1] - st["start"][1])
-
-    def backed_frac(self):
-        """지금 빼기에서 목표의 몇 % 를 왔나 (직진만. 회전·준비 회전 중엔 1 = 무시 안 함)"""
-        st = self.step
-        if not st or st.get("phase") != "main" or st["kind"] != "lin" or not self.odom or not st.get("start"):
-            return 1.0
-        return math.hypot(self.odom[0] - st["start"][0], self.odom[1] - st["start"][1]) / max(st["goal"], 1e-3)
 
     def tick(self):
         if self.state == "drive":
             return
-        now, t = time.time(), time.time() - self.state_t
+        t = time.time() - self.state_t
         x = z = 0.0
         if self.state == "stop":
             if t > 0.5:
                 self.go("back")
+                return
         elif self.state == "trapped":
             if t > self.wait_s:
                 self.go("back")
+                return
         elif self.state == "back":
             st = self.step
-            if not self.odom or not st["start"]:
+            if not self.odom or not st:
                 self.go("drive")
                 return
-            x0, y0, yaw0 = st["start"]
-            x1, y1, yaw1 = self.odom
+            yaw = self.odom[2]
             if st["phase"] == "pre":
-                turned = abs(math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0)))
-                if turned >= abs(st["pre"]):
-                    st["phase"], st["start"] = "main", self.odom
-                    x0, y0, yaw0 = self.odom
+                if abs(wrap(yaw - st["start"][2])) >= abs(st["pre"]):
+                    st.update(phase="main", start=self.odom, hold=yaw, scan0=self.last_scan(), scan_t=None)
                 else:
                     z = math.copysign(TURN_SPEED, st["pre"])
             if st["phase"] == "main":
-                if st["kind"] == "lin":
-                    done = math.hypot(x1 - x0, y1 - y0) >= st["goal"]
-                    x = 0.0 if done else st["sign"] * BACK_SPEED
-                    # 방향 유지: 시작 방향에서 틀어진 만큼 살짝 되돌림 (11-06: 좌우 바퀴가 따로 풀려 비스듬히 빠짐)
-                    err = math.atan2(math.sin(yaw0 - yaw1), math.cos(yaw0 - yaw1))
-                    z = 0.0 if done else max(-0.12, min(0.12, 1.5 * err))
+                s = self.backed()
+                err = wrap(self.wp_yaw(st["wps"], s, st["hold"]) - yaw)
+                if s < st["len"]:
+                    # 되감기 = 들어올 때의 곡률(기록) 그대로 + 자이로로 본 실제 방향과의 차이만큼 보정.
+                    #   헛도는 쪽이 있어 차체가 그쪽으로 돌면 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 (Jasper 11-07)
+                    ahead = self.wp_yaw(st["wps"], s + 0.01, st["hold"])
+                    ff = wrap(ahead - self.wp_yaw(st["wps"], s, st["hold"])) / 0.01 * BACK_SPEED
+                    x = st["dir"] * BACK_SPEED
+                    z = max(-HEAD_MAX, min(HEAD_MAX, ff + HEAD_K * err))
+                elif abs(err) >= HEAD_ROT:        # 거리는 다 됨, 방향이 남음 (돌던 중 닿음 = 되돌리기) → 제자리에서 맞춤
+                    z = math.copysign(TURN_SPEED, err)
                 else:
-                    done = abs(math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0))) >= st["goal"]
-                    z = 0.0 if done else st["sign"] * TURN_SPEED
-                if done:
+                    if not st["rebound"]:
+                        self.esc["done"] += s
                     self.trapped = 0
                     self.send(0.0, 0.0)
                     self.go("drive")
                     return
-            if t > STEP_TIMEOUT:   # 안 움직임 (헛돎) → 갇힌 걸로
+            if t > STEP_TIMEOUT:
                 self.trapped += 1
                 self.go("help" if self.trapped > 3 else "trapped")
                 return
@@ -537,7 +646,7 @@ class Whisker(Node):
         m.twist.linear.x, m.twist.angular.z = float(x), float(z)
         self.cmd_pub.publish(m)
 
-    def on_resume(self, _):   # 사람이 풀어줌 / whisker_lab 이 Ctrl+C 로 끝낼 때
+    def on_resume(self, _):
         self.trapped = 0
         self.send(0.0, 0.0)
         self.go("drive")
@@ -558,16 +667,16 @@ class Whisker(Node):
         return "map", mx + c * lx - s * ly, my + s * lx + c * ly, myaw + (oyaw - old[3])
 
     def mark(self, ang, ttl=None, half=MARK_HALF):
-        """충격 방향의 몸 둘레 점 + 3 cm 바깥에, 방향과 직각으로 점 3개 (~10 cm)"""
+        """닿은 방향의 몸 둘레 + 3 cm 바깥에, 방향과 직각으로 5 cm 간격 점들"""
         pose = self.map_pose()
         if not pose or pose[0] != "map":
             return False
         _, x, y, yaw = pose
         ca, sa = math.cos(ang), math.sin(ang)
         r = min(HALF_L / abs(ca) if abs(ca) > 1e-6 else 9, HALF_W / abs(sa) if abs(sa) > 1e-6 else 9) + MARK_GAP
-        n = max(1, round(half / 0.05))           # 5 cm 간격 (지도 칸)
+        n = max(1, round(half / 0.05))
         for off in [half * i / n for i in range(-n, n + 1)]:
-            bx, by = r * ca - off * sa, r * sa + off * ca            # 몸 기준
+            bx, by = r * ca - off * sa, r * sa + off * ca
             self.points.append((x + math.cos(yaw) * bx - math.sin(yaw) * by,
                                 y + math.sin(yaw) * bx + math.cos(yaw) * by, time.time() + ttl if ttl else None))
         self.contacts += 1
@@ -586,13 +695,14 @@ class Whisker(Node):
 
     def on_clear(self, _):
         self.points.clear()
+        self.stuck_spots.clear()
         self.contacts = 0
         self.get_logger().warn("WHISKER clear: 표시 전부 지움")
         self.publish_cloud()
 
     def publish_cloud(self):
         now = time.time()
-        self.points = [p for p in self.points if p[2] is None or p[2] > now]   # 부드러운 표시는 만료되면 사라짐
+        self.points = [p for p in self.points if p[2] is None or p[2] > now]
         self.cloud_pub.publish(self.cloud([(x, y) for x, y, _ in self.points]))
         self.soft_pub.publish(self.cloud([(x, y) for x, y, exp in self.points if exp is not None]))
 
