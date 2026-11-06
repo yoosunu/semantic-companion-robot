@@ -157,7 +157,10 @@ class Whisker(Node):
         직진: 바퀴 1 cm 눈금이 예상만큼 안 뜸 / 회전: 자이로 각도가 예상만큼 안 돎 (자이로는 헛돌아도 정직)"""
         now = time.time()
         cx, cz = self.cmd_now
-        straight, turning = abs(cx) >= 0.04, abs(cx) < 0.01 and abs(cz) >= 0.12   # 바닥선 아래(톡톡 주행)는 판단 안 함
+        # 직진 = 회전 성분이 거의 없을 때만. 11-06 23:57: 곡선(x 0.068, z -0.23)은 안쪽 바퀴가 거의 안 굴러 거리계 평균이
+        #   명령의 절반 아래 → "막힘" 헛것. 곡선 중엔 판단 안 함. 제자리 회전은 자이로로 (헛돌아도 정직)
+        straight = abs(cx) >= 0.04 and abs(cz) < 0.08
+        turning = abs(cx) < 0.01 and abs(cz) >= 0.12   # 바닥선 아래(톡톡 주행)는 판단 안 함
         if not (straight or turning) or now - self.cmd_since < SLOW_SETTLE or now - self.last_event < 1.0:
             return
         if self.state not in ("drive", "back") or len(self.odom_hist) < 5:
