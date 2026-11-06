@@ -158,10 +158,10 @@ class Whisker(Node):
             ang = math.atan2(-by, -bx)
         ev.update(dir=side_name(ang), ang=round(math.degrees(ang)), ax=round(d[0], 3), ay=round(d[1], 3),
                   cmd_x=round(self.motor[2], 3), cmd_z=round(self.motor[3], 2), state=self.state)
-        self.handle(ev, ang)
+        self.on_contact(ev, ang)
 
     # ------------------------------------------------------------------ 반응
-    def handle(self, ev, ang):
+    def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
         kind = ev["ev"]
         marked = kind in ("bump", "pitch") and self.mark(ang)
         ev["marked"] = marked
