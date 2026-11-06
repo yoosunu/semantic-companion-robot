@@ -2,7 +2,7 @@
 """Whisker (수염) — 기어다니는 로봇의 촉각. LiDAR(19.5 cm) 아래 것(의자 다리, 건조대 다리, 레일, 턱)을 닿아서 안다.
 
   느끼기   /imu + /motor_out(브리지가 방금 모터를 바꿨나 = efference copy) → 부딪힘 / 끄덕임 / 건드림
-  방향     충격 방향 = 가속이 튄 방향의 반대 (회전 중 모서리, 옆 긁힘, 사람이 민 것도)
+  방향     직진 중 = 가던 쪽 (확실 → 표시). 회전·정지 중 = IMU 참고 (11-06: 박을 때 출렁임 + IMU ~10 Hz → 못 믿음, 표시 안 함)
   반응     멈춤 → 왔던 쪽으로 10 cm 빼기 (회전 중이었으면 15° 되돌리기) → 성공하면 Nav2 에 돌려줌
   갇힘     빼다가 또 닿음 → 10초 가만히 → 다시 빼기 (1: 같은 방법, 2: 15° 돌고 빼기, 3: 반대로 15° 돌고 빼기)
            → 3번 다 실패하면 구조 요청 (ntfy) + 정지. 풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
@@ -12,7 +12,7 @@
 
 브리지는 얇게 (v8): /imu, /motor_out 을 내고, /whisker/cmd_vel 이 오는 동안은 Nav2 를 무시한다. 판단은 전부 여기.
 문턱값·거리는 ROS 파라미터 → 재빌드 없이 `ros2 param set /whisker bump_g 0.05`. 측정 근거: docs/calibration/imu-touch-2026-11-06.md
-축 방향: ax_forward / ay_left (+1/-1). 처음 한 번, 정면으로 박아서 dir 이 front 로 나오는지 확인 (아니면 ax_forward 뒤집기).
+IMU 로 충격 방향 알기는 연구 과제로 남김 (펌웨어 IMU 갱신 속도 확인 → 다시 도전). ax_forward / ay_left 는 그때 쓸 것.
 """
 import collections
 import json
@@ -36,8 +36,10 @@ MARK_GAP = 0.03               # m, 몸 바깥으로
 MARK_HALF = 0.05              # m, 표시 반폭 → 점 3개, 폭 ~10 cm
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (출발 흔들림 0.17 g 은 우리 것)
-BACK_SPEED, TURN_SPEED = 0.05, 0.25   # m/s, rad/s (기어가기 바닥선 위)
-STEP_TIMEOUT = 6.0            # s, 빼기 한 번 최대
+BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) 바로 위, 연속으로 잔잔하게.
+                                      #   11-06: 0.25 rad/s 는 출발 밀기 + 자이로 보정으로 과격. TAP 은 0.5 s 마다
+                                      #   모터가 바뀌어 감지가 0.4 s 씩 가려짐 → 빼는 중 다시 박아도 놓침 → 안 씀
+STEP_TIMEOUT = 8.0            # s, 빼기 한 번 최대
 
 
 def yaw_of(q):
@@ -63,8 +65,8 @@ class Whisker(Node):
         self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리
         self.back_turn = math.radians(p("back_turn_deg", 15.0).value)
         self.wait_s = p("trapped_wait", 10.0).value
-        self.ax_forward = p("ax_forward", 1.0).value   # 보드 +x 가 로봇 앞이면 +1 (첫 정면 박기로 확인)
-        self.ay_left = p("ay_left", 1.0).value         # 보드 +y 가 로봇 왼쪽이면 +1
+        self.ax_forward = p("ax_forward", 1.0).value   # 보드 +x 가 로봇 앞이면 +1 — 11-06 정면 박기 2번이 반대 부호라 미확정
+        self.ay_left = p("ay_left", 1.0).value         #   (IMU 방향은 회전·정지 중 참고용으로만 씀)
         self.react = p("react", True).value            # False = 느끼고 기록만 (관찰 모드)
 
         # 감각 상태
@@ -150,20 +152,24 @@ class Whisker(Node):
         if not ev:
             return
         self.last_event = now
-        # 충격 방향 (몸 기준): 로봇은 닿은 쪽 반대로 밀린다 → 접촉 = 가속 튐의 반대
-        bx, by = self.ax_forward * d[0], self.ay_left * d[1]
-        if ev["ev"] == "pitch" or horiz < 1e-4:   # 끄덕임: 가던 쪽 (앞으로 가다 들리면 앞)
-            ang = 0.0 if self.motor[2] >= 0 else math.pi
+        # 충격 방향 (몸 기준).
+        #   11-06 실측: 같은 정면 박기가 ax +0.09 / −0.07 로 반대 — 박는 순간 차체가 출렁이고, IMU 값은 ~10 Hz 로만 갱신
+        #   (피드백 20 Hz 에 같은 값 두 번) → 한 샘플·0.15 s 합 모두 방향을 못 믿음.
+        #   그래서: 직진 중이면 "가던 쪽" (앞으로 가다 뒤를 박을 순 없음) = 확실 → 빼기 + 표시.
+        #           회전 중·정지 중이면 IMU 방향은 참고만 (src=imu) → 표시 안 함, 회전은 되돌리기만.
+        if abs(self.motor[2]) >= 0.01:
+            ang, src = (0.0 if self.motor[2] > 0 else math.pi), "motion"
         else:
-            ang = math.atan2(-by, -bx)
-        ev.update(dir=side_name(ang), ang=round(math.degrees(ang)), ax=round(d[0], 3), ay=round(d[1], 3),
+            bx, by = self.ax_forward * d[0], self.ay_left * d[1]
+            ang, src = (math.atan2(-by, -bx) if horiz > 1e-4 else 0.0), "imu"
+        ev.update(dir=side_name(ang), src=src, ang=round(math.degrees(ang)), ax=round(d[0], 3), ay=round(d[1], 3),
                   cmd_x=round(self.motor[2], 3), cmd_z=round(self.motor[3], 2), state=self.state)
         self.on_contact(ev, ang)
 
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
         kind = ev["ev"]
-        marked = kind in ("bump", "pitch") and self.mark(ang)
+        marked = kind in ("bump", "pitch") and ev.get("src") == "motion" and self.mark(ang)   # 확실한 것만 지도에
         ev["marked"] = marked
         self.record(ev)
         if kind == "touch" or not self.react:
