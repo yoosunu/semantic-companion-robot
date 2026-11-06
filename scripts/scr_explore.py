@@ -51,7 +51,7 @@ STUCK_S, STUCK_M = 180.0, 0.10
 REACH_COST = 75          # 전역 비용지도(0~100) 이 미만 = 로봇 중심이 지나갈 수 있는 칸 (몸 외접원 밖 ≈ 78)
 VIEW_COST = 40           # 관찰점은 더 넉넉히 (벽·가구에서 떨어진 곳)
 SEE_R = 0.35             # m, 갈 수 있는 곳에서 이 안의 경계만 = 그 너머는 좁은 틈·구석
-VIEW_MIN, VIEW_MAX = 0.20, 1.50   # m, 관찰점 ↔ 경계 거리
+VIEW_MIN, VIEW_MAX = 0.20, 1.00   # m, 관찰점 ↔ 경계 거리
 SETTLE_S = 7.0           # s, 관찰점 도착 후 SLAM 지도 갱신(5 s) 기다림 (11-07 02:25: 도착 즉시 unseen 으로 전부 포기)
 NOVIEW_S = 30.0          # s, 갈 자리가 이만큼 계속 없을 때만 포기 (처음엔 지도가 작아서 잠깐 없을 수 있음)
 CONTACTS = ("bump", "pitch", "roll", "stuck")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
@@ -183,20 +183,30 @@ class Explorer(Node):
     # ------------------------------------------------------------------ 경계 찾기
     def find_frontiers(self):
         """explore_lite 의 철학 (11-07 Jasper: "너무 멍청하게 구석에 가려 함"):
-          1. 경계는 로봇에서 "갈 수 있는 칸"(전역 비용지도 < 75)으로 퍼져서 닿는 곳에서만 — 좁은 틈·구석 너머는 처음부터 없음
-          2. 경계 위에 서야 보이는 게 아님 (LiDAR 12 m) → 경계가 직선으로 보이는 안전한 칸(비용 < 40) = 관찰점으로 감
-             관찰점이 없으면 가 보지도 않고 포기 (no_view)"""
-        g = self.cmap
-        if g is None:
+          경계 = SLAM 지도의 "아는 빈칸 ↔ 모르는 칸" (채워야 할 건 SLAM 지도. 11-07 02:29: 비용지도는 로봇 따라 움직이는 창이고
+                 LiDAR 가 지나간 칸을 빈칸으로 지워서 경계가 안 보임 → 30 초 만에 "경계 없음")
+          1. 그중 로봇에서 "갈 수 있는 칸"(전역 비용지도 < 75)으로 퍼져 닿는 곳 근처만 — 좁은 틈·구석 너머는 없음
+          2. 경계 위가 아니라 경계가 직선으로 보이는 안전한 칸(비용 < 40, 경계에서 가까운 곳) = 관찰점으로 감"""
+        g, cm = self.grid, self.cmap
+        if g is None or cm is None:
             return []
         w, h, res = g.info.width, g.info.height, g.info.resolution
         ox, oy = g.info.origin.position.x, g.info.origin.position.y
-        a = np.array(g.data, dtype=np.int16).reshape(h, w)
+        a = np.array(g.data, dtype=np.int16).reshape(h, w)            # SLAM 지도
+        # 비용지도를 SLAM 지도 칸에 맞춰 옮김 (해상도·원점이 달라도: 칸 중심 좌표로 찾아봄). 비용지도 밖 = 모름(-1)
+        cw, ch, cres = cm.info.width, cm.info.height, cm.info.resolution
+        cox, coy = cm.info.origin.position.x, cm.info.origin.position.y
+        craw = np.array(cm.data, dtype=np.int16).reshape(ch, cw)
+        yy, xx = np.mgrid[:h, :w]
+        ci = np.floor((oy + (yy + 0.5) * res - coy) / cres).astype(int)
+        cj = np.floor((ox + (xx + 0.5) * res - cox) / cres).astype(int)
+        inside = (ci >= 0) & (ci < ch) & (cj >= 0) & (cj < cw)
+        cost = np.full((h, w), -1, np.int16)
+        cost[inside] = craw[ci[inside], cj[inside]]
         rx, ry = self.robot()
         r0, c0 = int((ry - oy) / res), int((rx - ox) / res)
-        passable = (a >= 0) & (a < REACH_COST)
-        rr, cc = np.ogrid[:h, :w]
-        seed = passable & ((rr - r0) ** 2 + (cc - c0) ** 2 <= (0.3 / res) ** 2)   # 로봇이 벽 옆이면 칸 자체는 비쌀 수 있음
+        passable = (cost >= 0) & (cost < REACH_COST)
+        seed = passable & ((yy - r0) ** 2 + (xx - c0) ** 2 <= (0.3 / res) ** 2)   # 로봇이 벽 옆이면 칸 자체는 비쌀 수 있음
         reach = seed.copy()
         while True:                                        # 갈 수 있는 칸으로 퍼지기 (4방향)
             p = np.pad(reach, 1)
@@ -208,12 +218,11 @@ class Explorer(Node):
         for _ in range(int(SEE_R / res)):
             p = np.pad(near, 1)
             near = near | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]
-        unk = a == -1
-        pad = np.pad(unk, 1)
+        pad = np.pad(a == -1, 1)
         near_unk = pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
-        fr = (a >= 0) & (a < 100) & near_unk & near
+        fr = (a == 0) & near_unk & near
         seen = np.zeros_like(fr)
-        safe_r, safe_c = np.nonzero(reach & (a < VIEW_COST))
+        safe_r, safe_c = np.nonzero(reach & (cost < VIEW_COST))
         out = []
         for r0_, c0_ in zip(*np.nonzero(fr)):
             if seen[r0_, c0_]:
@@ -245,22 +254,25 @@ class Explorer(Node):
 
     @staticmethod
     def viewpoint(a, safe_r, safe_c, gr, gc, r0, c0, res):
-        """경계 칸(gr, gc)이 직선으로 보이는 안전한 칸 중 로봇에 가까운 곳. 시선은 아는 칸·벽 아닌 칸만 지나야 함"""
+        """경계 칸(gr, gc)이 직선으로 보이는 안전한 칸 중 "경계에" 가까운 곳. 시선은 SLAM 지도에서 아는 칸·벽 아닌 칸만.
+        11-07 02:29: 로봇에 가까운 곳을 고르니 0.13 m 만 가고 끝 → SLAM 은 0.15 m 움직여야 스캔을 넣음 → 지도 그대로 → unseen"""
         if len(safe_r) == 0:
             return None
         d_f = np.hypot(safe_r - gr, safe_c - gc) * res
         ok = (d_f >= VIEW_MIN) & (d_f <= VIEW_MAX)
         sr, sc, d_f = safe_r[ok], safe_c[ok], d_f[ok]
-        score = np.hypot(sr - r0, sc - c0) * res + 0.5 * d_f
+        if len(sr) == 0:
+            return None
+        score = d_f + 0.3 * np.hypot(sr - r0, sc - c0) * res
         for i in np.argsort(score)[:60]:
             n = int(max(abs(sr[i] - gr), abs(sc[i] - gc))) + 1
             lr = np.rint(np.linspace(sr[i], gr, n)).astype(int)[:-2]
             lc = np.rint(np.linspace(sc[i], gc, n)).astype(int)[:-2]
-            v = a[lr, lc]
-            if ((v >= 0) & (v < 100)).all():
+            v = a[lr, lc]                                  # SLAM 지도: 아는 칸이고 벽(점유)이 아님
+            if ((v >= 0) & (v < 50)).all():
                 return int(sr[i]), int(sc[i])
-        i = int(np.argmin(d_f)) if len(d_f) else None    # 시선이 다 막힘 → 경계에 가장 가까운 안전한 칸으로 다가감
-        return (int(sr[i]), int(sc[i])) if i is not None else None
+        i = int(np.argmin(d_f))                            # 시선이 다 막힘 → 경계에 가장 가까운 안전한 칸으로 다가감
+        return int(sr[i]), int(sc[i])
 
     @staticmethod
     def near(x, y, pts, r=REGION):
