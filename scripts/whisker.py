@@ -3,7 +3,8 @@
 
   느끼기   /imu + /motor_out(브리지가 방금 모터를 바꿨나 = efference copy) → 부딪힘 / 끄덕임 / 건드림
            + 예상보다 느림(odom): 명령만큼 안 움직임 → 충격 없는 막힘 (손·쿠션·동물)
-  단단/부드러움  충격·끄덕임 = 단단 → 영구 표시 / 느려짐만 = 부드러움 → 밀지 않고 물러남, 표시는 1분 뒤 사라짐
+  단단/부드러움  충격·끄덕임 = 단단 → 영구 표시 / 느려짐·한쪽 들림(밟음) = 부드러움 → 바로 물러남, 표시 1분
+  (느려짐은 11-06 현재 관찰만: slow_react=False)
   힘 제한  브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 실패해도 짓누르지 않게 (협동 로봇의 힘 제한 원칙)
   방향     직진 중 = 가던 쪽 (확실 → 표시). 회전·정지 중 = IMU 참고 (11-06: 박을 때 출렁임 + IMU ~10 Hz → 못 믿음, 표시 안 함)
   반응     멈춤 → 왔던 쪽으로 10 cm 빼기 (회전 중이었으면 15° 되돌리기) → 성공하면 Nav2 에 돌려줌
@@ -67,6 +68,9 @@ class Whisker(Node):
         p = self.declare_parameter
         self.bump_g = p("bump_g", 0.06).value          # 주행 중 수평 가속 튐 (상자 0.09, 주행 잡음 0.02)
         self.pitch_dps = p("pitch_dps", 5.5).value     # 주행 중 앞뒤 끄덕임 (카펫 7)
+        self.roll_dps = p("roll_dps", 5.0).value       # 주행 중 좌우 기우뚱 = 한쪽 궤도가 뭔가를 밟음 (주행 중 gx 최대 ~2.7)
+        self.slow_react = p("slow_react", False).value # "예상보다 느림" 에 반응할지. 11-06: 빼기(바닥선 속도) 중 헛것 →
+                                                       #   일단 관찰만 (화면·로그에 got/want), 숫자 모은 뒤 켬
         self.touch_g = p("touch_g", 0.025).value       # 정지 중 건드림 (톡 0.04)
         self.rock_dps = p("rock_dps", 4.0).value       # 정지 중 기우뚱 (톡 6)
         self.back_dist = p("back_dist", 0.10).value    # m, 빼는 거리 (단단한 것)
@@ -93,6 +97,7 @@ class Whisker(Node):
         self.step = None                     # 지금 빼기 계획 {"kind": "lin"/"rot", "sign", "goal", "start", "pre_rot"}
         self.contact_ang = 0.0               # "처음" 닿은 방향 (몸 기준 rad, 0 = 앞) — 갇혀도 안 바꿈 (11-06 핑퐁 수정)
         self.contact_feel = "hard"
+        self.contact_kind = "bump"
         self.plan_text = ""
         self.last_cmd = (0.0, 0.0)           # 닿기 직전 우리가 따르던 명령 (x, z)
         self.trapped = 0
@@ -161,6 +166,11 @@ class Whisker(Node):
             got, want = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))), abs(cz) * dt
         if got < SLOW_RATIO * want:
             self.last_event = now
+            if not self.slow_react:    # 관찰만: 화면·로그에 숫자만 (반응·표시 없음)
+                self.record({"ev": "slow", "observe": True, "got": round(got, 3), "want": round(want, 3),
+                             "kind": "straight" if straight else "turn", "dir": "-", "feel": "soft", "cmd_x": round(cx, 3),
+                             "cmd_z": round(cz, 2), "state": self.state, "marked": False})
+                return
             ang = (0.0 if cx > 0 else math.pi) if straight else 0.0
             ev = {"ev": "slow", "got": round(got, 3), "want": round(want, 3), "kind": "straight" if straight else "turn",
                   "dir": side_name(ang) if straight else "turn", "src": "motion" if straight else "turn",
@@ -191,6 +201,8 @@ class Whisker(Node):
             ev = {"ev": "bump", "g": round(horiz, 3)}
         elif motors_on and abs(d[3]) > self.pitch_dps:
             ev = {"ev": "pitch", "dps": round(d[3], 1)}
+        elif motors_on and abs(d[2]) > self.roll_dps:   # 11-06: 바퀴 밑 손가락 = 한쪽만 들림 → 끄덕임보다 기우뚱
+            ev = {"ev": "roll", "dps": round(d[2], 1)}
         elif not motors_on and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
             ev = {"ev": "touch", "g": round(horiz, 3), "gx": round(d[2], 1), "gy": round(d[3], 1)}
         if not ev:
@@ -215,9 +227,10 @@ class Whisker(Node):
         kind = ev["ev"]
         # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
         #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
-        ev["feel"] = "soft" if kind == "slow" else ("hard" if kind in ("bump", "pitch") else "touch")
-        ttl = SOFT_TTL if kind == "slow" else None
-        marked = kind in ("bump", "pitch", "slow") and ev.get("src") == "motion" and self.mark(ang, ttl)   # 확실한 것만 지도에
+        #   roll(한쪽 궤도만 들림) = 뭔가를 밟음 (손가락·물건일 수도) → 부드러움 쪽으로 (표시 1분). pitch(양쪽) = 턱·레일 → 단단
+        ev["feel"] = "soft" if kind in ("slow", "roll") else ("hard" if kind in ("bump", "pitch") else "touch")
+        ttl = SOFT_TTL if ev["feel"] == "soft" else None
+        marked = kind in ("bump", "pitch", "roll", "slow") and ev.get("src") == "motion" and self.mark(ang, ttl)   # 확실한 것만
         ev["marked"] = marked
         self.record(ev)
         if kind == "touch" or not self.react:
@@ -227,11 +240,11 @@ class Whisker(Node):
         elif ang < -0.3:
             self.right_hits += 1
         if self.state == "drive":
-            self.contact_ang, self.contact_feel = ang, ev["feel"]
+            self.contact_ang, self.contact_feel, self.contact_kind = ang, ev["feel"], kind
             self.last_cmd = (self.motor[2], self.motor[3])
             self.trapped = 0
-            # 부드러움(손·발일 수도) = 멈춰 있지 말고 바로 물러남 / 단단함 = 0.5 s 멈춘 뒤 빼기
-            self.go("back" if ev["feel"] == "soft" else "stop")
+            # 바로 물러남: 부드러움(손·발일 수도) / 밟음·들림(pitch·roll — 올라탄 채 서 있지 않게). 부딪힘만 0.5 s 멈춘 뒤 빼기
+            self.go("stop" if kind == "bump" else "back")
         elif self.state == "back":          # 빼다가 또 닿음 = 앞뒤 다 막힘 → 기다림. 빼는 방향은 처음 그대로 (안 뒤집음)
             self.trapped += 1
             if self.trapped > 3:            # 시도 1·2·3 다 실패
@@ -263,7 +276,7 @@ class Whisker(Node):
             pre = -self.back_turn if self.left_hits > self.right_hits else self.back_turn
         elif self.trapped >= 3:
             pre = self.back_turn if self.left_hits > self.right_hits else -self.back_turn
-        dist = self.soft_dist if self.contact_feel == "soft" else self.back_dist
+        dist = self.soft_dist if self.contact_kind == "slow" else self.back_dist   # 밟은 건(roll·pitch) 10 cm 다 내려옴
         if rotating:   # 돌다가 닿음 → 돌던 반대로 15°
             self.step = {"kind": "rot", "sign": -math.copysign(1, z0), "goal": self.back_turn, "pre": pre}
             main = f"{'왼쪽' if self.step['sign'] > 0 else '오른쪽'}으로 {math.degrees(self.back_turn):.0f}° 되돌리기"

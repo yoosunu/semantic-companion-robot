@@ -43,7 +43,10 @@ def main():
 
     def on_sense(m):
         d = json.loads(m.data)
-        extra = d.get("g", d.get("dps", d.get("got", "")))
+        if d.get("ev") == "slow":
+            extra = f"{d.get('kind')} 예상 {d.get('want')} / 실제 {d.get('got')}" + ("  [관찰만, 반응 안 함]" if d.get("observe") else "")
+        else:
+            extra = d.get("g", d.get("dps", ""))
         say(f"⚡ {d.get('ev')} {d.get('dir', '')} ({d.get('feel', '')}) {extra}"
             + ("  → 지도 표시" if d.get("marked") else ""))
 
@@ -62,6 +65,10 @@ def main():
         t.twist.linear.x = x
         cmd.publish(t)
 
+    say("연결 기다리는 중 (2초)…")
+    end = time.time() + 2.0
+    while time.time() < end:                      # Whisker 의 /sense·/whisker/state 와 연결될 시간 (첫 사건 놓치지 않게)
+        rclpy.spin_once(n, timeout_sec=0.1)
     plan = [("앞으로", 0.08, a.fwd), ("쉼", 0.0, a.pause), ("뒤로", -0.05, a.back), ("쉼", 0.0, a.pause)]
     say("시작 — Ctrl+C 로 전부 멈춤. 아무 때나 손·발·상자를 넣어 보세요.")
     try:
