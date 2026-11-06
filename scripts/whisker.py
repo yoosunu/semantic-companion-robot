@@ -41,6 +41,8 @@ MARK_GAP = 0.03               # m, 몸 바깥으로
 MARK_HALF = 0.05              # m, 표시 반폭 → 점 3개, 폭 ~10 cm
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (출발 흔들림 0.17 g 은 우리 것)
+MOVING_V, MOVING_W = 0.025, 0.10   # m/s, rad/s — 직전 0.5 s 동안 "실제로" 이만큼 움직였으면 = 굴러가는 중 (거리계·자이로)
+START_BLOCK_S = 1.0           # s, 출발 명령 후 이 시간 동안 1 cm 눈금이 하나도 안 뜨면 = 앞이 막힘 (바퀴 떼기 0.3~0.8 s)
 BACK_SPEED, TURN_SPEED = 0.05, 0.15   # m/s, rad/s — 바닥선(0.05 / 0.13) 바로 위, 연속으로 잔잔하게.
                                       #   11-06: 0.25 rad/s 는 출발 밀기 + 자이로 보정으로 과격. TAP 은 0.5 s 마다
                                       #   모터가 바뀌어 감지가 0.4 s 씩 가려짐 → 빼는 중 다시 박아도 놓침 → 안 씀
@@ -91,6 +93,10 @@ class Whisker(Node):
         self.base = None                     # [ax, ay, gx, gy] 평소 값 (천천히 따라감)
         self.motor = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.prev_motor = None
+        self.motor_hist = collections.deque()   # (시각, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
+        self.start = None                       # {"t", "pos"} 서 있다 출발한 순간
+        # 지나온 길 (11-07): 빼기는 "방금 지나온 곳"으로만, 지나온 만큼만. 출발 직후엔 온 길이 없음 → 안 뺌
+        self.trail = {"sign": 0, "len": 0.0, "last": None, "idle": None}
         self.last_self = 0.0                 # 우리가 마지막으로 모터를 바꾼 시각
         self.last_event = 0.0
         # 위치
@@ -138,10 +144,23 @@ class Whisker(Node):
     def on_motor(self, m):
         d = list(m.data) + [0.0] * 5
         self.motor = d[:5]
-        if self.prev_motor is not None:
-            pl, pr, cx, cz = self.prev_motor[:4]
-            if (abs(d[0] - pl) > 8 or abs(d[1] - pr) > 8 or abs(d[2] - cx) > 0.02 or abs(d[3] - cz) > 0.05):
-                self.last_self = time.time()
+        # efference copy: "방금 우리가 모터를 바꿨나". 11-07 수정: 한 샘플 차이만 보면 Nav2 의 부드러운 가속(매 틱 조금씩)과
+        #   바퀴 떼기 밀기(매 틱 +3 PWM)를 못 잡아서, 출발 흔들림(0.17 g)을 부딪힘으로 오해 (imu_lab 은 계단 명령이라 안 드러남).
+        #   → 0.4 s 전과 비교 + 멈춰 있다 출발하면 1 s 동안 가림
+        now = time.time()
+        self.motor_hist.append((now, d[0], d[1], d[2], d[3]))
+        while self.motor_hist and now - self.motor_hist[0][0] > SELF_MASK:
+            self.motor_hist.popleft()
+        o = self.motor_hist[0]
+        if (abs(d[0] - o[1]) > 8 or abs(d[1] - o[2]) > 8 or abs(d[2] - o[3]) > 0.02 or abs(d[3] - o[4]) > 0.05):
+            self.last_self = max(self.last_self, now)
+        # 출발 기록: 모터가 꺼져 있다 켜진 순간의 시각·자리 → "출발했는데 안 나가짐" 판단용
+        on = abs(d[0]) > 1 or abs(d[1]) > 1
+        was_on = self.prev_motor is not None and (abs(self.prev_motor[0]) > 1 or abs(self.prev_motor[1]) > 1)
+        if on and not was_on and self.odom:
+            self.start = {"t": now, "pos": self.odom}
+        elif not on:
+            self.start = None
         if abs(d[2] - self.cmd_now[0]) > 0.02 or abs(d[3] - self.cmd_now[1]) > 0.05:
             self.cmd_now, self.cmd_since = (d[2], d[3]), time.time()
         self.prev_motor = d[:5]
@@ -150,7 +169,71 @@ class Whisker(Node):
         st, pp = m.header.stamp, m.pose.pose
         self.odom = (pp.position.x, pp.position.y, yaw_of(pp.orientation))
         self.odom_hist.append((st.sec + st.nanosec * 1e-9, *self.odom))
+        self.update_trail()
+        self.check_start_blocked()
         self.check_slow()
+
+    def update_trail(self):
+        """Nav2 가 운전하는 동안(drive) 같은 방향(앞/뒤)으로 이어서 간 거리. 방향이 바뀌거나 1 s 넘게 서 있으면 처음부터"""
+        if self.state != "drive" or not self.odom:
+            return
+        tr, cx, now = self.trail, self.motor[2], time.time()
+        sign = 1 if cx > 0.01 else (-1 if cx < -0.01 else 0)
+        pos = self.odom[:2]
+        if sign == 0:
+            tr["idle"] = tr["idle"] or now
+            if now - tr["idle"] > 1.0:
+                tr.update(sign=0, len=0.0, last=pos)
+            return
+        tr["idle"] = None
+        if sign != tr["sign"] or tr["last"] is None:
+            tr.update(sign=sign, len=0.0, last=pos)
+        else:
+            tr["len"] += math.hypot(pos[0] - tr["last"][0], pos[1] - tr["last"][1])
+            tr["last"] = pos
+
+    def moving_now(self):
+        """직전 0.5 s 동안 실제로 움직였나 (바퀴 거리계 / 자이로) — 명령이 아니라 측정"""
+        if len(self.odom_hist) < 3:
+            return False
+        t1, x1, y1, a1 = self.odom_hist[-1]
+        old = next((r for r in reversed(self.odom_hist) if t1 - r[0] >= 0.5), None)
+        if not old:
+            return False
+        dt = t1 - old[0]
+        v = math.hypot(x1 - old[1], y1 - old[2]) / dt
+        w = abs(math.atan2(math.sin(a1 - old[3]), math.cos(a1 - old[3]))) / dt
+        return v >= MOVING_V or w >= MOVING_W
+
+    def check_start_blocked(self):
+        """출발했는데 안 나가짐: 명령 후 1 s 동안 1 cm 눈금도, 3° 회전도 없음 = 앞(또는 뒤)이 막힘. (집에서 나오는데 앞에 뭐가 있을 때)"""
+        st, now = self.start, time.time()
+        if not st or not self.odom or self.state not in ("drive", "back") or now - st["t"] < START_BLOCK_S:
+            return
+        self.start = None                                   # 출발 한 번에 한 번만
+        x0, y0, a0 = st["pos"]
+        moved = math.hypot(self.odom[0] - x0, self.odom[1] - y0)
+        turned = abs(math.atan2(math.sin(self.odom[2] - a0), math.cos(self.odom[2] - a0)))
+        if moved >= 0.01 or turned >= 0.05:
+            return
+        cx, cz = self.motor[2], self.motor[3]
+        if abs(cx) < 0.02 and abs(cz) < 0.1:
+            return
+        straight = abs(cx) >= 0.02
+        ang = (0.0 if cx > 0 else math.pi) if straight else 0.0
+        self.last_event = now
+        self.slow_hist.append((now, self.odom[0], self.odom[1]))     # 같은 자리에서 또 막히면 → stuck (못 가는 곳, 영구)
+        near = [h for h in self.slow_hist if now - h[0] <= STUCK_S * 2
+                and math.hypot(h[1] - self.odom[0], h[2] - self.odom[1]) <= STUCK_R]
+        if len(near) >= STUCK_N and straight:
+            self.slow_hist.clear()
+            self.on_contact({"ev": "stuck", "n": len(near), "dir": side_name(ang), "src": "motion", "cmd_x": round(cx, 3),
+                             "cmd_z": round(cz, 2), "state": self.state, "why": "출발 막힘 반복"}, ang)
+            return
+        ev = {"ev": "blocked", "moved": round(moved, 3), "kind": "straight" if straight else "turn",
+              "dir": side_name(ang) if straight else "turn", "src": "motion" if straight else "turn",
+              "cmd_x": round(cx, 3), "cmd_z": round(cz, 2), "state": self.state}
+        self.on_contact(ev, ang)
 
     def check_slow(self):
         """예상보다 느림 = 막힘. 충격이 없어도(손·쿠션·동물) 잡는다. 11-06: 빼다가 손을 밀어버림 → 추가.
@@ -219,11 +302,14 @@ class Whisker(Node):
         if not settled or now - self.last_event < 1.0:
             return
         ev = None
-        if motors_on and horiz > self.bump_g:
+        # 11-07 (Jasper): 부딪힘은 "움직이다 박는 것" — 직전에 실제로 굴러가고 있었을 때만. 서 있다 출발할 때의 흔들림(0.17 g)은
+        #   속도가 0 에서 막 올라가는 중이라 여기 안 걸림 (시간으로 가리는 게 아니라 물리 조건으로 거름)
+        rolling = motors_on and self.moving_now()
+        if rolling and horiz > self.bump_g:
             ev = {"ev": "bump", "g": round(horiz, 3)}
-        elif motors_on and abs(d[3]) > self.pitch_dps:
+        elif rolling and abs(d[3]) > self.pitch_dps:
             ev = {"ev": "pitch", "dps": round(d[3], 1)}
-        elif motors_on and abs(d[2]) > self.roll_dps:   # 11-06: 바퀴 밑 손가락 = 한쪽만 들림 → 끄덕임보다 기우뚱
+        elif rolling and abs(d[2]) > self.roll_dps:   # 11-06: 바퀴 밑 손가락 = 한쪽만 들림 → 끄덕임보다 기우뚱
             ev = {"ev": "roll", "dps": round(d[2], 1)}
         elif not motors_on and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
             ev = {"ev": "touch", "g": round(horiz, 3), "gx": round(d[2], 1), "gy": round(d[3], 1)}
@@ -254,10 +340,10 @@ class Whisker(Node):
         # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
         #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
         #   roll(한쪽 궤도만 들림) = 뭔가를 밟음 (손가락·물건일 수도) → 부드러움 쪽으로 (표시 1분). pitch(양쪽) = 턱·레일 → 단단
-        ev["feel"] = ("soft" if kind in ("slow", "roll") else
+        ev["feel"] = ("soft" if kind in ("slow", "roll", "blocked") else
                       "hard" if kind in ("bump", "pitch", "stuck") else "touch")   # stuck(헛바퀴 반복) = 못 가는 구역
         ttl = SOFT_TTL if ev["feel"] == "soft" else None
-        marked = (kind in ("bump", "pitch", "roll", "slow", "stuck") and ev.get("src") == "motion"
+        marked = (kind in ("bump", "pitch", "roll", "slow", "stuck", "blocked") and ev.get("src") == "motion"
                   and self.mark(ang, ttl, STUCK_HALF if kind == "stuck" else MARK_HALF))   # 확실한 것만
         ev["marked"] = marked
         self.record(ev)
@@ -273,7 +359,19 @@ class Whisker(Node):
             self.trapped = 0
             # 바로 물러남: 부드러움(손·발일 수도) / 밟음·들림(pitch·roll — 올라탄 채 서 있지 않게). 부딪힘만 0.5 s 멈춘 뒤 빼기
             self.go("stop" if kind == "bump" else "back")   # stuck 도 바로 빼기 (헛돌며 버티지 않게)
-        elif self.state == "back":          # 빼다가 또 닿음 = 앞뒤 다 막힘 → 기다림. 빼는 방향은 처음 그대로 (안 뒤집음)
+        elif self.state == "back" and self.step and self.step["kind"] == "lin" and not self.step.get("rebound") \
+                and self.backed() >= 0.02:
+            # 빼다가 반대쪽에 닿음 (11-07 Jasper: "뒤에 박았으면 바로 앞으로 빼고 다음으로") → 기다리지 않고 바로 반대로,
+            #   방금 뺀 만큼만 (최대 5 cm) — 그 길은 방금 지나왔으니 비어 있음
+            back, sign = min(0.05, self.backed()), -self.step["sign"]
+            self.step = {"kind": "lin", "sign": sign, "goal": back, "pre": 0.0, "start": self.odom, "phase": "main",
+                         "rebound": True}
+            self.plan_text = f"반대쪽에도 닿음 → 바로 {'앞으' if sign > 0 else '뒤'}로 {back * 100:.0f} cm (방금 지나온 길)"
+            self.state_t = time.time()
+            self.get_logger().warn(f"WHISKER back: 빼기 — {self.plan_text}")
+            self.state_pub.publish(String(data=json.dumps({"state": "back", "msg": "빼기 — " + self.plan_text,
+                                                           "try": self.trapped}, ensure_ascii=False)))
+        elif self.state == "back":          # 빼고, 되돌아 나오는 것까지 막힘 = 진짜 앞뒤 다 막힘 → 기다림
             self.trapped += 1
             if self.trapped > 3:            # 시도 1·2·3 다 실패
                 self.go("help")
@@ -281,9 +379,13 @@ class Whisker(Node):
                 self.go("trapped")
 
     def go(self, state):
+        if state == "back" and not self.plan_step():   # 지나온 길이 없음 (출발 직후 등) → 빼지 않고 멈춘 채 Nav2 에
+            self.send(0.0, 0.0)
+            self.get_logger().warn(f"WHISKER back: {self.plan_text}")
+            self.state_pub.publish(String(data=json.dumps({"state": "back", "msg": self.plan_text, "try": self.trapped},
+                                                          ensure_ascii=False)))
+            state = "drive"
         self.state, self.state_t = state, time.time()
-        if state == "back":
-            self.plan_step()
         msg = {"stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
                "trapped": f"앞뒤 다 막힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
                "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "빠짐 → Nav2 에 돌려줌"}[state]
@@ -304,19 +406,32 @@ class Whisker(Node):
             pre = -self.back_turn if self.left_hits > self.right_hits else self.back_turn
         elif self.trapped >= 3:
             pre = self.back_turn if self.left_hits > self.right_hits else -self.back_turn
-        dist = self.soft_dist if self.contact_kind == "slow" else self.back_dist   # 밟은 건(roll·pitch) 10 cm 다 내려옴
+        dist = self.soft_dist if self.contact_kind in ("slow", "blocked") else self.back_dist   # 밟은 건(roll·pitch) 10 cm
         if rotating:   # 돌다가 닿음 → 돌던 반대로 15°
             self.step = {"kind": "rot", "sign": -math.copysign(1, z0), "goal": self.back_turn, "pre": pre}
             main = f"{'왼쪽' if self.step['sign'] > 0 else '오른쪽'}으로 {math.degrees(self.back_turn):.0f}° 되돌리기"
-        else:          # 가다가 닿음 → 처음 닿은 쪽의 반대로 직선 (앞에서 닿았으면 후진)
+        else:          # 가다가 닿음 → 왔던 길로, 온 만큼만 (최대 10 cm, 부드러운 건 5 cm)
             sign = -1.0 if math.cos(self.contact_ang) > 0 else 1.0
+            came = self.trail["len"] if self.trail["sign"] == -sign else 0.0      # 그 방향으로 지나온 거리
+            dist = min(dist, came)
+            if dist < 0.02:
+                self.step = None
+                self.plan_text = f"지나온 길 없음 ({came * 100:.0f} cm) → 빼지 않고 멈춤, Nav2 에 돌려줌 (표시는 남김)"
+                return False
             self.step = {"kind": "lin", "sign": sign, "goal": dist, "pre": pre}
-            main = f"{'뒤' if sign < 0 else '앞'}로 {dist * 100:.0f} cm"
+            main = f"{'뒤' if sign < 0 else '앞으'}로 {dist * 100:.0f} cm (지나온 {came * 100:.0f} cm 안에서)"
         self.step["start"] = self.odom
         self.step["phase"] = "pre" if pre else "main"
         head = f"시도 {self.trapped}: " if self.trapped else ""
         turn = f"{'왼쪽' if pre > 0 else '오른쪽'} {math.degrees(abs(pre)):.0f}° 돈 뒤 " if pre else ""
         self.plan_text = f"{head}{turn}{main} ({self.contact_feel})"
+        return True
+
+    def backed(self):
+        st = self.step
+        if not st or st.get("phase") != "main" or not self.odom or not st.get("start"):
+            return 0.0
+        return math.hypot(self.odom[0] - st["start"][0], self.odom[1] - st["start"][1])
 
     def backed_frac(self):
         """지금 빼기에서 목표의 몇 % 를 왔나 (직진만. 회전·준비 회전 중엔 1 = 무시 안 함)"""

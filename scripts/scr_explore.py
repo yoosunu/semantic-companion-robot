@@ -46,7 +46,7 @@ W_DIST, W_SIZE = 3.0, 1.0
 WHISKER_GIVEUP = 2       # 가는 중 접촉 이만큼이면 포기
 NO_PROGRESS_S, PROGRESS_M = 90.0, 0.05
 STUCK_S, STUCK_M = 180.0, 0.10
-CONTACTS = ("bump", "pitch", "roll", "slow", "stuck")
+CONTACTS = ("bump", "pitch", "roll", "slow", "stuck", "blocked")
 
 
 def yaw_of(q):
