@@ -4,8 +4,8 @@
   감각 — 출발·톡톡·곡선·빼기 어디서나 같은 규칙
     부딪힘     실제로 굴러가다 가속 튐 → 0.3 s 안에 바퀴가 실제로 멈췄나 확인
                (Jasper: "움직이다 박는 것"과 "서 있다 출발하는 흔들림"은 다르다)
-    카펫 기울기 차체가 평소보다 1.5° 이상 기운 채 0.3 s (가속도 0.4 s 중앙값 = 중력 방향) → 올라가기 전에 되감기 (Jasper 11-07)
-               여유가 작아(카펫 1.6~1.9° / 맨바닥 ≤1.1°) 확실하지 않은 감각 → 처음 1분 표시, 같은 곳 또 = 영구
+    (뺀 것)    카펫 기울기(가속도 = 중력 방향): 11-07 01:54 실주행에서 헛것 5번, 진짜 0번. 가속도계는 기울기와 우리 가속을
+               구별 못 함 → 톡톡(0.5 s 밀고 멈춤) 중 5.3°, 곡선·후진 중 1.6~1.9° 로 방 가운데 분홍 선. efference 원칙과 충돌 → 뺌
     들림       기울어지는 각속도 → 0.3 s 동안 실제로 2° 이상 기울었나 확인 = 발·문턱처럼 크게 들리는 것
                11-07: 얇은 카펫은 이 IMU(10 Hz)로 맨바닥과 구별 안 됨 (기록 18개, 0.3 s 유지 기울기:
                카펫 1.6~1.9° / 맨바닥 1.1° / 밀어붙이기 1.6°) → 카펫은 아래 "안 움직임"이 맡음
@@ -18,7 +18,7 @@
                (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
   표시         부딪힘 = 점 10 cm 영구 / 들림 앞뒤 = 선 30 cm 영구 / 들림 한쪽 = 점 10 cm 1분 /
-               안 움직임·카펫 기울기 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
+               안 움직임 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
                /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
   힘 제한      브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 늦어도 짓누르지 않게
   기록         ~/scr_logs/whisker/<날짜>.jsonl, 로그 줄 "SENSE {...}" (run_report 가 셈)
@@ -70,10 +70,6 @@ HIST_S = 10.0                 # s, 지나온 길 기록 길이
 IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 시작
 REBOUND_MAX = 0.05            # m
 STEP_TIMEOUT = 12.0           # s, 빼기 한 번 최대
-TILT_DEG = 1.5                # °, 차체가 평소보다 이만큼 기운 채 TILT_HOLD 동안 = 카펫 가장자리에 올라타는 중 (11-07 Jasper)
-TILT_HOLD = 0.3               # s     기록 18개 (0.4 s 중앙값, 0.3 s 유지): 카펫 1.6~1.9° / 맨바닥·출발·서기·제자리 회전 ≤ 1.1°
-TILT_WIN = 0.4                # s, 가속도 중앙값 창 (출발·박기 튐 0.17 g 같은 순간값 제거)
-TILT_REARM = 0.8              # °, 이 아래로 내려와야 다시 감지 (같은 기울기로 연달아 안 뜨게)
 SOFT_TTL = 60.0               # s, 부드러운 것(발·손일 수도) / 처음 막힌 곳 표시는 1분 뒤 사라짐
 
 
@@ -116,10 +112,6 @@ class Whisker(Node):
         self.cmd_hist = collections.deque()            # (t, cmd_x, cmd_z) 최근 NOMO_S + 1 s
         self.scans = collections.deque()               # (t, 스캔 점들 (x, y) 몸 기준)
         self.yaw_hist = collections.deque()            # (t, 자이로 방향)
-        self.grav = collections.deque()      # (t, ax, ay, az) g — 차체 기울기 (중력 방향)
-        self.grav_ref = None                 # 평소 중력 방향 (단위 벡터, 아주 천천히 따라감)
-        self.tilt_since = None
-        self.tilt_armed = True
         self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
         self.last_self = 0.0
@@ -333,7 +325,6 @@ class Whisker(Node):
         now = time.time()
         a, w = m.linear_acceleration, m.angular_velocity
         s = [a.x / G, a.y / G, math.degrees(w.x), math.degrees(w.y)]
-        self.check_tilt(now, a.x / G, a.y / G, a.z / G)
         if self.base is None:
             self.base = s[:]
             return
@@ -380,43 +371,6 @@ class Whisker(Node):
         self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3]),
                         "tilt_p": d[3] * dt, "tilt_r": d[2] * dt}
 
-    def check_tilt(self, now, ax, ay, az):
-        """카펫 기울기: 0.4 s 중앙값 중력 방향이 평소보다 1.5° 이상 기운 채 0.3 s = 가장자리에 올라타는 중 → 올라가기 전에 되감기.
-        얇은 카펫은 기울기가 작아(1.6~1.9°) 맨바닥(≤1.1°)과 여유가 0.5° 뿐 → 확실하지 않은 감각이라
-        처음엔 1분 표시, 같은 곳에서 또면 영구 (안 움직임과 같은 규칙). 놓치면 헛바퀴는 "안 움직임"이 잡음"""
-        self.grav.append((now, ax, ay, az))
-        while self.grav and now - self.grav[0][0] > TILT_WIN:
-            self.grav.popleft()
-        if len(self.grav) < 4:
-            return
-        v = np.median(np.array([g[1:] for g in self.grav]), axis=0)
-        v = v / max(np.linalg.norm(v), 1e-6)
-        if self.grav_ref is None:
-            self.grav_ref = v
-            return
-        tilt = math.degrees(math.acos(float(np.clip(np.dot(v, self.grav_ref), -1.0, 1.0))))
-        if tilt < TILT_DEG * 0.5 and self.state == "drive":   # 평소 방향은 평평할 때만 아주 천천히 (집마다 바닥 기울기 다름)
-            self.grav_ref = self.grav_ref + 0.002 * (v - self.grav_ref)
-            self.grav_ref = self.grav_ref / np.linalg.norm(self.grav_ref)
-        if tilt < TILT_REARM:
-            self.tilt_armed = True
-        asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
-        if tilt < TILT_DEG or self.state != "drive" or not asked or not self.tilt_armed:
-            self.tilt_since = None
-            return
-        self.tilt_since = self.tilt_since or now
-        if now - self.tilt_since < TILT_HOLD:
-            return
-        self.tilt_since, self.tilt_armed = None, False
-        d = np.degrees(v - self.grav_ref)                     # 어느 축으로 기울었나 (참고: 부호는 보드 방향 미확정)
-        linear = abs(self.motor[2]) >= 0.01
-        ang = (0.0 if self.motor[2] > 0 else math.pi) if linear else 0.0
-        self.last_event = now
-        ev = {"ev": "tilt", "deg": round(tilt, 1), "dx_deg": round(float(d[0]), 1), "dy_deg": round(float(d[1]), 1),
-              "dir": side_name(ang) if linear else "turn", "src": "motion" if linear else "turn",
-              "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
-        self.on_contact(ev, ang)
-
     def confirm(self):
         p, self.pending = self.pending, None
         ev, kind = p["ev"], p["ev"]["ev"]
@@ -445,7 +399,7 @@ class Whisker(Node):
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang, cut=None):
         kind = ev["ev"]
-        if self.state == "back" and kind in ("pitch", "roll", "tilt"):
+        if self.state == "back" and kind in ("pitch", "roll"):
             return                                   # 빼는 중 기울어짐 = 올라탔던 것에서 내려오는 중
         if self.state in ("stop", "trapped", "help") and kind != "touch":
             return
@@ -454,7 +408,7 @@ class Whisker(Node):
             half = LINE_HALF                         # 앞뒤로 들림 = 턱·가장자리 = 선
         elif kind == "roll":
             ttl, feel = SOFT_TTL, "soft"             # 한쪽만 = 발·물건일 수도
-        elif kind in ("stuck", "tilt"):              # 확실하지 않은 감각: 처음 1분, 같은 곳에서 또면 영구
+        elif kind == "stuck":                        # 처음 1분, 같은 곳에서 또면 영구
             half = LINE_HALF
             pose = self.map_pose()
             again = bool(pose) and any(math.hypot(pose[1] - x, pose[2] - y) < REPEAT_R for x, y in self.stuck_spots)

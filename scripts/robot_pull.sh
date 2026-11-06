@@ -13,8 +13,8 @@ ping -c 1 -t 3 "${HOST#*@}" >/dev/null 2>&1 || true   # Pi Wi-Fi 절전 깨우�
 mkdir -p "$REPO/logs/reports" "$REPO/logs/ros_log"
 rsync -a -e "$SSH" "$HOST:scr_logs/reports/" "$REPO/logs/reports/"
 rsync -a -e "$SSH" --include='*.log' --exclude='*' "$HOST:.ros/log/" "$REPO/logs/ros_log/"
-# 심박(날짜별 heartbeat.jsonl)과 저장한 지도도 같이
-rsync -am -e "$SSH" --include='*/' --include='heartbeat.jsonl' --exclude='*' "$HOST:scr_logs/" "$REPO/logs/scr_logs/"
+# 심박(날짜별 heartbeat.jsonl), nav·탐색기 전체 출력(11-07~), 저장한 지도도 같이
+rsync -am -e "$SSH" --include='*/' --include='heartbeat.jsonl' --include='nav_*.log' --include='explore_*.log' --exclude='*' "$HOST:scr_logs/" "$REPO/logs/scr_logs/"
 rsync -a -e "$SSH" "$HOST:maps/" "$REPO/logs/maps/" 2>/dev/null || true
 rsync -a -e "$SSH" "$HOST:scr_logs/imu_lab/" "$REPO/logs/imu_lab/" 2>/dev/null || true   # IMU 실험 (11-06)
 rsync -a -e "$SSH" "$HOST:scr_logs/whisker/" "$REPO/logs/whisker/" 2>/dev/null || true   # Whisker 접촉 기록 (11-06)

@@ -46,9 +46,9 @@ MIN_FRONTIER = 0.30      # m, 이보다 작은 경계 묶음 무시
 REGION = 0.40            # m, 같은 곳 / Whisker 표시 근처
 W_DIST, W_SIZE = 3.0, 1.0
 WHISKER_GIVEUP = 2       # 가는 중 접촉 이만큼이면 포기
-NO_PROGRESS_S, PROGRESS_M = 90.0, 0.05
+NO_PROGRESS_S, PROGRESS_M = 45.0, 0.05   # 11-07: 90 s 는 카펫 표시 너머 목표에 98 s 버팀
 STUCK_S, STUCK_M = 180.0, 0.10
-CONTACTS = ("bump", "pitch", "roll", "stuck", "tilt")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
+CONTACTS = ("bump", "pitch", "roll", "stuck")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
 CANCEL_WAIT = 15.0       # s, 취소 보냈는데 Nav2 답이 없으면 우리가 정리
 STATUS_S = 30.0          # s, 상태 한 줄 주기
 
