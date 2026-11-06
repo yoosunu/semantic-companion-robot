@@ -10,10 +10,13 @@
   - "Exploration stopped"            : 더 볼 곳 없음 → 집으로 복귀 시작 (알림 안 함, 화면에만)
   - "returned to initial pose"       : 복귀까지 끝 → 지도 자동 저장 ~/maps/<name>_<날짜_시각> + ntfy 알림
   - 복귀가 3분 안에 안 끝나면         : 저장 + "복귀 못 함" 알림 (막혔을 수 있음)
+  - 지도와 같이 <지도>_frontiers.json 저장: 탐색기가 포기한(블랙리스트, RViz 빨강) 경계 / 남은(파랑) 경계 (11-06)
+    → 분석 그림에서 회색(미탐) vs 빨강(시도했다 포기) vs 분홍(Whisker 접촉) 구별
   - 탐색 중 3분 동안 10 cm 도 못 움직이면: "멈춘 것 같음" 알림 (끝나지도 않고 서 버린 경우. 다시 움직이면 다시 감시) — 11-06
 알림 주제는 ~/.scr.env 의 NTFY_TOPIC (저장소 밖). 탐색기 자체는 그대로 둠 → 끄는 건 평소처럼 Ctrl+C.
 """
 import argparse
+import json
 import math
 import os
 import subprocess
@@ -32,6 +35,7 @@ def odom_watch(state):
     """/odom 을 듣는 작은 노드 (별도 스레드). 마지막으로 10 cm 이상 움직인 시각을 state 에 적는다."""
     import rclpy
     from nav_msgs.msg import Odometry
+    from visualization_msgs.msg import MarkerArray
     rclpy.init()
     n = rclpy.create_node("explore_watch")
     anchor = {"p": None}
@@ -43,6 +47,15 @@ def odom_watch(state):
             state["moved_at"] = time.time()
             state["stuck_sent"] = False
     n.create_subscription(Odometry, "odom", on_odom, 10)
+
+    def on_frontiers(m):   # 탐색기 그림: POINTS 마커 = 경계, 빨강 = 블랙리스트(포기), 파랑 = 아직
+        out = {"gave_up": [], "open": []}
+        for mk in m.markers:
+            if mk.type == 8 and mk.action == 0 and mk.points:     # 8 = POINTS, 0 = ADD
+                key = "gave_up" if mk.color.r > 0.5 and mk.color.b < 0.5 else "open"
+                out[key].append([[round(p.x, 3), round(p.y, 3)] for p in mk.points])
+        state["frontiers"] = out
+    n.create_subscription(MarkerArray, "explore/frontiers", on_frontiers, 10)
     try:
         rclpy.spin(n)
     except Exception:
@@ -94,6 +107,10 @@ def main():
             return
         state["done"] = True
         path, ok = save_map(a.name)
+        fr = state.get("frontiers")
+        if fr:
+            Path(str(path) + "_frontiers.json").write_text(json.dumps(fr))
+            print(f"[watch] 경계 저장: 포기 {len(fr['gave_up'])}개, 남음 {len(fr['open'])}개 → {path.name}_frontiers.json", flush=True)
         mins, secs = divmod(int(time.time() - t0), 60)
         body = f"{mins}분 {secs}초\n지도: {path.name}{'' if ok else ' (저장 실패!)'}"
         print(f"\n[watch] ===== {title} — {body.replace(chr(10), ' / ')} =====\n", flush=True)

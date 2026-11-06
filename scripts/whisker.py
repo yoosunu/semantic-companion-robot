@@ -48,6 +48,7 @@ SLOW_WINDOW = 0.5             # s, "예상보다 느림" 판단 창 (0.05 m/s �
 SLOW_SETTLE = 0.8             # s, 명령이 이만큼 이어진 뒤부터 판단 (출발 밀기 0.3 s 지난 뒤)
 SLOW_RATIO = 0.3              # 예상 이동의 30% 도 못 가면 = 막힘
 SOFT_TTL = 60.0               # s, 부드러운 것(손·발·동물일 수도) 표시는 1분 뒤 사라짐
+RELEASE_FRAC = 0.6            # 빼기 거리의 앞 60% 동안 사건 무시 = 올라탔던 것에서 내려오는 흔들림
 
 
 def yaw_of(q):
@@ -224,6 +225,10 @@ class Whisker(Node):
 
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang):   # (이름 주의: Node 가 이미 .handle 을 씀 → 11-06 첫 실행 TypeError)
+        if self.state == "back" and self.backed_frac() < RELEASE_FRAC:
+            # 빼기 초반의 흔들림 = 올라탔던 것(손가락·턱)에서 내려오는 것 (11-06: 손가락을 밟고 빼다가 "bump rear" → 갇힘 오해)
+            self.get_logger().info(f"WHISKER 빼는 초반 흔들림 무시 (내려오는 중, {self.backed_frac() * 100:.0f}%)")
+            return
         kind = ev["ev"]
         # 단단함 vs 부드러움: 충격(bump)·끄덕임(pitch) = 단단 → 영구 표시. 충격 없이 느려짐(slow) = 부드러움
         #   (쿠션·커튼·손·발·동물일 수도) → 밀지 않고 물러나고, 표시는 1분 뒤 사라짐 (살아 있는 건 움직이니까)
@@ -289,6 +294,13 @@ class Whisker(Node):
         head = f"시도 {self.trapped}: " if self.trapped else ""
         turn = f"{'왼쪽' if pre > 0 else '오른쪽'} {math.degrees(abs(pre)):.0f}° 돈 뒤 " if pre else ""
         self.plan_text = f"{head}{turn}{main} ({self.contact_feel})"
+
+    def backed_frac(self):
+        """지금 빼기에서 목표의 몇 % 를 왔나 (직진만. 회전·준비 회전 중엔 1 = 무시 안 함)"""
+        st = self.step
+        if not st or st.get("phase") != "main" or st["kind"] != "lin" or not self.odom or not st.get("start"):
+            return 1.0
+        return math.hypot(self.odom[0] - st["start"][0], self.odom[1] - st["start"][1]) / max(st["goal"], 1e-3)
 
     def tick(self):
         if self.state == "drive":

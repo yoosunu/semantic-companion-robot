@@ -17,6 +17,7 @@ rsync -a -e "$SSH" --include='*.log' --exclude='*' "$HOST:.ros/log/" "$REPO/logs
 rsync -am -e "$SSH" --include='*/' --include='heartbeat.jsonl' --exclude='*' "$HOST:scr_logs/" "$REPO/logs/scr_logs/"
 rsync -a -e "$SSH" "$HOST:maps/" "$REPO/logs/maps/" 2>/dev/null || true
 rsync -a -e "$SSH" "$HOST:scr_logs/imu_lab/" "$REPO/logs/imu_lab/" 2>/dev/null || true   # IMU 실험 (11-06)
+rsync -a -e "$SSH" "$HOST:scr_logs/whisker/" "$REPO/logs/whisker/" 2>/dev/null || true   # Whisker 접촉 기록 (11-06)
 
 latest=$(ls -t "$REPO"/logs/reports/*.md 2>/dev/null | head -1 || true)
 if [ -n "$latest" ]; then
