@@ -18,7 +18,7 @@
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
                최대 15 cm, 들어온 방향에서 30° 까지. 끝 = "바닥 확인"(캡슐): 마지막 1 s LiDAR 이동이 명령의 50%↑ + 자세 2° 미만
                → Nav2 에 돌려줌. 거리는 됐는데 아직이면 5 cm 더 → 그래도 아니면 갇힘. 지나온 길이 없으면(출발 직후) 표시만 하고 돌려줌
-  갇힘         빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
+  갇힘         같은 자리(30 cm)에서 30 s 안 접촉 4번 = 구조 요청. 빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
                (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
   표시         부딪힘 = 점 10 cm 영구 / 들림 = 선 30 cm 영구 /
@@ -85,6 +85,8 @@ IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 
 PUSH_DEG, PUSH_S = 15.0, 1.0  # 1 s 동안 실제 회전(자이로)과 명령한 회전의 차이가 15° 넘음 = 누가 밀었음 → 1 s 정지 (Jasper 11-08)
 PAUSE_S = 1.0                 #   (제자리 회전 0.25 rad/s 가 완전히 헛돌아도 차이 14° → 안 걸림)
 REBOUND_MAX = 0.05            # m
+TRAP_MEM_S, TRAP_MEM_R = 30.0, 0.30   # 같은 자리(30 cm)에서 30 s 안에 접촉이 이어지면 계속 셈 → 4 번째 = 구조 요청
+SPOT_HELP = 4                 #   (11-08 실기·흉내: 좁은 틈에선 몇 cm 는 늘 움직여서 "빠짐"이 됨 → 횟수가 0 으로 → 영원히 왔다 갔다)
 FREE_S, FREE_RATIO = 1.0, 0.5 # 되감기 성공 = 마지막 1 s 동안 LiDAR 로 잰 이동이 명령의 50% 이상 ("명령대로 움직이네 = 바닥이네", Jasper 11-07)
 EXTEND_MAX = 0.05             # m, 거리는 다 됐는데 아직 바닥 확인이 안 되면 이만큼 더 빼 봄 → 그래도 안 되면 갇힘
 STEP_TIMEOUT = 12.0           # s, 빼기 한 번 최대
@@ -139,6 +141,9 @@ class Whisker(Node):
         self.last_tilt = None
         self.touch_cap = None                # 서 있을 때 흔들림 하나 = 사건 하나
         self.push_t = 0.0
+        self.episode_hits = 0                # 이번 탈출에서 닿은 횟수 (1 = 한 번에 빠짐)
+        self.spot_n = 0                      # 같은 자리 접촉 횟수 (구조 요청 판단)
+        self.trap_mem = None                 # (시각, x, y, 이어갈 갇힘 횟수)
         self.slope_watch_t = 0.0
         self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}, "slope": 0.0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
@@ -629,11 +634,24 @@ class Whisker(Node):
         if self.state == "drive":
             self.contact_kind, self.contact_feel = kind, feel
             self.trapped = 0
+            m, pose = self.trap_mem, self.map_pose()
+            near = bool(m and pose and time.time() - m[0] < TRAP_MEM_S and math.hypot(pose[1] - m[1], pose[2] - m[2]) < TRAP_MEM_R)
+            self.spot_n = (m[3] if near else 0) + 1
+            if self.spot_n > 1:
+                self.get_logger().warn(f"WHISKER 같은 자리에서 {self.spot_n}번째 접촉 (30초·30 cm 안)")
+            if self.spot_n >= SPOT_HELP:
+                self.trap_mem = None
+                self.go("help")
+                return
+            if pose:                                 # 접촉할 때마다 바로 저장 (빼지 않고 끝나는 경우도 세게 — 11-08 흉내 시험)
+                self.trap_mem = (time.time(), pose[1], pose[2], self.spot_n)
+            self.episode_hits = 1
             self.esc = self.plan_replay(time.time() if cut is None else cut)
             self.path.clear()
             self.path_sign = 0
             self.go("stop" if kind == "bump" else "back")
         elif self.state == "back" and self.step and not self.step["rebound"] and self.backed() >= 0.02:
+            self.episode_hits += 1
             # 빼다가 반대쪽에 막힘 → 기다리지 않고 방금 뺀 길로 반대로 (그 길은 방금 지나와서 비어 있음)
             done = self.backed()
             self.esc["done"] += done
@@ -644,6 +662,7 @@ class Whisker(Node):
             self.state_t = time.time()
             self.say_state("back", "빼기 — " + self.plan_text)
         elif self.state == "back":
+            self.episode_hits += 1
             if self.step and not self.step["rebound"]:
                 self.esc["done"] += self.backed()
             elif self.step:
@@ -722,13 +741,13 @@ class Whisker(Node):
         self.state, self.state_t = state, time.time()
         msg = {"pause": f"누가 밀었음 → {PAUSE_S:.0f}초 정지", "stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
                "trapped": f"앞뒤 다 막힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
-               "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "Nav2 에 돌려줌"}[state]
+               "help": "구조 요청 — 못 빠져나감 (재시도 3번 실패 또는 같은 자리 접촉 4번). 풀기: /whisker/resume", "drive": "Nav2 에 돌려줌"}[state]
         self.say_state(state, msg)
         if state == "help":
             where = self.map_pose()
             threading.Thread(target=self.ntfy, daemon=True, args=("robot: WHISKER 구조 요청",
-                             f"3번 빠져나오지 못함. 위치 {where[1]:.2f}, {where[2]:.2f} ({where[0]})" if where else
-                             "3번 빠져나오지 못함")).start()
+                             f"못 빠져나감 (재시도 3번 또는 같은 자리 4번). 위치 {where[1]:.2f}, {where[2]:.2f} ({where[0]})" if where else
+                             "못 빠져나감")).start()
 
     def say_state(self, state, msg):
         self.get_logger().warn(f"WHISKER {state}: {msg}")
@@ -808,6 +827,9 @@ class Whisker(Node):
                     if ok:
                         if not st["rebound"]:
                             self.esc["done"] += s
+                        pose = self.map_pose()
+                        n = self.spot_n + (self.episode_hits - 1)   # 이번 탈출에서 앞뒤로 더 닿았으면 그만큼 더
+                        self.trap_mem = (time.time(), pose[1], pose[2], n) if pose else None
                         self.trapped = 0
                         self.send(0.0, 0.0)
                         self.get_logger().warn(f"WHISKER 바닥 확인: {why}")
