@@ -52,12 +52,13 @@ MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (efference copy)
 MOVING_V, MOVING_W = 0.025, 0.10   # 직전 0.5 s 실제로 이만큼 움직였으면 = 굴러가는 중 (부딪힘 조건)
 CONFIRM_S, CONFIRM_STALL = 0.3, 0.5   # 부딪힘 의심 → 확인 창 / 바퀴 멈춤(진척 < 명령의 50%)
+NOMO_BACK_S = 2.5             # s, 빼는 중의 안 움직임 창
 NOMO_S = 1.5                  # s, 안 움직임 판단 창 (11-07 체중계: 충격 없이 막히고 바퀴는 헛돎 → LiDAR 만 봄. 2.5 → 1.5 s)
 LIFT_DEG = 1.8                # °, 0.3 s 동안 자이로로 실제 기운 각도(앞뒤+좌우) = 뭔가를 밟고 올라탐
 LIFT_WIN = 0.3                #   11-07 실측: 평소 18개(출발·정지·회전·카펫·상자·손·발·밀기) ≤ 1.5° /
                               #   굵은 선 2.0°(0.05)·3.9°(0.08), 화장실 문턱 4.9°, 체중계에 막힘 1.5°(안 올라탐)
 LIFT_WATCH = 1.0              # °, 이 이상이면 값만 로그 (Nav2 곡선·톡톡에서 얼마나 나오나 — 기록 18개엔 없던 주행)
-NOMO_MIN_LIN, NOMO_MIN_ROT = 0.05, 0.3   # 창 동안 명령의 합(부호 포함): 5 cm 이상 또는 0.3 rad 이상 가라고 했어야 판단
+NOMO_MIN_LIN, NOMO_MIN_ROT = 0.03, 0.2   # 창 동안 명령의 합(부호 포함): 3 cm·0.2 rad 이상 가라고 했어야 판단 (창 1.5 s 라 느린 0.03 m/s 도 들어오게)
 NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
 NOMO_MOVE = 0.015             # m, 2.5 s 동안 LiDAR 로 잰 이동이 이 미만 = 안 움직임 (느린 건 막힘이 아님)
 NOMO_SHARP = 0.003            # m, 스캔 맞추기 답이 ±3 cm 옆보다 평균 잔차가 이만큼은 작아야 믿음 (특징 없는 곳이면 판단 안 함)
@@ -116,7 +117,7 @@ class Whisker(Node):
         self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
         self.lift_watch_t = 0.0
         self.lift_t = 0.0
-        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
         self.last_self = 0.0
@@ -171,8 +172,8 @@ class Whisker(Node):
     def say_diag(self):
         g = self.diag
         self.get_logger().info(f"DIAG 5s: imu {g['imu']} · motor {g['motor']} · 명령중 {g['asked']} · dt=0 {g['dt0']} · "
-                               f"최대 들림 {g['deg']:.1f}° · cmd {self.motor[2]:.3f} {self.motor[3]:.2f} · {self.state}")
-        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0}
+                               f"최대 들림 {g['deg']:.1f}° · 안움직임 {g['nomo'] or '-'} · cmd {self.motor[2]:.3f} {self.motor[3]:.2f} · {self.state}")
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}}
 
     def on_motor(self, m):
         self.diag["motor"] += 1
@@ -187,7 +188,7 @@ class Whisker(Node):
         if abs(d[0] - o[1]) > 8 or abs(d[1] - o[2]) > 8 or abs(d[2] - o[3]) > 0.02 or abs(d[3] - o[4]) > 0.05:
             self.last_self = max(self.last_self, now)
         self.cmd_hist.append((now, d[2], d[3]))
-        while self.cmd_hist and now - self.cmd_hist[0][0] > NOMO_S + 1.0:
+        while self.cmd_hist and now - self.cmd_hist[0][0] > NOMO_BACK_S + 1.0:
             self.cmd_hist.popleft()
 
     def on_odom(self, m):
@@ -196,7 +197,7 @@ class Whisker(Node):
         self.odom_hist.append((st.sec + st.nanosec * 1e-9, *self.odom))
         now = time.time()
         self.yaw_hist.append((now, self.odom[2]))
-        while self.yaw_hist and now - self.yaw_hist[0][0] > NOMO_S + 1.0:
+        while self.yaw_hist and now - self.yaw_hist[0][0] > NOMO_BACK_S + 1.0:
             self.yaw_hist.popleft()
         self.update_path(now)
 
@@ -245,7 +246,7 @@ class Whisker(Node):
         if len(pts) > NOMO_PTS:
             pts = pts[:: int(math.ceil(len(pts) / NOMO_PTS))]
         self.scans.append((now, pts))
-        while self.scans and now - self.scans[0][0] > NOMO_S + 1.0:
+        while self.scans and now - self.scans[0][0] > NOMO_BACK_S + 1.0:
             self.scans.popleft()
         if now - self.nomo_check >= 0.5:
             self.nomo_check = now
@@ -294,36 +295,52 @@ class Whisker(Node):
         if sharp >= NOMO_SHARP:                          # 분명한 답이 있을 때만 (특징 없는 곳이면 거리계)
             st["scan_s"], st["scan_t"] = abs(shift), now
 
-    def check_nomo(self, now):
-        """안 움직임: 명령은 2.5 s 내내 "가라"였는데 세상(LiDAR)도 방향(자이로)도 그대로"""
-        if self.state not in ("drive", "back") or now - self.nomo_t < NOMO_S:
-            return
-        if self.state == "back" and now - self.state_t < NOMO_S:   # 창이 빼기 안에 다 들어와야
-            return
-        if not self.cmd_hist or self.cmd_hist[0][0] > now - NOMO_S + 0.2:
-            return
-        win = [c for c in self.cmd_hist if c[0] >= now - NOMO_S]
+    def nomo_why(self, now):
+        """안 움직임을 판단하지 않는 이유 (없으면 None = 막힘). DIAG 에 셈.
+        창: Nav2 주행 중 1.5 s (체중계처럼 막히면 빨리) / 빼는 중 2.5 s (한쪽이 헛돌며 느리게 나오는 중을 막힘으로 보지 않게)"""
+        S = NOMO_S if self.state == "drive" else NOMO_BACK_S
+        if self.state not in ("drive", "back") or now - self.nomo_t < S:
+            return "상태·쉼"
+        if self.state == "back" and now - self.state_t < S:   # 창이 빼기 안에 다 들어와야
+            return "빼기 초반"
+        if not self.cmd_hist or self.cmd_hist[0][0] > now - S + 0.2:
+            return "명령 기록 짧음"
+        win = [c for c in self.cmd_hist if c[0] >= now - S]
         if len(win) < 5 or any(abs(cx) < 0.01 and abs(cz) < 0.05 for _, cx, cz in win):
-            return                                   # 중간에 "서라"가 있었음 = 판단 안 함
+            return "명령 없음"                         # 중간에 "서라"가 있었음 = 판단 안 함
         lin = sum(c[1] * (n[0] - c[0]) for c, n in zip(win, win[1:]))
         rot = sum(c[2] * (n[0] - c[0]) for c, n in zip(win, win[1:]))
         if abs(lin) < NOMO_MIN_LIN and abs(rot) < NOMO_MIN_ROT:
-            return                                   # 가라고 한 게 너무 적음 (제자리 떨림 등)
-        yw = [(t, y) for t, y in self.yaw_hist if t >= now - NOMO_S]
+            return "명령 적음"                         # 가라고 한 게 너무 적음 (제자리 떨림 등)
+        yw = [(t, y) for t, y in self.yaw_hist if t >= now - S]
         if len(yw) < 5:
-            return
-        turned = sum(abs(wrap(b[1] - a[1])) for a, b in zip(yw, yw[1:]))
+            return "자이로 기록 짧음"
+        # 처음과 끝의 방향 차이 (11-07 23:57: 떨림의 절댓값을 다 더했더니 막혀서 떠는 것도 "3° 돎 = 움직임"이 될 수 있었음)
+        turned = abs(wrap(yw[-1][1] - yw[0][1]))
         if turned >= NOMO_TURN:
-            return                                   # 자이로가 돎 = 움직임 (자이로는 헛바퀴에 안 속음)
-        old = next((p for t, p in self.scans if t >= now - NOMO_S), None)
+            return "자이로 돎"                         # 자이로가 돎 = 움직임 (자이로는 헛바퀴에 안 속음)
+        old = next((p for t, p in self.scans if t >= now - S), None)
         if old is None or len(self.scans) < 2 or len(old) < 30 or len(self.scans[-1][1]) < 30:
-            return
+            return "스캔 없음"
         shift, sharp = self.scan_match(old, self.scans[-1][1], wrap(yw[-1][1] - yw[0][1]), min(0.25, abs(lin) + 0.05))
         # 기준 하나: 2.5 s 동안 LiDAR 로 1.5 cm 도 못 감 = 막힘. 11-07 02:35: "명령의 30%" 기준은 느린 후진 곡선
         #   (명령 12 cm, 실제 3 cm 움직임)을 막힘으로 오해 → 고스트. 진짜 막힘(발닦개)은 0~1 cm
         need = NOMO_MOVE
-        if sharp < NOMO_SHARP or abs(shift) >= need:
-            return                                   # 스캔으로 판단 못 함 / 실제로 갔음
+        if sharp < NOMO_SHARP:
+            return "스캔 애매"                         # 특징 없는 곳 = 판단 못 함
+        if abs(shift) >= need:
+            return f"감 {abs(shift) * 100:.0f}cm"       # 실제로 갔음
+        self.nomo_v = (lin, rot, turned, shift, sharp)
+        return None
+
+    def check_nomo(self, now):
+        """안 움직임: 명령은 1.5 s 내내 "가라"였는데 세상(LiDAR)도 방향(자이로)도 그대로"""
+        why = self.nomo_why(now)
+        if why:
+            self.diag["nomo"][why] = self.diag["nomo"].get(why, 0) + 1
+            return
+        self.diag["nomo"]["막힘"] = self.diag["nomo"].get("막힘", 0) + 1
+        lin, rot, turned, shift, sharp = self.nomo_v
         self.nomo_t = now
         linear = abs(lin) >= NOMO_MIN_LIN
         ang = (0.0 if lin > 0 else math.pi) if linear else 0.0
@@ -456,14 +473,17 @@ class Whisker(Node):
             half = LINE_HALF
             pose = self.map_pose()
             again = bool(pose) and any(math.hypot(pose[1] - x, pose[2] - y) < REPEAT_R for x, y in self.stuck_spots)
-            if pose:
+            if pose and self.state != "back":
                 self.stuck_spots.append((pose[1], pose[2]))
             ev["again"] = again
             ttl, feel = (None, "hard") if again else (SOFT_TTL, "soft")
         elif kind == "touch":
             feel = "touch"
         ev["feel"] = feel
-        ev["marked"] = kind != "touch" and ev.get("src") == "motion" and self.mark(ang, ttl, half)
+        # 빼는 중 막힘은 표시 안 함: 지나온 길은 방금 지나와서 비어 있음 — 못 빠지는 건 미끄러짐 탓 (11-07 검토: 뒤에 영구 선이 그어져
+        #   돌아갈 길을 스스로 막았음)
+        backing = self.state == "back"
+        ev["marked"] = kind != "touch" and ev.get("src") == "motion" and not backing and self.mark(ang, ttl, half)
         self.record(ev)
         if kind == "touch" or not self.react:
             return
