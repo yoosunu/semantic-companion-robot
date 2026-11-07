@@ -334,9 +334,13 @@ class Whisker(Node):
             return
         d = [s[i] - self.base[i] for i in range(4)]
         horiz = math.hypot(d[0], d[1])
-        dt = 0.05 if self.prev_imu_t is None else min(0.2, max(0.0, now - self.prev_imu_t))
-        self.prev_imu_t = now
-        if self.check_lift(now, d[2], d[3], dt):
+        # 시간은 IMU 메시지에 찍힌 시각으로 (11-07 23:42 실기: 처리 시각으로 쟀더니 스캔 맞추기 동안 밀린 IMU 가
+        #   한꺼번에 처리돼 dt ≈ 0 → 기울기가 안 쌓여 들림을 전혀 못 느낌. 흉내 시험은 시간을 직접 넣어서 안 드러남)
+        st = getattr(getattr(m, "header", None), "stamp", None)
+        t_msg = st.sec + st.nanosec * 1e-9 if st is not None and st.sec else now
+        dt = 0.05 if self.prev_imu_t is None else min(0.2, max(0.0, t_msg - self.prev_imu_t))
+        self.prev_imu_t = t_msg
+        if self.check_lift(t_msg, now, d[2], d[3], dt):
             return
         if self.pending:                       # 부딪힘 의심 중: 창이 끝나면 결과(바퀴가 멈췄나)로 판정
             if now - self.pending["t"] >= CONFIRM_S:
@@ -347,6 +351,11 @@ class Whisker(Node):
         settled = now - self.last_self > SELF_MASK
         if settled and horiz < self.touch_g and abs(d[2]) < self.rock_dps and abs(d[3]) < self.rock_dps:
             self.base = [self.base[i] + 0.02 * d[i] for i in range(4)]   # 평소 값은 조용할 때만 천천히
+        elif settled and not motors_on and not asked and abs(d[2]) < 1.0 and abs(d[3]) < 1.0:
+            # 멈춰 있고 자이로도 조용한데 가속만 다름 = 기운 자리에 서 있음 (문턱 위 등) → 평소 값이 그 자세를 따라감
+            #   (11-07 23:42: 문턱 위에 선 채로 1초마다 touch 가 끝없이 뜸)
+            self.base[0] += 0.1 * d[0]
+            self.base[1] += 0.1 * d[1]
         if not settled or now - self.last_event < 1.0:
             return
         ev = None
@@ -370,11 +379,11 @@ class Whisker(Node):
             return
         self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3])}
 
-    def check_lift(self, now, gx, gy, dt):
+    def check_lift(self, t_msg, now, gx, gy, dt):
         """들림: 0.3 s 동안 자이로로 실제 기운 각도(앞뒤·좌우 합)가 1.8° 이상 = 선·문턱을 밟고 올라타는 중 → 바로 되감기.
         자이로는 실제 회전만 잼 (어제 뺀 가속도 기울기는 우리 가속에 속았음). 출발·정지 흔들림은 0.3 s 안에 +− 로 되돌아옴"""
-        self.lift_hist.append((now, gx, gy, dt))
-        while self.lift_hist and now - self.lift_hist[0][0] > LIFT_WIN:
+        self.lift_hist.append((t_msg, gx, gy, dt))
+        while self.lift_hist and t_msg - self.lift_hist[0][0] > LIFT_WIN:
             self.lift_hist.popleft()
         roll = sum(h[1] * h[3] for h in self.lift_hist)
         pitch = sum(h[2] * h[3] for h in self.lift_hist)
