@@ -6,10 +6,9 @@
                (Jasper: "움직이다 박는 것"과 "서 있다 출발하는 흔들림"은 다르다)
     (뺀 것)    카펫 기울기(가속도 = 중력 방향): 11-07 01:54 실주행에서 헛것 5번, 진짜 0번. 가속도계는 기울기와 우리 가속을
                구별 못 함 → 톡톡(0.5 s 밀고 멈춤) 중 5.3°, 곡선·후진 중 1.6~1.9° 로 방 가운데 분홍 선. efference 원칙과 충돌 → 뺌
-    들림       기울어지는 각속도 → 0.3 s 동안 실제로 2° 이상 기울었나 확인 = 발·문턱처럼 크게 들리는 것
-               11-07: 얇은 카펫은 이 IMU(10 Hz)로 맨바닥과 구별 안 됨 (기록 18개, 0.3 s 유지 기울기:
-               카펫 1.6~1.9° / 맨바닥 1.1° / 밀어붙이기 1.6°) → 카펫은 아래 "안 움직임"이 맡음
-    안 움직임  움직이라는 명령이 2.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 명령의 30% 미만이고 자이로도 3° 도 안 돎
+    들림       0.3 s 동안 자이로로 실제 기운 각도 1.8° 이상 = 선·문턱을 밟고 올라탐 → 바로 되감기, 일직선 영구 표시
+               11-07 실측: 평소 ≤ 1.5° / 굵은 선 2.0~3.9° / 화장실 문턱 4.9°. 얇은 카펫은 못 잡음 (ToF 오면 다시)
+    안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
@@ -17,7 +16,7 @@
   갇힘         빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
                (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
-  표시         부딪힘 = 점 10 cm 영구 / 들림 앞뒤 = 선 30 cm 영구 / 들림 한쪽 = 점 10 cm 1분 /
+  표시         부딪힘 = 점 10 cm 영구 / 들림 = 선 30 cm 영구 /
                안 움직임 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
                /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
   힘 제한      브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 늦어도 짓누르지 않게
@@ -52,11 +51,15 @@ LINE_HALF = 0.15              # m, 선 표시 반폭 → 폭 ~30 cm (카펫 가�
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (efference copy)
 MOVING_V, MOVING_W = 0.025, 0.10   # 직전 0.5 s 실제로 이만큼 움직였으면 = 굴러가는 중 (부딪힘 조건)
-CONFIRM_S, CONFIRM_STALL, CONFIRM_TILT = 0.3, 0.5, 2.0   # 의심 → 확인 창 / 바퀴 멈춤(진척 < 명령의 50%) / 실제 기울기 2°
-NOMO_S = 2.5                  # s, 안 움직임 판단 창
+CONFIRM_S, CONFIRM_STALL = 0.3, 0.5   # 부딪힘 의심 → 확인 창 / 바퀴 멈춤(진척 < 명령의 50%)
+NOMO_S = 1.5                  # s, 안 움직임 판단 창 (11-07 체중계: 충격 없이 막히고 바퀴는 헛돎 → LiDAR 만 봄. 2.5 → 1.5 s)
+LIFT_DEG = 1.8                # °, 0.3 s 동안 자이로로 실제 기운 각도(앞뒤+좌우) = 뭔가를 밟고 올라탐
+LIFT_WIN = 0.3                #   11-07 실측: 평소 18개(출발·정지·회전·카펫·상자·손·발·밀기) ≤ 1.5° /
+                              #   굵은 선 2.0°(0.05)·3.9°(0.08), 화장실 문턱 4.9°, 체중계에 막힘 1.5°(안 올라탐)
+LIFT_WATCH = 1.0              # °, 이 이상이면 값만 로그 (Nav2 곡선·톡톡에서 얼마나 나오나 — 기록 18개엔 없던 주행)
 NOMO_MIN_LIN, NOMO_MIN_ROT = 0.05, 0.3   # 창 동안 명령의 합(부호 포함): 5 cm 이상 또는 0.3 rad 이상 가라고 했어야 판단
 NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
-NOMO_MOVE, NOMO_RATIO = 0.015, 0.3   # LiDAR 로 잰 이동이 명령의 30% (최소 1.5 cm) 미만 = 안 움직임
+NOMO_MOVE = 0.015             # m, 2.5 s 동안 LiDAR 로 잰 이동이 이 미만 = 안 움직임 (느린 건 막힘이 아님)
 NOMO_SHARP = 0.003            # m, 스캔 맞추기 답이 ±3 cm 옆보다 평균 잔차가 이만큼은 작아야 믿음 (특징 없는 곳이면 판단 안 함)
 NOMO_RANGE = 10.0             # m
 NOMO_PTS = 240                # 스캔 한 장에서 쓸 점 수
@@ -94,8 +97,6 @@ class Whisker(Node):
         super().__init__("whisker")
         p = self.declare_parameter
         self.bump_g = p("bump_g", 0.06).value          # 주행 중 수평 가속 튐 (상자 0.09, 주행 잡음 0.02)
-        self.pitch_dps = p("pitch_dps", 5.5).value     # 앞뒤 기울어지는 각속도 (의심)
-        self.roll_dps = p("roll_dps", 5.0).value       # 좌우 = 한쪽 궤도가 뭔가를 밟음
         self.touch_g = p("touch_g", 0.025).value       # 정지 중 건드림 (톡 0.04)
         self.rock_dps = p("rock_dps", 4.0).value       # 정지 중 기우뚱 (톡 6)
         self.back_turn = math.radians(p("back_turn_deg", 15.0).value)
@@ -112,6 +113,9 @@ class Whisker(Node):
         self.cmd_hist = collections.deque()            # (t, cmd_x, cmd_z) 최근 NOMO_S + 1 s
         self.scans = collections.deque()               # (t, 스캔 점들 (x, y) 몸 기준)
         self.yaw_hist = collections.deque()            # (t, 자이로 방향)
+        self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
+        self.lift_watch_t = 0.0
+        self.lift_t = 0.0
         self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
         self.last_self = 0.0
@@ -306,9 +310,9 @@ class Whisker(Node):
         if old is None or len(self.scans) < 2 or len(old) < 30 or len(self.scans[-1][1]) < 30:
             return
         shift, sharp = self.scan_match(old, self.scans[-1][1], wrap(yw[-1][1] - yw[0][1]), min(0.25, abs(lin) + 0.05))
-        # Nav2 주행 중엔 "명령의 30% 도 못 감" = 걸림. 빼는 중엔 느려도 나가고 있으면 됨 → "1.5 cm 도 못 감"만
-        #   (흉내 시험: 한쪽 궤도 30% 접지로 되감으면 1 cm/s 남짓 — 느리지만 빠져나가는 중)
-        need = NOMO_MOVE if self.state == "back" else max(NOMO_MOVE, NOMO_RATIO * abs(lin))
+        # 기준 하나: 2.5 s 동안 LiDAR 로 1.5 cm 도 못 감 = 막힘. 11-07 02:35: "명령의 30%" 기준은 느린 후진 곡선
+        #   (명령 12 cm, 실제 3 cm 움직임)을 막힘으로 오해 → 고스트. 진짜 막힘(발닦개)은 0~1 cm
+        need = NOMO_MOVE
         if sharp < NOMO_SHARP or abs(shift) >= need:
             return                                   # 스캔으로 판단 못 함 / 실제로 갔음
         self.nomo_t = now
@@ -332,9 +336,9 @@ class Whisker(Node):
         horiz = math.hypot(d[0], d[1])
         dt = 0.05 if self.prev_imu_t is None else min(0.2, max(0.0, now - self.prev_imu_t))
         self.prev_imu_t = now
-        if self.pending:                       # 의심 중: 기울기 쌓고, 창이 끝나면 결과로 판정
-            self.pending["tilt_p"] += d[3] * dt
-            self.pending["tilt_r"] += d[2] * dt
+        if self.check_lift(now, d[2], d[3], dt):
+            return
+        if self.pending:                       # 부딪힘 의심 중: 창이 끝나면 결과(바퀴가 멈췄나)로 판정
             if now - self.pending["t"] >= CONFIRM_S:
                 self.confirm()
             return
@@ -348,10 +352,6 @@ class Whisker(Node):
         ev = None
         if motors_on and horiz > self.bump_g and self.moving_now():      # 움직이다 박음 (Jasper 11-07)
             ev = {"ev": "bump", "g": round(horiz, 3)}
-        elif (motors_on or asked) and self.state == "drive" and abs(d[3]) > self.pitch_dps:
-            ev = {"ev": "pitch", "dps": round(d[3], 1)}
-        elif (motors_on or asked) and self.state == "drive" and abs(d[2]) > self.roll_dps:
-            ev = {"ev": "roll", "dps": round(d[2], 1)}
         elif not motors_on and not asked and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
             ev = {"ev": "touch", "g": round(horiz, 3), "gx": round(d[2], 1), "gy": round(d[3], 1)}
         if not ev:
@@ -368,8 +368,34 @@ class Whisker(Node):
         if ev["ev"] == "touch":
             self.on_contact(ev, ang)
             return
-        self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3]),
-                        "tilt_p": d[3] * dt, "tilt_r": d[2] * dt}
+        self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3])}
+
+    def check_lift(self, now, gx, gy, dt):
+        """들림: 0.3 s 동안 자이로로 실제 기운 각도(앞뒤·좌우 합)가 1.8° 이상 = 선·문턱을 밟고 올라타는 중 → 바로 되감기.
+        자이로는 실제 회전만 잼 (어제 뺀 가속도 기울기는 우리 가속에 속았음). 출발·정지 흔들림은 0.3 s 안에 +− 로 되돌아옴"""
+        self.lift_hist.append((now, gx, gy, dt))
+        while self.lift_hist and now - self.lift_hist[0][0] > LIFT_WIN:
+            self.lift_hist.popleft()
+        roll = sum(h[1] * h[3] for h in self.lift_hist)
+        pitch = sum(h[2] * h[3] for h in self.lift_hist)
+        deg = math.hypot(roll, pitch)
+        asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
+        if deg >= LIFT_WATCH and asked and now - self.lift_watch_t > 1.0:
+            self.lift_watch_t = now
+            self.get_logger().info(f"LIFT watch {deg:.1f}° (앞뒤 {pitch:+.1f}, 좌우 {roll:+.1f}) "
+                                   f"cmd {self.motor[2]:.3f} {self.motor[3]:.2f} {self.state}")
+        if deg < LIFT_DEG or not asked or self.state != "drive" or now - self.lift_t < 1.0:
+            return False                       # (부딪힘 의심과는 따로 쉼 — 같이 막으면 선을 놓침, 11-07 기록 재생에서 드러남)
+        self.lift_t = self.last_event = now
+        self.lift_hist.clear()
+        self.pending = None
+        linear = abs(self.motor[2]) >= 0.01
+        ang = (0.0 if self.motor[2] > 0 else math.pi) if linear else 0.0
+        ev = {"ev": "lift", "deg": round(deg, 1), "pitch_deg": round(pitch, 1), "roll_deg": round(roll, 1),
+              "dir": side_name(ang) if linear else "turn", "src": "motion" if linear else "turn",
+              "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
+        self.on_contact(ev, ang)
+        return True
 
     def confirm(self):
         p, self.pending = self.pending, None
@@ -387,11 +413,9 @@ class Whisker(Node):
             ok = still_asked and want > 0.005 and got < CONFIRM_STALL * want
             ev["confirm"] = {"want": round(want, 3), "got": round(got, 3), "asked": still_asked}
         else:
-            tilt = p["tilt_p"] if kind == "pitch" else p["tilt_r"]
-            ok = abs(tilt) >= CONFIRM_TILT
-            ev["confirm"] = {"tilt_deg": round(tilt, 1)}
+            ok = False
         if ok:
-            self.on_contact(ev, p["ang"], cut=p["t"] if kind == "bump" else None)   # 부딪힌 뒤 0.3 s 는 안 움직였음
+            self.on_contact(ev, p["ang"], cut=p["t"])     # 부딪힌 뒤 0.3 s 는 안 움직였음
         else:
             ev["was"], ev["ev"], ev["feel"], ev["marked"] = kind, "ghost", "ghost", False
             self.record(ev)
@@ -399,15 +423,13 @@ class Whisker(Node):
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang, cut=None):
         kind = ev["ev"]
-        if self.state == "back" and kind in ("pitch", "roll"):
+        if self.state == "back" and kind == "lift":
             return                                   # 빼는 중 기울어짐 = 올라탔던 것에서 내려오는 중
         if self.state in ("stop", "trapped", "help") and kind != "touch":
             return
         half, ttl, feel = MARK_HALF, None, "hard"
-        if kind == "pitch":
-            half = LINE_HALF                         # 앞뒤로 들림 = 턱·가장자리 = 선
-        elif kind == "roll":
-            ttl, feel = SOFT_TTL, "soft"             # 한쪽만 = 발·물건일 수도
+        if kind == "lift":
+            half = LINE_HALF                         # 올라탐 = 선·문턱 = 일직선, 영구 (Jasper 11-07)
         elif kind == "stuck":                        # 처음 1분, 같은 곳에서 또면 영구
             half = LINE_HALF
             pose = self.map_pose()

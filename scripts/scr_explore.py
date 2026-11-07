@@ -54,7 +54,7 @@ SEE_R = 0.35             # m, 갈 수 있는 곳에서 이 안의 경계만 = �
 VIEW_MIN, VIEW_MAX = 0.20, 1.00   # m, 관찰점 ↔ 경계 거리
 SETTLE_S = 7.0           # s, 관찰점 도착 후 SLAM 지도 갱신(5 s) 기다림 (11-07 02:25: 도착 즉시 unseen 으로 전부 포기)
 NOVIEW_S = 30.0          # s, 갈 자리가 이만큼 계속 없을 때만 포기 (처음엔 지도가 작아서 잠깐 없을 수 있음)
-CONTACTS = ("bump", "pitch", "roll", "stuck")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
+CONTACTS = ("bump", "lift", "stuck")   # Whisker v9 의 감각 (ghost·touch 는 접촉 아님)
 CANCEL_WAIT = 15.0       # s, 취소 보냈는데 Nav2 답이 없으면 우리가 정리
 STATUS_S = 30.0          # s, 상태 한 줄 주기
 
