@@ -12,6 +12,7 @@
                (Jasper 11-08 "캡슐"). 실측(명령 중): 평소 ≤ 3.2° / 선 ≤ 2.8° / 올라탄 문턱 5.6~10°
     안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
+  밀림         Nav2 운전 중 1 s 동안 실제 회전(자이로)과 명령 회전의 차이 15°↑ = 누가 밀었음 → 1 s 정지 후 다시 (표시 없음)
   건드림       서 있을 때 흔들림 하나 = 사건 하나 (캡슐): 잦아들면 시작 전과 비교 → moved(방향 5°·자세 2° 바뀜) / tap / held(10 s)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
@@ -81,6 +82,8 @@ REPLAY_MAX = 0.15             # m, 되감기 최대 거리
 REPLAY_ROT = math.radians(30)  # 되감기는 들어온 방향에서 30° 까지만 거슬러 감
 HIST_S = 10.0                 # s, 지나온 길 기록 길이
 IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 시작
+PUSH_DEG, PUSH_S = 15.0, 1.0  # 1 s 동안 실제 회전(자이로)과 명령한 회전의 차이가 15° 넘음 = 누가 밀었음 → 1 s 정지 (Jasper 11-08)
+PAUSE_S = 1.0                 #   (제자리 회전 0.25 rad/s 가 완전히 헛돌아도 차이 14° → 안 걸림)
 REBOUND_MAX = 0.05            # m
 FREE_S, FREE_RATIO = 1.0, 0.5 # 되감기 성공 = 마지막 1 s 동안 LiDAR 로 잰 이동이 명령의 50% 이상 ("명령대로 움직이네 = 바닥이네", Jasper 11-07)
 EXTEND_MAX = 0.05             # m, 거리는 다 됐는데 아직 바닥 확인이 안 되면 이만큼 더 빼 봄 → 그래도 안 되면 갇힘
@@ -135,6 +138,7 @@ class Whisker(Node):
         self.slope_t = 0.0
         self.last_tilt = None
         self.touch_cap = None                # 서 있을 때 흔들림 하나 = 사건 하나
+        self.push_t = 0.0
         self.slope_watch_t = 0.0
         self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}, "slope": 0.0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
@@ -219,6 +223,27 @@ class Whisker(Node):
         while self.yaw_hist and now - self.yaw_hist[0][0] > NOMO_BACK_S + 1.0:
             self.yaw_hist.popleft()
         self.update_path(now)
+        self.check_pushed(now)
+
+    def check_pushed(self, now):
+        """밀림: 명령하지 않은 회전 (Jasper 11-07 "의도한 움직임과 실제의 불일치"를 회전에). 반응 = 잠깐 정지(변수 줄이기), 표시 없음.
+        나중에 "밀지 마세요" 같은 말의 근거 (11-08)"""
+        if self.state != "drive" or now - self.push_t < 2.0 or len(self.yaw_hist) < 5:
+            return
+        yw = [(t, y) for t, y in self.yaw_hist if t >= now - PUSH_S]
+        cw = [c for c in self.cmd_hist if c[0] >= now - PUSH_S]
+        if len(yw) < 5 or len(cw) < 5 or yw[0][0] > now - PUSH_S * 0.8:
+            return
+        if not any(abs(cx) >= 0.01 or abs(cz) >= 0.05 for _, cx, cz in cw):
+            return                                   # 서 있음 → 건드림 캡슐이 맡음
+        actual = math.degrees(wrap(yw[-1][1] - yw[0][1]))
+        asked = math.degrees(sum(c[2] * (n[0] - c[0]) for c, n in zip(cw, cw[1:])))
+        if abs(actual - asked) < PUSH_DEG:
+            return
+        self.push_t = now
+        ev = {"ev": "pushed", "turned_deg": round(actual, 1), "asked_deg": round(asked, 1), "dir": "-", "src": "gyro",
+              "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
+        self.on_contact(ev, 0.0)
 
     def update_path(self, now):
         """Nav2 가 운전하는 동안 지나온 길. 앞/뒤 방향이 바뀌거나 1 s 넘게 서 있으면 새로 시작"""
@@ -569,7 +594,7 @@ class Whisker(Node):
         kind = ev["ev"]
         if self.state == "back" and kind in ("lift", "slope"):
             return                                   # 빼는 중 기울어짐 = 올라탔던 것에서 내려오는 중
-        if self.state in ("stop", "trapped", "help") and kind != "touch":
+        if self.state in ("stop", "trapped", "help", "pause") and kind != "touch":
             return
         half, ttl, feel = MARK_HALF, None, "hard"
         if kind in ("lift", "slope"):
@@ -582,15 +607,20 @@ class Whisker(Node):
                 self.stuck_spots.append((pose[1], pose[2]))
             ev["again"] = again
             ttl, feel = (None, "hard") if again else (SOFT_TTL, "soft")
-        elif kind == "touch":
-            feel = "touch"
+        elif kind in ("touch", "pushed"):
+            feel = kind
         ev["feel"] = feel
         # 빼는 중 막힘은 표시 안 함: 지나온 길은 방금 지나와서 비어 있음 — 못 빠지는 건 미끄러짐 탓 (11-07 검토: 뒤에 영구 선이 그어져
         #   돌아갈 길을 스스로 막았음)
         backing = self.state == "back"
-        ev["marked"] = kind != "touch" and ev.get("src") == "motion" and not backing and self.mark(ang, ttl, half)
+        ev["marked"] = kind not in ("touch", "pushed") and ev.get("src") == "motion" and not backing and self.mark(ang, ttl, half)
         self.record(ev)
         if kind == "touch" or not self.react:
+            return
+        if kind == "pushed":
+            if self.state == "drive":
+                self.send(0.0, 0.0)
+                self.go("pause")                     # 잠깐 정지 → 다시 Nav2 (되감기·표시 없음)
             return
         if ang > 0.3:
             self.left_hits += 1
@@ -690,7 +720,7 @@ class Whisker(Node):
             self.say_state("back", self.plan_text)
             state = "drive"
         self.state, self.state_t = state, time.time()
-        msg = {"stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
+        msg = {"pause": f"누가 밀었음 → {PAUSE_S:.0f}초 정지", "stop": "멈춤 (0.5 s)", "back": "빼기 — " + self.plan_text,
                "trapped": f"앞뒤 다 막힘 → {self.wait_s:.0f}초 대기 후 시도 {self.trapped}/3",
                "help": "구조 요청 — 3번 다 못 빠짐. 풀기: /whisker/resume", "drive": "Nav2 에 돌려줌"}[state]
         self.say_state(state, msg)
@@ -740,6 +770,11 @@ class Whisker(Node):
         if self.state == "stop":
             if t > 0.5:
                 self.go("back")
+                return
+        elif self.state == "pause":
+            if t > PAUSE_S:
+                self.send(0.0, 0.0)
+                self.go("drive")
                 return
         elif self.state == "trapped":
             if t > self.wait_s:
