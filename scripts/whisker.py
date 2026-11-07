@@ -111,6 +111,8 @@ class Whisker(Node):
         self.ax_forward = p("ax_forward", 1.0).value   # IMU 방향은 정지 중 참고용 (미확정)
         self.ay_left = p("ay_left", 1.0).value
         self.react = p("react", True).value            # False = 느끼고 기록만
+        self.lift_deg = p("lift_deg", LIFT_DEG).value   # 시험용으로 끌 때: -p lift_deg:=99.0
+        self.slope_deg = p("slope_deg", SLOPE_DEG).value
         self.laser_yaw = math.radians(p("laser_yaw_deg", 180.0).value)   # URDF laser_yaw (10-29 실측: 라이다 0° = 로봇 뒤)
 
         # 감각
@@ -435,7 +437,7 @@ class Whisker(Node):
             self.lift_watch_t = now
             self.get_logger().info(f"LIFT watch {deg:.1f}° (앞뒤 {pitch:+.1f}, 좌우 {roll:+.1f}) "
                                    f"cmd {self.motor[2]:.3f} {self.motor[3]:.2f} {self.state}")
-        if deg < LIFT_DEG or not asked or self.state != "drive" or now - self.lift_t < 1.0:
+        if deg < self.lift_deg or not asked or self.state != "drive" or now - self.lift_t < 1.0:
             return False                       # (부딪힘 의심과는 따로 쉼 — 같이 막으면 선을 놓침, 11-07 기록 재생에서 드러남)
         self.lift_t = self.last_event = now
         self.lift_hist.clear()
@@ -467,13 +469,13 @@ class Whisker(Node):
             return False
         tilt = math.degrees(math.acos(float(np.clip(np.dot(v, self.grav_ref), -1.0, 1.0))))
         self.diag["slope"] = max(self.diag["slope"], tilt)
-        if not moving and tilt < SLOPE_DEG and self.state == "drive":
+        if not moving and tilt < self.slope_deg and self.state == "drive":
             self.grav_ref = self.grav_ref + 0.05 * (v - self.grav_ref)   # 멈춰 있을 때 평평한 자세를 따라감 (바닥마다 조금씩 다름)
             self.grav_ref = self.grav_ref / float(np.linalg.norm(self.grav_ref))
         if tilt >= SLOPE_WATCH and asked and now - self.slope_watch_t > 1.0:
             self.slope_watch_t = now
             self.get_logger().info(f"SLOPE watch {tilt:.1f}° cmd {self.motor[2]:.3f} {self.motor[3]:.2f} {self.state}")
-        if tilt < SLOPE_DEG or not asked or self.state != "drive" or now - self.slope_t < 2.0:
+        if tilt < self.slope_deg or not asked or self.state != "drive" or now - self.slope_t < 2.0:
             return False
         self.slope_t = self.last_event = now
         self.pending = None
