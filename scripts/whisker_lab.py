@@ -46,8 +46,10 @@ def main():
         if d.get("ev") == "stuck":
             extra = (f"명령 {d.get('want_cm')} cm / LiDAR {d.get('scan_cm')} cm, 자이로 {d.get('turned_deg')}°"
                      + ("  [같은 곳 또 → 영구]" if d.get("again") else ""))
+        elif d.get("ev") == "touch":
+            extra = (f"{d.get('touch')} {d.get('dur_s')} s, 방향 {d.get('dyaw_deg')}° 자세 {d.get('dtilt_deg')}° 바뀜")
         else:
-            extra = d.get("g", d.get("dps", ""))
+            extra = d.get("g", d.get("deg", d.get("dps", "")))
         say(f"⚡ {d.get('ev')} {d.get('dir', '')} ({d.get('feel', '')}) {extra}"
             + ("  → 지도 표시" if d.get("marked") else ""))
 

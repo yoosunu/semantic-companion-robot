@@ -12,9 +12,11 @@
                (Jasper 11-08 "캡슐"). 실측(명령 중): 평소 ≤ 3.2° / 선 ≤ 2.8° / 올라탄 문턱 5.6~10°
     안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
+  건드림       서 있을 때 흔들림 하나 = 사건 하나 (캡슐): 잦아들면 시작 전과 비교 → moved(방향 5°·자세 2° 바뀜) / tap / held(10 s)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
-               최대 15 cm, 들어온 방향에서 30° 까지 → 끝나면 Nav2 에 돌려줌. 지나온 길이 없으면(출발 직후) 표시만 하고 돌려줌
+               최대 15 cm, 들어온 방향에서 30° 까지. 끝 = "바닥 확인"(캡슐): 마지막 1 s LiDAR 이동이 명령의 50%↑ + 자세 2° 미만
+               → Nav2 에 돌려줌. 거리는 됐는데 아직이면 5 cm 더 → 그래도 아니면 갇힘. 지나온 길이 없으면(출발 직후) 표시만 하고 돌려줌
   갇힘         빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
                (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
@@ -80,6 +82,8 @@ REPLAY_ROT = math.radians(30)  # 되감기는 들어온 방향에서 30° 까지
 HIST_S = 10.0                 # s, 지나온 길 기록 길이
 IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 시작
 REBOUND_MAX = 0.05            # m
+FREE_S, FREE_RATIO = 1.0, 0.5 # 되감기 성공 = 마지막 1 s 동안 LiDAR 로 잰 이동이 명령의 50% 이상 ("명령대로 움직이네 = 바닥이네", Jasper 11-07)
+EXTEND_MAX = 0.05             # m, 거리는 다 됐는데 아직 바닥 확인이 안 되면 이만큼 더 빼 봄 → 그래도 안 되면 갇힘
 STEP_TIMEOUT = 12.0           # s, 빼기 한 번 최대
 SOFT_TTL = 60.0               # s, 부드러운 것(발·손일 수도) / 처음 막힌 곳 표시는 1분 뒤 사라짐
 
@@ -129,6 +133,8 @@ class Whisker(Node):
         self.grav = collections.deque()      # (t, ax, ay, az, 자이로 크기) 최근 0.5 s — 기운 채 감각
         self.grav_ref = None                 # 출발 전(멈춰 있고 조용할 때) 중력 방향
         self.slope_t = 0.0
+        self.last_tilt = None
+        self.touch_cap = None                # 서 있을 때 흔들림 하나 = 사건 하나
         self.slope_watch_t = 0.0
         self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}, "slope": 0.0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
@@ -313,6 +319,7 @@ class Whisker(Node):
                                        min(0.30, st["len"] + 0.08))
         if sharp >= NOMO_SHARP:                          # 분명한 답이 있을 때만 (특징 없는 곳이면 거리계)
             st["scan_s"], st["scan_t"] = abs(shift), now
+            st.setdefault("scan_hist", []).append((now, abs(shift)))
 
     def nomo_why(self, now):
         """안 움직임을 판단하지 않는 이유 (없으면 None = 막힘). DIAG 에 셈.
@@ -405,13 +412,16 @@ class Whisker(Node):
             #   (11-07 23:42: 문턱 위에 선 채로 1초마다 touch 가 끝없이 뜸)
             self.base[0] += 0.1 * d[0]
             self.base[1] += 0.1 * d[1]
+        if not motors_on and not asked:                # 서 있음 → 건드림 캡슐만
+            if settled:
+                self.check_touch(now, horiz, d)
+            return
+        self.touch_cap = None                          # 움직이기 시작하면 건드림 캡슐은 버림
         if not settled or now - self.last_event < 1.0:
             return
         ev = None
         if motors_on and horiz > self.bump_g and self.moving_now():      # 움직이다 박음 (Jasper 11-07)
             ev = {"ev": "bump", "g": round(horiz, 3)}
-        elif not motors_on and not asked and (horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps):
-            ev = {"ev": "touch", "g": round(horiz, 3), "gx": round(d[2], 1), "gy": round(d[3], 1)}
         if not ev:
             return
         self.last_event = now
@@ -423,11 +433,42 @@ class Whisker(Node):
             ang, src = (math.atan2(-by, -bx) if horiz > 1e-4 else 0.0), "imu"
         ev.update(dir=side_name(ang), src=src, ax=round(d[0], 3), ay=round(d[1], 3),
                   cmd_x=round(self.motor[2], 3), cmd_z=round(self.motor[3], 2), state=self.state)
-        if ev["ev"] == "touch":
-            self.on_contact(ev, ang)
-            return
         # 시각은 IMU stamp 로 (11-08: 처리 시각이면 밀린 IMU 가 한꺼번에 와서 0.3 s 창이 엉뚱해짐 → 출발 직후 헛부딪힘)
         self.pending = {"ev": ev, "ang": ang, "t": now, "ts": t_msg, "cmd": (self.motor[2], self.motor[3])}
+
+    def grav_now(self):
+        if len(self.grav) < 3:
+            return None
+        v = np.median(np.array([g[1:4] for g in self.grav]), axis=0)
+        return v / max(float(np.linalg.norm(v)), 1e-6)
+
+    def check_touch(self, now, horiz, d):
+        """건드림 캡슐 (Jasper 11-08 캡슐 철학): 서 있을 때 흔들림 하나 = 사건 하나. 잦아들면(0.5 s 조용) 시작 전과 비교 →
+        방향 5°↑ 또는 자세 2°↑ 바뀜 = moved (누가 옮김·밀었음) / 제자리 = tap (톡 건드림) / 10 s 넘게 안 잦아듦 = held.
+        (예전: 순간 튐마다 1초에 한 번 기록 → 기운 자리에 서 있으면 끝없이 반복)"""
+        active = horiz > self.touch_g or abs(d[2]) > self.rock_dps or abs(d[3]) > self.rock_dps
+        cap = self.touch_cap
+        if cap is None:
+            if active and self.odom:
+                self.touch_cap = {"t0": now, "yaw0": self.odom[2], "g0": self.grav_now(), "peak_g": horiz,
+                                  "peak_dps": max(abs(d[2]), abs(d[3])), "quiet": None}
+            return
+        cap["peak_g"] = max(cap["peak_g"], horiz)
+        cap["peak_dps"] = max(cap["peak_dps"], abs(d[2]), abs(d[3]))
+        cap["quiet"] = None if active else (cap["quiet"] or now)
+        held = now - cap["t0"] > 10.0
+        if not held and not (cap["quiet"] and now - cap["quiet"] >= 0.5):
+            return
+        self.touch_cap = None
+        dyaw = math.degrees(abs(wrap(self.odom[2] - cap["yaw0"]))) if self.odom else 0.0
+        g1 = self.grav_now()
+        dtilt = (math.degrees(math.acos(float(np.clip(np.dot(g1, cap["g0"]), -1.0, 1.0))))
+                 if g1 is not None and cap["g0"] is not None else 0.0)
+        kind = "held" if held else ("moved" if dyaw > 5.0 or dtilt > 2.0 else "tap")
+        ev = {"ev": "touch", "touch": kind, "dur_s": round(now - cap["t0"], 1), "peak_g": round(cap["peak_g"], 3),
+              "peak_dps": round(cap["peak_dps"], 1), "dyaw_deg": round(dyaw, 1), "dtilt_deg": round(dtilt, 1),
+              "dir": "-", "src": "imu", "state": self.state}
+        self.on_contact(ev, 0.0)
 
     def check_lift(self, t_msg, now, gx, gy, dt):
         """들림: 0.3 s 동안 자이로로 실제 기운 각도(앞뒤·좌우 합)가 1.8° 이상 = 선·문턱을 밟고 올라타는 중 → 바로 되감기.
@@ -479,6 +520,7 @@ class Whisker(Node):
                 self.grav_ref = v
             return False
         tilt = math.degrees(math.acos(float(np.clip(np.dot(v, self.grav_ref), -1.0, 1.0))))
+        self.last_tilt = (now, tilt)                     # 되감기 끝 판정에 씀 (자세가 출발 전으로 돌아왔나)
         self.diag["slope"] = max(self.diag["slope"], tilt)
         if not moving and tilt < self.slope_deg and self.state == "drive":
             self.grav_ref = self.grav_ref + 0.05 * (v - self.grav_ref)   # 멈춰 있을 때 평평한 자세를 따라감 (바닥마다 조금씩 다름)
@@ -663,13 +705,32 @@ class Whisker(Node):
         self.state_pub.publish(String(data=json.dumps({"state": state, "msg": msg, "try": self.trapped}, ensure_ascii=False)))
 
     def backed(self):
-        """이번 빼기에서 실제로 간 거리: LiDAR 스캔 맞추기 값이 있으면 그것 (헛바퀴에 안 속음), 없으면 거리계"""
+        """이번 빼기에서 실제로 간 거리: LiDAR 가 한 번이라도 답했으면 LiDAR 값 (헛바퀴에 안 속음).
+        LiDAR 가 한 번도 못 답한 곳(특징 없음)만 거리계. 11-08 검토: 예전엔 LiDAR 답이 1 s 늦으면 거리계로 돌아가 헛바퀴 "빠짐"을 믿었음"""
         st = self.step
         if not st or st["phase"] != "main" or not self.odom:
             return 0.0
-        if st.get("scan_t") and time.time() - st["scan_t"] < 1.0:
+        if st.get("scan_t"):
             return st["scan_s"]
         return math.hypot(self.odom[0] - st["start"][0], self.odom[1] - st["start"][1])
+
+    def escaped(self, st, now):
+        """되감기 캡슐의 끝 판정 (Jasper 11-08): 빼기 전엔 "명령해도 안 움직임", 뺀 뒤엔 "명령대로 움직임 + 자세가 출발 전으로"
+        → 바닥에 돌아옴. 판단할 근거가 없으면(LiDAR 무응답, 자세 미측정) 그 조건은 통과로 봄. (통과/아님, 설명)"""
+        free, why = True, []
+        h = st.get("scan_hist", [])
+        if st["len"] > 0 and h:
+            old = next((x for x in h if x[0] >= now - FREE_S), None)
+            if not old or now - h[0][0] < FREE_S * 0.8:
+                return False, "바닥 확인 중"
+            rate = (h[-1][1] - old[1]) / max(h[-1][0] - old[0], 0.3)
+            free = rate >= FREE_RATIO * BACK_SPEED
+            why.append(f"LiDAR {rate * 100:.1f} cm/s (명령 {BACK_SPEED * 100:.0f})")
+        flat = True
+        if self.last_tilt is not None and now - self.last_tilt[0] < 1.5:
+            flat = self.last_tilt[1] < self.slope_deg / 2
+            why.append(f"자세 {self.last_tilt[1]:.1f}°")
+        return free and flat, ", ".join(why) or "근거 없음 (거리만)"
 
     def tick(self):
         if self.state == "drive":
@@ -708,12 +769,25 @@ class Whisker(Node):
                 elif abs(err) >= HEAD_ROT:        # 거리는 다 됨, 방향이 남음 (돌던 중 닿음 = 되돌리기) → 제자리에서 맞춤
                     z = math.copysign(TURN_SPEED, err)
                 else:
-                    if not st["rebound"]:
-                        self.esc["done"] += s
-                    self.trapped = 0
-                    self.send(0.0, 0.0)
-                    self.go("drive")
-                    return
+                    ok, why = self.escaped(st, time.time())
+                    if ok:
+                        if not st["rebound"]:
+                            self.esc["done"] += s
+                        self.trapped = 0
+                        self.send(0.0, 0.0)
+                        self.get_logger().warn(f"WHISKER 바닥 확인: {why}")
+                        self.go("drive")
+                        return
+                    if s < st["len"] + EXTEND_MAX:  # 거리는 됐는데 아직 바닥이 아님 → 같은 방향으로 조금 더 (방향 유지)
+                        x = st["dir"] * BACK_SPEED
+                        z = max(-HEAD_MAX, min(HEAD_MAX, HEAD_K * err))
+                    else:
+                        self.get_logger().warn(f"WHISKER {st['len'] * 100 + EXTEND_MAX * 100:.0f} cm 뺐는데 바닥 아님: {why}")
+                        if not st["rebound"]:
+                            self.esc["done"] += s
+                        self.trapped += 1
+                        self.go("help" if self.trapped > 3 else "trapped")
+                        return
             if t > STEP_TIMEOUT:
                 self.trapped += 1
                 self.go("help" if self.trapped > 3 else "trapped")
