@@ -116,6 +116,7 @@ class Whisker(Node):
         self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
         self.lift_watch_t = 0.0
         self.lift_t = 0.0
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
         self.last_self = 0.0
@@ -160,13 +161,21 @@ class Whisker(Node):
         self.state_pub = self.create_publisher(String, "whisker/state", 10)
         self.create_timer(0.05, self.tick)
         self.create_timer(1.0, self.publish_cloud)
+        self.create_timer(5.0, self.say_diag)
         d = Path.home() / "scr_logs" / "whisker"
         d.mkdir(parents=True, exist_ok=True)
         self.log_path = d / f"{time.strftime('%Y-%m-%d')}.jsonl"
         self.get_logger().info(f"whisker v9 ready (react={self.react}) → log {self.log_path}")
 
     # ------------------------------------------------------------------ 입력
+    def say_diag(self):
+        g = self.diag
+        self.get_logger().info(f"DIAG 5s: imu {g['imu']} · motor {g['motor']} · 명령중 {g['asked']} · dt=0 {g['dt0']} · "
+                               f"최대 들림 {g['deg']:.1f}° · cmd {self.motor[2]:.3f} {self.motor[3]:.2f} · {self.state}")
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0}
+
     def on_motor(self, m):
+        self.diag["motor"] += 1
         d = (list(m.data) + [0.0] * 5)[:5]
         self.motor = d
         now = time.time()
@@ -389,6 +398,10 @@ class Whisker(Node):
         pitch = sum(h[2] * h[3] for h in self.lift_hist)
         deg = math.hypot(roll, pitch)
         asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
+        self.diag["imu"] += 1
+        self.diag["asked"] += int(asked)
+        self.diag["dt0"] += int(dt <= 1e-4)
+        self.diag["deg"] = max(self.diag["deg"], deg)
         if deg >= LIFT_WATCH and asked and now - self.lift_watch_t > 1.0:
             self.lift_watch_t = now
             self.get_logger().info(f"LIFT watch {deg:.1f}° (앞뒤 {pitch:+.1f}, 좌우 {roll:+.1f}) "
