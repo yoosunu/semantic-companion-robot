@@ -67,7 +67,7 @@ SLOPE_WATCH = 2.0             # °, 이 이상이면 값만 로그 (톡톡·곡�
 LIFT_WATCH = 1.0              # °, 이 이상이면 값만 로그 (Nav2 곡선·톡톡에서 얼마나 나오나 — 기록 18개엔 없던 주행)
 NOMO_MIN_LIN, NOMO_MIN_ROT = 0.03, 0.2   # 창 동안 명령의 합(부호 포함): 3 cm·0.2 rad 이상 가라고 했어야 판단 (창 1.5 s 라 느린 0.03 m/s 도 들어오게)
 NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
-NOMO_MOVE = 0.015             # m, 2.5 s 동안 LiDAR 로 잰 이동이 이 미만 = 안 움직임 (느린 건 막힘이 아님)
+NOMO_MOVE = 0.015             # m, 판단 창(주행 1.5 s · 빼기 2.5 s) 동안 LiDAR 로 잰 이동이 이 미만 = 안 움직임 (느린 건 막힘이 아님)
 NOMO_SHARP = 0.003            # m, 스캔 맞추기 답이 ±3 cm 옆보다 평균 잔차가 이만큼은 작아야 믿음 (특징 없는 곳이면 판단 안 함)
 NOMO_RANGE = 10.0             # m
 NOMO_PTS = 240                # 스캔 한 장에서 쓸 점 수
@@ -235,6 +235,12 @@ class Whisker(Node):
         while self.path and now - self.path[0][0] > HIST_S:
             self.path.popleft()
 
+    def odom_at(self, ts):
+        """stamp ts 에 가장 가까운 거리계 기록 (t, x, y, yaw)"""
+        if not self.odom_hist:
+            return None
+        return min(self.odom_hist, key=lambda r: abs(r[0] - ts))
+
     def moving_now(self):
         """직전 0.5 s 동안 실제로 움직였나 (거리계·자이로) — 부딪힘의 "굴러가던 중" 조건"""
         if len(self.odom_hist) < 3:
@@ -384,7 +390,9 @@ class Whisker(Node):
         if self.check_slope(t_msg, now, a.x / G, a.y / G, a.z / G, math.hypot(d[2], d[3])):
             return
         if self.pending:                       # 부딪힘 의심 중: 창이 끝나면 결과(바퀴가 멈췄나)로 판정
-            if now - self.pending["t"] >= CONFIRM_S:
+            ts = self.pending["ts"]
+            odom_ok = bool(self.odom_hist) and self.odom_hist[-1][0] >= ts + CONFIRM_S - 0.05   # 거리계도 그 시각까지 와 있어야
+            if t_msg - ts >= CONFIRM_S and (odom_ok or t_msg - ts >= 1.0):
                 self.confirm()
             return
         motors_on = abs(self.motor[0]) > 1 or abs(self.motor[1]) > 1
@@ -418,7 +426,8 @@ class Whisker(Node):
         if ev["ev"] == "touch":
             self.on_contact(ev, ang)
             return
-        self.pending = {"ev": ev, "ang": ang, "t": now, "pos": self.odom, "cmd": (self.motor[2], self.motor[3])}
+        # 시각은 IMU stamp 로 (11-08: 처리 시각이면 밀린 IMU 가 한꺼번에 와서 0.3 s 창이 엉뚱해짐 → 출발 직후 헛부딪힘)
+        self.pending = {"ev": ev, "ang": ang, "t": now, "ts": t_msg, "cmd": (self.motor[2], self.motor[3])}
 
     def check_lift(self, t_msg, now, gx, gy, dt):
         """들림: 0.3 s 동안 자이로로 실제 기운 각도(앞뒤·좌우 합)가 1.8° 이상 = 선·문턱을 밟고 올라타는 중 → 바로 되감기.
@@ -496,12 +505,13 @@ class Whisker(Node):
         cx1, cz1 = self.motor[2], self.motor[3]
         if kind == "bump":
             still_asked = abs(cx1) >= 0.8 * abs(cx0) and abs(cz1) >= 0.8 * abs(cz0)
+            a, b = self.odom_at(p["ts"]), self.odom_at(p["ts"] + CONFIRM_S)   # 의심 시각 ~ 0.3 s 뒤, 거리계 stamp 로
             if abs(cx0) >= 0.01:
                 want = abs(cx0) * CONFIRM_S
-                got = math.hypot(self.odom[0] - p["pos"][0], self.odom[1] - p["pos"][1]) if self.odom and p["pos"] else want
+                got = math.hypot(b[1] - a[1], b[2] - a[2]) if a and b else want
             else:
                 want = abs(cz0) * CONFIRM_S
-                got = abs(wrap(self.odom[2] - p["pos"][2])) if self.odom and p["pos"] else want
+                got = abs(wrap(b[3] - a[3])) if a and b else want
             ok = still_asked and want > 0.005 and got < CONFIRM_STALL * want
             ev["confirm"] = {"want": round(want, 3), "got": round(got, 3), "asked": still_asked}
         else:
