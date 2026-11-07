@@ -55,6 +55,11 @@ def record(mode, label, secs, x, z):
         t.twist.linear.x, t.twist.angular.z = cx, cz
         pub.publish(t)
 
+    # 연결 기다림 (11-07: Pi 에선 새 노드가 브리지와 연결되기까지 1~3 s — 그 전 명령은 아무도 못 받음)
+    t_wait = time.time() + 6.0
+    while time.time() < t_wait and (pub.get_subscription_count() == 0 or len(rows) < 5):
+        rclpy.spin_once(n, timeout_sec=0.1)
+    rows.clear()
     print(f"[{label}] 1초 기준 → {'움직임' if mode == 'drive' else '가만히'} {secs:.0f}초 → 1초 정리", flush=True)
     end_pre, end_act = time.time() + 1.0, time.time() + 1.0 + secs
     end_all = end_act + 1.0
