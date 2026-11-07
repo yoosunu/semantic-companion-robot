@@ -36,6 +36,7 @@ import math
 import struct
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -939,11 +940,13 @@ class Whisker(Node):
                     topic = ln.split("=", 1)[1].strip()
         if not topic:
             return
+        # 제목은 URL 에 (11-08: HTTP 헤더는 한글을 못 담아 "구조 요청" 알림이 보내지기도 전에 실패 — 오류를 삼켜서 몰랐음)
+        url = "https://ntfy.sh/" + topic + "?title=" + urllib.parse.quote(title)
         try:
-            urllib.request.urlopen(urllib.request.Request("https://ntfy.sh/" + topic, data=body.encode(), headers={
-                "Title": title, "Priority": "high", "Tags": "warning"}), timeout=10)
-        except Exception:
-            pass
+            urllib.request.urlopen(urllib.request.Request(url, data=body.encode(), headers={
+                "Priority": "high", "Tags": "warning"}), timeout=10)
+        except Exception as e:
+            print(f"[whisker] 알림 실패: {e}", flush=True)
 
 
 def main():
