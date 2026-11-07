@@ -8,6 +8,8 @@
                구별 못 함 → 톡톡(0.5 s 밀고 멈춤) 중 5.3°, 곡선·후진 중 1.6~1.9° 로 방 가운데 분홍 선. efference 원칙과 충돌 → 뺌
     들림       0.3 s 동안 자이로로 실제 기운 각도 1.8° 이상 = 선·문턱을 밟고 올라탐 → 바로 되감기, 일직선 영구 표시
                11-07 실측: 평소 ≤ 1.5° / 굵은 선 2.0~3.9° / 화장실 문턱 4.9°. 얇은 카펫은 못 잡음 (ToF 오면 다시)
+    기운 채    흔들림이 끝난 뒤(자이로 0.5 s 조용) 중력 방향이 출발 전 자세보다 3° 이상 = 천천히 문턱·경사에 올라섬 → 되감기
+               (Jasper 11-08 "캡슐"). 실측: 평소 ≤ 1.2° / 문턱 천천히 5.8° / 선은 안 남음(들림이 맡음)
     안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
@@ -57,6 +59,10 @@ NOMO_S = 1.5                  # s, 안 움직임 판단 창 (11-07 체중계: �
 LIFT_DEG = 1.8                # °, 0.3 s 동안 자이로로 실제 기운 각도(앞뒤+좌우) = 뭔가를 밟고 올라탐
 LIFT_WIN = 0.3                #   11-07 실측: 평소 18개(출발·정지·회전·카펫·상자·손·발·밀기) ≤ 1.5° /
                               #   굵은 선 2.0°(0.05)·3.9°(0.08), 화장실 문턱 4.9°, 체중계에 막힘 1.5°(안 올라탐)
+SLOPE_DEG = 3.0               # °, 흔들림이 끝난 뒤(자이로 0.5 s 조용) 중력 방향이 출발 전 자세보다 이만큼 기운 채 = 문턱·경사에 올라섬
+SLOPE_QUIET, SLOPE_WIN = 1.5, 0.5   # °/s, s — "조용" = 이 창 동안 자이로가 이 아래 (Jasper 11-08 캡슐: 흔들림은 빨리 왔다 돌아가고,
+                              #   올라선 건 기운 채 남는다). 실측: 평소 20개 ≤ 1.2° / 문턱 천천히 5.8°, 빨리 7.9° / 선 ≤ 1.7° (선은 들림이 맡음)
+SLOPE_WATCH = 1.5             # °, 이 이상이면 값만 로그 (톡톡·곡선 주행 기준점 잡기용)
 LIFT_WATCH = 1.0              # °, 이 이상이면 값만 로그 (Nav2 곡선·톡톡에서 얼마나 나오나 — 기록 18개엔 없던 주행)
 NOMO_MIN_LIN, NOMO_MIN_ROT = 0.03, 0.2   # 창 동안 명령의 합(부호 포함): 3 cm·0.2 rad 이상 가라고 했어야 판단 (창 1.5 s 라 느린 0.03 m/s 도 들어오게)
 NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
@@ -117,7 +123,11 @@ class Whisker(Node):
         self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
         self.lift_watch_t = 0.0
         self.lift_t = 0.0
-        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
+        self.grav = collections.deque()      # (t, ax, ay, az, 자이로 크기) 최근 0.5 s — 기운 채 감각
+        self.grav_ref = None                 # 출발 전(멈춰 있고 조용할 때) 중력 방향
+        self.slope_t = 0.0
+        self.slope_watch_t = 0.0
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}, "slope": 0.0}   # 5 s 마다 상태 한 줄 (11-07 23:48: 아무것도 못 느낀 원인 찾기)
         self.pending = None                  # 의심 중인 사건
         self.prev_imu_t = None
         self.last_self = 0.0
@@ -172,8 +182,8 @@ class Whisker(Node):
     def say_diag(self):
         g = self.diag
         self.get_logger().info(f"DIAG 5s: imu {g['imu']} · motor {g['motor']} · 명령중 {g['asked']} · dt=0 {g['dt0']} · "
-                               f"최대 들림 {g['deg']:.1f}° · 안움직임 {g['nomo'] or '-'} · cmd {self.motor[2]:.3f} {self.motor[3]:.2f} · {self.state}")
-        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}}
+                               f"최대 들림 {g['deg']:.1f}° · 최대 기운채 {g['slope']:.1f}° · 안움직임 {g['nomo'] or '-'} · cmd {self.motor[2]:.3f} {self.motor[3]:.2f} · {self.state}")
+        self.diag = {"imu": 0, "motor": 0, "deg": 0.0, "asked": 0, "dt0": 0, "nomo": {}, "slope": 0.0}
 
     def on_motor(self, m):
         self.diag["motor"] += 1
@@ -368,6 +378,8 @@ class Whisker(Node):
         self.prev_imu_t = t_msg
         if self.check_lift(t_msg, now, d[2], d[3], dt):
             return
+        if self.check_slope(t_msg, now, a.x / G, a.y / G, a.z / G, math.hypot(d[2], d[3])):
+            return
         if self.pending:                       # 부딪힘 의심 중: 창이 끝나면 결과(바퀴가 멈췄나)로 판정
             if now - self.pending["t"] >= CONFIRM_S:
                 self.confirm()
@@ -436,6 +448,43 @@ class Whisker(Node):
         self.on_contact(ev, ang)
         return True
 
+    def check_slope(self, t_msg, now, ax, ay, az, gyro):
+        """기운 채 (Jasper 11-08 "캡슐"): 자이로가 0.5 s 조용할 때만 = 흔들림이 끝났을 때만, 가속도(중력 방향)로 본 자세를
+        출발 전 자세와 비교. 3° 이상 기운 채 = 문턱·경사에 올라섬 → 되감기. 오르막·내리막 똑같이 잡힘.
+        가속도계는 우리 가속에 속지만(11-07 톡톡 5.3° 고스트), 그건 흔들림이 있는 동안이라 "조용할 때만" 보면 걸러짐"""
+        self.grav.append((t_msg, ax, ay, az, gyro))
+        while self.grav and t_msg - self.grav[0][0] > SLOPE_WIN:
+            self.grav.popleft()
+        if len(self.grav) < 5 or t_msg - self.grav[0][0] < SLOPE_WIN * 0.8 or max(g[4] for g in self.grav) > SLOPE_QUIET:
+            return False                       # 아직 흔들리는 중
+        v = np.median(np.array([g[1:4] for g in self.grav]), axis=0)
+        v = v / max(float(np.linalg.norm(v)), 1e-6)
+        asked = abs(self.motor[2]) >= 0.01 or abs(self.motor[3]) >= 0.05
+        moving = asked or abs(self.motor[0]) > 1 or abs(self.motor[1]) > 1
+        if self.grav_ref is None:
+            if not moving:
+                self.grav_ref = v
+            return False
+        tilt = math.degrees(math.acos(float(np.clip(np.dot(v, self.grav_ref), -1.0, 1.0))))
+        self.diag["slope"] = max(self.diag["slope"], tilt)
+        if not moving and tilt < SLOPE_DEG and self.state == "drive":
+            self.grav_ref = self.grav_ref + 0.05 * (v - self.grav_ref)   # 멈춰 있을 때 평평한 자세를 따라감 (바닥마다 조금씩 다름)
+            self.grav_ref = self.grav_ref / float(np.linalg.norm(self.grav_ref))
+        if tilt >= SLOPE_WATCH and asked and now - self.slope_watch_t > 1.0:
+            self.slope_watch_t = now
+            self.get_logger().info(f"SLOPE watch {tilt:.1f}° cmd {self.motor[2]:.3f} {self.motor[3]:.2f} {self.state}")
+        if tilt < SLOPE_DEG or not asked or self.state != "drive" or now - self.slope_t < 2.0:
+            return False
+        self.slope_t = self.last_event = now
+        self.pending = None
+        linear = abs(self.motor[2]) >= 0.01
+        ang = (0.0 if self.motor[2] > 0 else math.pi) if linear else 0.0
+        ev = {"ev": "slope", "deg": round(tilt, 1), "dir": side_name(ang) if linear else "turn",
+              "src": "motion" if linear else "turn", "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2),
+              "state": self.state}
+        self.on_contact(ev, ang)
+        return True
+
     def confirm(self):
         p, self.pending = self.pending, None
         ev, kind = p["ev"], p["ev"]["ev"]
@@ -462,12 +511,12 @@ class Whisker(Node):
     # ------------------------------------------------------------------ 반응
     def on_contact(self, ev, ang, cut=None):
         kind = ev["ev"]
-        if self.state == "back" and kind == "lift":
+        if self.state == "back" and kind in ("lift", "slope"):
             return                                   # 빼는 중 기울어짐 = 올라탔던 것에서 내려오는 중
         if self.state in ("stop", "trapped", "help") and kind != "touch":
             return
         half, ttl, feel = MARK_HALF, None, "hard"
-        if kind == "lift":
+        if kind in ("lift", "slope"):
             half = LINE_HALF                         # 올라탐 = 선·문턱 = 일직선, 영구 (Jasper 11-07)
         elif kind == "stuck":                        # 처음 1분, 같은 곳에서 또면 영구
             half = LINE_HALF
