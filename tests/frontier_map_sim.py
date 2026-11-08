@@ -26,4 +26,5 @@ fr = X.find_frontiers()
 print(f"로봇 ({rx}, {ry}) → 경계 {len(fr)}개 (30 cm 이상)")
 for f in sorted(fr, key=lambda f: -f["size"]):
     v = f"관찰점 ({f['vx']:+.2f}, {f['vy']:+.2f}) 경계까지 {math.hypot(f['vx'] - f['x'], f['vy'] - f['y']):.2f} m" if f["vx"] is not None else "관찰점 없음"
+    if f.get("ax") is not None: v += f" / 경계 옆 싼 칸 ({f['ax']:+.2f}, {f['ay']:+.2f}) 경계까지 {math.hypot(f['ax'] - f['x'], f['ay'] - f['y']):.2f} m"
     print(f"   경계 ({f['x']:+.2f}, {f['y']:+.2f}) {f['size']:.2f} m → {v}")

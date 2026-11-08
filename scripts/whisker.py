@@ -22,8 +22,8 @@
   갇힘         같은 자리(30 cm)에서 30 s 안 접촉 4번 = 구조 요청. 빼다가 또 막힘 → 2 cm 이상 뺐으면 방금 뺀 길로 반대로 최대 5 cm → 그래도 막히면 10초 대기 → 다시
                (시도 1: 남은 되감기, 2: 15° 돌고 빼기, 3: 반대로 15°) → 3번 실패 = 구조 요청(ntfy) + 정지
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
-  표시         부딪힘 = 점 10 cm 영구 / 들림 = 선 30 cm 영구 /
-               안 움직임 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
+  표시         부딪힘 = 점 10 cm 영구 / 들림 = 선 15 cm 영구 /
+               안 움직임 = 선 15 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
                /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 1분짜리가 지나면 /whisker/scars 흉터로 (막지 않고 기억만). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
   힘 제한      브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 늦어도 짓누르지 않게
   기록         ~/scr_logs/whisker/<날짜>.jsonl, 로그 줄 "SENSE {...}" (run_report 가 셈)
@@ -54,7 +54,8 @@ G = 9.81
 HALF_L, HALF_W = 0.13, 0.12   # m, 차체 반길이·반폭 (footprint)
 MARK_GAP = 0.03               # m, 몸 바깥으로
 MARK_HALF = 0.05              # m, 점 표시 반폭 → 폭 ~10 cm (의자 다리)
-LINE_HALF = 0.15              # m, 선 표시 반폭 → 폭 ~30 cm (카펫 가장자리·턱은 길다. 11-07 00:36: 10 cm 옆으로 다시 올라탐)
+LINE_HALF = 0.075             # m, 선 표시 반폭 → 폭 ~15 cm (11-07 00:36: 10 cm 옆으로 다시 올라탐 → 30 cm. 11-08 Jasper: 반으로 —
+                             #   30 cm 선이 빨래 건조대 밑 같은 좁은 곳 입구를 통째로 막아 갇힐 수 있음)
 MARK_Z = 0.10                 # m, 장애물 높이 (costmap 높이 필터 안)
 SELF_MASK = 0.4               # s, 우리가 모터를 바꾼 뒤 IMU 무시 (efference copy)
 MOVING_V, MOVING_W = 0.025, 0.10   # 직전 0.5 s 실제로 이만큼 움직였으면 = 굴러가는 중 (부딪힘 조건)
@@ -73,6 +74,8 @@ LIFT_WATCH = 1.0              # °, 이 이상이면 값만 로그 (Nav2 곡선�
 NOMO_MIN_LIN, NOMO_MIN_ROT = 0.03, 0.2   # 창 동안 명령의 합(부호 포함): 3 cm·0.2 rad 이상 가라고 했어야 판단 (창 1.5 s 라 느린 0.03 m/s 도 들어오게)
 NOMO_TURN = 0.05              # rad, 자이로로 3° 이상 돌았으면 움직인 것
 NOMO_MOVE = 0.015             # m, 판단 창(주행 1.5 s · 빼기 2.5 s) 동안 LiDAR 로 잰 이동이 이 미만 = 안 움직임 (느린 건 막힘이 아님)
+MOTOR_OFF_S = 0.3            # s, 판단 창 안에서 브리지가 모터를 완전히 끈(PWM 0) 시간이 이만큼이면 판단 안 함 (11-08 21:15: 후진 명령 −0.05 인데
+                             #   브리지는 약한 PWM → 톡톡 모드 PWM 0 → 안 움직인 게 당연한데 "막힘" → 3시 고스트 흉터)
 NOMO_SHARP = 0.003            # m, 스캔 맞추기 답이 ±3 cm 옆보다 평균 잔차가 이만큼은 작아야 믿음 (특징 없는 곳이면 판단 안 함)
 NOMO_RANGE = 10.0             # m
 NOMO_PTS = 240                # 스캔 한 장에서 쓸 점 수
@@ -134,6 +137,7 @@ class Whisker(Node):
         self.motor_hist = collections.deque()          # (t, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
         self.cmd_hist = collections.deque()            # (t, cmd_x, cmd_z) 최근 NOMO_S + 1 s
         self.pwm_hist = collections.deque()            # (t, pwm_r − pwm_l) — 실제로 모터에 준 회전
+        self.off_hist = collections.deque()            # (t, 모터 완전히 꺼짐?) — efference copy: 명령이 아니라 모터가 받은 것
         self.scans = collections.deque()               # (t, 스캔 점들 (x, y) 몸 기준)
         self.yaw_hist = collections.deque()            # (t, 자이로 방향)
         self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
@@ -226,6 +230,9 @@ class Whisker(Node):
         self.pwm_hist.append((now, d[1] - d[0]))      # 오른쪽 − 왼쪽 = 우리가 실제로 돌리는 방향 (+ = 왼쪽)
         while self.pwm_hist and now - self.pwm_hist[0][0] > NOMO_BACK_S + 1.0:
             self.pwm_hist.popleft()
+        self.off_hist.append((now, d[0] == 0 and d[1] == 0))
+        while self.off_hist and now - self.off_hist[0][0] > NOMO_BACK_S + 1.0:
+            self.off_hist.popleft()
         while self.cmd_hist and now - self.cmd_hist[0][0] > NOMO_BACK_S + 1.0:
             self.cmd_hist.popleft()
 
@@ -389,6 +396,9 @@ class Whisker(Node):
         rot = sum(c[2] * (n[0] - c[0]) for c, n in zip(win, win[1:]))
         if abs(lin) < NOMO_MIN_LIN and abs(rot) < NOMO_MIN_ROT:
             return "명령 적음"                         # 가라고 한 게 너무 적음 (제자리 떨림 등)
+        ov = [o for o in self.off_hist if o[0] >= now - S]
+        if sum(n[0] - c[0] for c, n in zip(ov, ov[1:]) if c[1]) >= MOTOR_OFF_S:
+            return "모터 쉼"                           # 명령은 "가라"인데 브리지가 모터를 껐음 (톡톡 모드) = 안 움직이는 게 정상
         yw = [(t, y) for t, y in self.yaw_hist if t >= now - S]
         if len(yw) < 5:
             return "자이로 기록 짧음"
