@@ -33,16 +33,29 @@ class Handle:
     def get_result_async(s): return s.res
     def cancel_goal_async(s): s.cancelled += 1
 sent = []
+plans = []                                   # 플래너에게 길을 물은 것 [(goal, handle, fut, answered)]
+AUTO = [None]                                # 길 자동 답 (점 목록). None = 답 안 함
 class AC:
-    def __init__(s, *a): pass
+    def __init__(s, node=None, typ=None, name=""): s.name = name
     def server_is_ready(s): return True
     def send_goal_async(s, g):
-        h = Handle(); f = Fut(h); sent.append((g, h, f)); return f
+        h = Handle(); f = Fut(h)
+        (plans if s.name == "compute_path_to_pose" else sent).append([g, h, f, False] if s.name == "compute_path_to_pose" else (g, h, f))
+        return f
+def give_path(pts, status=4):
+    pl = plans[-1]; pl[3] = True; g, h, f, _ = pl
+    if f.cb: f.cb(f)
+    poses = [types.SimpleNamespace(pose=types.SimpleNamespace(position=types.SimpleNamespace(x=x, y=y))) for x, y in pts]
+    h.res.r = types.SimpleNamespace(status=status, result=types.SimpleNamespace(path=types.SimpleNamespace(poses=poses)))
+    if h.res.cb: h.res.cb(h.res)
+def line(a, b, n=None):
+    n = n or max(2, int(math.hypot(b[0] - a[0], b[1] - a[1]) / 0.05) + 1)
+    return [(a[0] + (b[0] - a[0]) * k / (n - 1), a[1] + (b[1] - a[1]) * k / (n - 1)) for k in range(n)]
 mod("rclpy"); mod("rclpy.node", Node=Node); mod("rclpy.action", ActionClient=AC)
 mod("rclpy.qos", DurabilityPolicy=types.SimpleNamespace(TRANSIENT_LOCAL=0), QoSProfile=lambda **k: None,
     ReliabilityPolicy=types.SimpleNamespace(RELIABLE=0))
 mod("rclpy.signals", SignalHandlerOptions=types.SimpleNamespace(NO=0))
-mod("nav2_msgs"); mod("nav2_msgs.action", NavigateToPose=types.SimpleNamespace(Goal=M))
+mod("nav2_msgs"); mod("nav2_msgs.action", NavigateToPose=types.SimpleNamespace(Goal=M), ComputePathToPose=types.SimpleNamespace(Goal=M))
 class TW:
     def __init__(s): s.header = types.SimpleNamespace(); s.twist = types.SimpleNamespace(linear=types.SimpleNamespace(), angular=types.SimpleNamespace())
 for n, it in {"geometry_msgs.msg": ["Point", "PoseStamped", "PoseWithCovarianceStamped"], "nav_msgs.msg": ["OccupancyGrid", "Odometry"],
@@ -80,10 +93,14 @@ def make(frontiers):
     return X
 def move(X, x, y, yaw=0.0): X.odom_hist.append((0, x, y, yaw))
 def ptick(X, n):
-    for _ in range(n): T[0] += 0.1; X.probe_tick()
+    for _ in range(n):
+        T[0] += 0.1; X.probe_tick()
+        if plans and not plans[-1][3] and AUTO[0] is not None and X.probe:
+            give_path(AUTO[0])
 F = lambda: [[{"x": -0.45, "y": 0.36, "size": 0.6, "cells": [(-0.45, 0.36)], "vx": 0.0, "vy": 0.41, "ax": -0.25, "ay": 0.36}]]
 reasons = lambda X: [g["reason"] for g in X.gave_up]
 
+AUTO[0] = line((-0.25, 0.36), (-0.45, 0.36))              # 11시: 경계 옆 칸 → 경계, 곧은 길
 # A) 11시 통로 (11-08 21:15): 관찰점 → 경계 옆 싼 칸 → 더듬기 → 그래도 그대로 → unseen
 fr = F(); X = make(fr); sent.clear(); tick(X, 2); f = sent[-1][2]; f.cb(f)
 ok("A1 처음엔 관찰점 (0.00, 0.41) 으로", goal_xy() == (0.0, 0.41))
@@ -97,11 +114,11 @@ ok("A3 거기서도 그대로 → 더듬기 시작 (Nav2 목표 없음)", X.prob
 cmds.clear(); ptick(X, 12)
 ok("A4 더듬기 전 1.5 s 는 조용 (Nav2 감속 기다림)", cmds == [])
 ptick(X, 10)
-ok("A5 경계가 뒤(왼쪽 뒤)에 있음 → 먼저 제자리에서 왼쪽으로 돎", cmds and cmds[-1][0] == 0.0 and cmds[-1][1] > 0)
+ok("A5 플래너 길 받음 → 길이 뒤쪽 → 먼저 제자리에서 왼쪽으로 돎", len(plans) >= 1 and X.probe["path"] is not None and bool(cmds) and cmds[-1][0] == 0.0 and cmds[-1][1] > 0)
 move(X, -0.25, 0.36, math.pi); cmds.clear(); ptick(X, 3)
 ok("A6 경계 쪽을 봄 → 천천히 직진 0.07", cmds and cmds[-1][0] == 0.07)
-move(X, -0.40, 0.36, math.pi); ptick(X, 2)
-ok("A7 경계 8 cm 안 → 더듬기 끝, 정지", X.probe is None and cmds[-1] == (0.0, 0.0))
+move(X, -0.42, 0.36, math.pi); ptick(X, 2)
+ok("A7 길 끝 6 cm 안 → 더듬기 끝, 정지", X.probe is None and cmds[-1] == (0.0, 0.0))
 tick(X, 9)
 ok("A8 더듬기까지 했는데도 그대로 → unseen 포기", reasons(X) == ["unseen"])
 
@@ -165,6 +182,41 @@ W(X, "back"); answer(5); tick(X, 3)
 ok("K1 집 가다 Whisker → 끝내지 않음", X.phase == "home" and h0.cancelled == 1)
 W(X, "drive"); tick(X, 2)
 ok("K2 돌려받고 다시 집으로", len(sent) == 2 and goal_xy() == (0.0, 0.0))
+
+# L) 관찰점 없음 기록 (11-08 22:14 11시): 초반에 잠깐 없었던 기록이 남아 있다가 가는 중 잠깐 사라지면 바로 포기했음
+fr = [[{"x": -0.77, "y": 0.30, "size": 0.6, "cells": [(-0.77, 0.30)], "vx": None, "vy": None}]]
+X = make(fr); sent.clear(); tick(X, 3)
+fr[0] = [{"x": -0.77, "y": 0.30, "size": 0.6, "cells": [(-0.77, 0.30)], "vx": 0.03, "vy": 0.65}]; tick(X, 2)
+ok("L1 관찰점이 생기면 그리로 출발, 기록 지워짐", goal_xy() == (0.03, 0.65) and X.no_view == {})
+f = sent[-1][2]; f.cb(f)
+fr[0] = [{"x": -0.77, "y": 0.30, "size": 0.6, "cells": [(-0.77, 0.30)], "vx": None, "vy": None}]
+for i in range(40): move(X, 0.0, 0.016 * i); tick(X, 1)                  # 천천히 다가감 (진척 있음)
+ok("L2 가는 중 관찰점이 잠깐 사라져도 (40 s) 포기 안 함", X.gave_up == [] and X.goal is not None)
+fr[0] = [{"x": -0.77, "y": 0.30, "size": 0.6, "cells": [(-0.77, 0.30)], "vx": 0.03, "vy": 0.65}]
+answer(4); tick(X, 9)
+ok("L3 도착 후 그대로 → 2단계로 이어감 (포기 없음)", X.gave_up == [] and (X.goal is not None or X.probe is not None))
+
+# M) 2시 (11-08 22:14): 경계는 북쪽인데 사이에 벽 → 플래너 길(서쪽으로 돌아감)을 따라감, 직진 안 함
+fr = [[{"x": 1.68, "y": 0.30, "size": 0.5, "cells": [(1.68, 0.30)], "vx": 1.27, "vy": 0.30, "ax": 1.48, "ay": 0.45}]]
+X = make(fr); move(X, 1.50, -0.47, math.pi / 2); X.approached.append((1.68, 0.30)); tick(X, 1)
+AUTO[0] = line((1.50, -0.47), (1.30, -0.47)) + line((1.30, -0.42), (1.30, 0.30)) + line((1.35, 0.30), (1.68, 0.30))
+cmds.clear(); ptick(X, 20)
+ok("M 벽 너머 경계 → 직진(북쪽) 말고 길 따라 서쪽으로 먼저 돎", cmds and cmds[-1][0] == 0.0 and cmds[-1][1] > 0)
+# N) 플래너가 길 없음 → no_path / 너무 긴 길 → far
+fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); AUTO[0] = None; ptick(X, 20); give_path([])
+ok("N1 플래너 길 없음 → no_path 포기", reasons(X) == ["no_path"] and X.probe is None)
+fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); ptick(X, 20)
+give_path(line((-0.25, 0.36), (-0.25, 1.36)) + line((-0.25, 1.36), (-0.45, 0.36)))
+ok("N2 길이 1.5 m 넘음 → far 포기 (더듬기 아님)", reasons(X) == ["far"])
+# O) 더듬다 Whisker 가 빼면 → 돌려받은 자리에서 길을 새로 받음
+AUTO[0] = line((-0.25, 0.36), (-0.45, 0.36))
+fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); ptick(X, 20); n0 = len(plans)
+X.on_sense(types.SimpleNamespace(data='{"ev": "bump"}')); W(X, "back"); ptick(X, 30); move(X, -0.15, 0.36); W(X, "drive"); ptick(X, 15)
+ok("O 빼고 돌려받음 → 길 다시 받음, 접촉 1 이어짐", len(plans) == n0 + 1 and X.probe and X.probe["contacts"] == 1)
+# P) 2단계인데 경계에서 멀리(0.8 m 밖) 멈칫 → 더듬지 않고 Nav2 에 계속 맡김
+fr = [[{"x": 1.68, "y": 0.30, "size": 0.5, "cells": [(1.68, 0.30)], "vx": 1.27, "vy": 0.30, "ax": 1.48, "ay": 0.45}]]
+X = make(fr); move(X, 1.50, -0.60); X.viewed.append((1.68, 0.30)); sent.clear(); tick(X, 1); f = sent[-1][2]; f.cb(f); tick(X, 20)
+ok("P 멀리서 20 s 멈칫 → 더듬기 안 함 (45 s 규칙까지 Nav2)", X.probe is None and X.goal is not None and X.gave_up == [])
 
 # C) 1단계에서 경계가 사라지면(보임) 포기 없이 다음
 fr = [[{"x": 1.0, "y": 0.5, "size": 0.5, "cells": [(1.0, 0.5)], "vx": 0.8, "vy": 0.4}]]

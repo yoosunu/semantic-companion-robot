@@ -14,9 +14,11 @@
        Whisker 가 멈춤·빼기·갇힘·구조 요청에 들어가면 목표를 취소(포기 아님) → Whisker 가 돌려주고 1 s 뒤 같은 목표를 다시 보냄.
        그동안 우리 시계(15 s 멈칫·45 s 진척)도 멈춤. 접촉 수는 이어서 셈. 더듬기도 Whisker 가 빼는 동안 시계를 멈춤.
        이유: 빼기·갇힘 대기(10 s)가 Nav2 의 진척 검사(20 s)·복구 동작·우리 타임아웃과 겹쳐 "안 막혔는데 포기"가 될 수 있음
-     단계 (11-08 밤): ① 관찰점에서 봄 → ② 경계에 가장 가까운 싼 칸(비용 < 75)으로 Nav2 → ③ 더듬기: Nav2 를 끄고 경계 쪽으로
-       천천히 최대 30 cm 직진 (Whisker 가 켜져 있음 — 닿으면 Whisker 가 빼고, 2번이면 whisker 포기). 그래도 그대로 → unseen
-       ②에서 15 s 동안 5 cm 도 못 다가가면(Nav2 멈칫 = "어리바리") 기다리지 않고 바로 ③
+     단계 (11-08 밤): ① 관찰점에서 봄 → ② 경계에 가장 가까운 칸(비용 < 85)으로 Nav2 → ③ 더듬기: Nav2 주행(MPPI)을 끄고
+       Nav2 플래너에게 경계까지 "길만" 받아 그 길을 0.07 m/s 로 따라감 (Whisker 켜짐 — 닿으면 Whisker 가 빼고, 돌려주면 그 자리에서
+       길을 다시 받음, 2번이면 whisker 포기). 길 없음 → no_path, 길이 1.5 m 넘음 → far. 다 갔는데 그대로 → unseen
+       (11-08 22:14: 처음엔 직진 → 0.8 m 떨어진 곳에서 LiDAR 가 이미 그린 벽을 들이받음. 길찾기는 플래너, 기어가기는 우리)
+       ②에서 경계 80 cm 안인데 15 s 동안 5 cm 도 못 다가가면(MPPI 멈칫 = "어리바리") 기다리지 않고 바로 ③
        (11-08 21:15: 2단계 목표가 벽에 붙은 경계 칸 자체 → MPPI 가 46 s 동안 들어가지 않고 떨기만 → no_progress 포기 2곳)
      가는 중 그 경계가 지도에서 사라지면 (이미 보임) → 목표 바꿈
   5. 경계 없음 → 집(0,0)으로 → 지도 + 경계(포기 이유) 자동 저장 + 폰 알림. 3분 동안 10 cm 도 못 움직이면 STUCK 알림
@@ -42,7 +44,7 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, PoseStamped, PoseWithCovarianceStamped, TwistStamped
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -69,8 +71,11 @@ CONTACTS = ("bump", "lift", "slope", "stuck", "turn_blocked")   # Whisker v9 의
 CANCEL_WAIT = 15.0       # s, 취소 보냈는데 Nav2 답이 없으면 우리가 정리
 STATUS_S = 30.0          # s, 상태 한 줄 주기
 STALL_S = 15.0           # s, 2단계(경계로 다가감)에서 이만큼 5 cm 도 못 다가가면 Nav2 멈칫 → 바로 더듬기 (45 s 기다리지 않음)
-PROBE_M, PROBE_V = 0.30, 0.07   # 더듬기: 최대 거리 [m], 직진 속도 [m/s] (0.05 아래는 브리지가 톡톡 모드로 바꿈)
-PROBE_S = 25.0           # s, 더듬기 전체 제한
+PROBE_V = 0.07           # m/s, 더듬기 속도 (0.05 아래는 브리지가 톡톡 모드로 바꿈)
+PROBE_NEAR = 0.80        # m, 2단계 멈칫 → 더듬기는 경계에서 이만큼 안일 때만 (멀면 Nav2 에 계속 맡김 → 45 s 규칙)
+PROBE_PATH_MAX = 1.5     # m, 플래너 길이 이보다 길면 더듬기가 아니라 이동 → far 포기
+PROBE_LOOK = 0.12        # m, 길 따라가기: 이만큼 앞의 길 점을 봄
+PROBE_S = 25.0           # s, 더듬기 시간 제한 = 이것 + 길 길이 / 0.05 m/s (Whisker 가 맡는 동안은 멈춤)
 WHISKER_BUSY = ("stop", "back", "trapped", "help")   # Whisker 가 몰고 있는 상태 (pause = 밀림 1 s 정지는 짧아서 Nav2 그대로)
 PROBE_QUIET = 1.5        # s, 더듬기 전 Nav2 가 조용해질 때까지 (취소 후 velocity_smoother 가 0 까지 감속)
 
@@ -161,6 +166,7 @@ class Explorer(Node):
             self.create_subscription(PoseWithCovarianceStamped, t, self.on_map_pose, 10)
         self.marker_pub = self.create_publisher(MarkerArray, "scr_explore/markers", 1)
         self.nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        self.planner = ActionClient(self, ComputePathToPose, "compute_path_to_pose")   # 더듬기: 길만 받음
         self.create_timer(1.0, self.step)
         self.say("시작 — Nav2 기다리는 중")
 
@@ -392,8 +398,15 @@ class Explorer(Node):
                 self.give_up(f["x"], f["y"], "whisker")       # 닿아서 확인한 곳 → 처음부터 제외
                 given.append((f["x"], f["y"]))
                 continue
+            key = next((k for k in self.no_view if math.hypot(k[0] - f["x"], k[1] - f["y"]) < REGION), None)
+            if f["vx"] is not None and key is not None:
+                del self.no_view[key]                          # 관찰점이 다시 생김 → "없음" 기록 지움 (11-08 22:14: 초반 기록이
+                key = None                                     #   남아 있다가 잠깐 사라진 순간 바로 "30 s 지남" → 11시 가는 중 포기)
+            going = self.goal and math.hypot(self.goal["x"] - f["x"], self.goal["y"] - f["y"]) < REGION
+            if f["vx"] is None and going:
+                cands.append(f)                                # 지금 가고 있는 목표는 이 규칙으로 포기하지 않음
+                continue
             if f["vx"] is None:                                # 근처에 안전한 자리가 없음 → 보류, 30 s 계속이면 포기
-                key = next((k for k in self.no_view if math.hypot(k[0] - f["x"], k[1] - f["y"]) < REGION), None)
                 if key is None:
                     self.no_view[(f["x"], f["y"])] = now
                 elif now - self.no_view[key] > NOVIEW_S:
@@ -456,7 +469,7 @@ class Explorer(Node):
             still = any(math.hypot(c[0] - g["x"], c[1] - g["y"]) < 0.3 for f in self.frontiers for c in f["cells"])
             if g["contacts"] >= WHISKER_GIVEUP:
                 self.cancel_goal("whisker")
-            elif g["stage"] == 2 and now - g["best_t"] > STALL_S:
+            elif g["stage"] == 2 and now - g["best_t"] > STALL_S and math.hypot(rx - g["x"], ry - g["y"]) < PROBE_NEAR:
                 self.say(f"경계 옆에서 Nav2 가 {STALL_S:.0f}초 멈칫 → 더듬기로")
                 self.cancel_goal("stall")
             elif now - g["best_t"] > NO_PROGRESS_S:
@@ -473,6 +486,9 @@ class Explorer(Node):
             self.say(f"남은 경계 없음 (포기 {len(self.gave_up)}곳) → 집으로")
             self.phase = "home"
             self.send(0.0, 0.0, rx, ry, home=True)
+            return
+        cands = [f for f in cands if f["vx"] is not None]       # (가는 중 목표 보호용으로 넣은 것은 고를 때 빼기)
+        if not cands:
             return
         best = min(cands, key=lambda f: W_DIST * math.hypot(f["vx"] - rx, f["vy"] - ry) - W_SIZE * f["size"])
         if self.near(best["x"], best["y"], self.reached, 0.3):
@@ -572,9 +588,48 @@ class Explorer(Node):
     # ------------------------------------------------------------------ 더듬기 (3단계)
     def start_probe(self, f):
         now = time.time()
-        self.probe = {"x": f["x"], "y": f["y"], "t0": now, "start": None, "contacts": 0, "going": False,
-                      "quiet_until": now + PROBE_QUIET, "hold": 0.0}
-        self.say(f"더듬기 시작: 경계 ({f['x']:.2f}, {f['y']:.2f}) 쪽으로 천천히 최대 {PROBE_M * 100:.0f} cm (Whisker 켜짐)")
+        self.probe = {"x": f["x"], "y": f["y"], "t0": now, "contacts": 0, "going": False, "quiet_until": now + PROBE_QUIET,
+                      "hold": 0.0, "path": None, "planning": False, "gen": 0, "i": 0, "limit": PROBE_S}
+        self.say(f"더듬기 시작: 경계 ({f['x']:.2f}, {f['y']:.2f}) — 플래너 길을 천천히 따라감 (Whisker 켜짐)")
+
+    def request_path(self):
+        p = self.probe
+        p["planning"], p["path"] = True, None
+        ps = PoseStamped()
+        ps.header.frame_id = "map"
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x, ps.pose.position.y = float(p["x"]), float(p["y"])
+        ps.pose.orientation.w = 1.0
+        g = ComputePathToPose.Goal()
+        g.goal, g.use_start, g.planner_id = ps, False, ""     # 출발 = 지금 로봇 자리. 경계 칸이 비싸도 NavFn 이 0.5 m 안 가까운 칸으로
+        gen = p["gen"]
+        self.planner.send_goal_async(g).add_done_callback(lambda f: self.on_plan_accepted(f, p, gen))
+
+    @safe
+    def on_plan_accepted(self, fut, p, gen):
+        h = fut.result()
+        if not h.accepted:
+            if self.probe is p:
+                self.end_probe("no_path")
+            return
+        h.get_result_async().add_done_callback(lambda f: self.on_plan(f, p, gen))
+
+    @safe
+    def on_plan(self, fut, p, gen):
+        if self.probe is not p or p["gen"] != gen:
+            return                                       # 옛 길 (그 사이 Whisker 가 빼서 다시 받기로 함)
+        p["planning"] = False
+        r = fut.result()
+        poses = r.result.path.poses if r.status == 4 else []
+        pts = [(q.pose.position.x, q.pose.position.y) for q in poses]
+        if len(pts) < 2:
+            return self.end_probe("no_path")
+        length = sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
+        if length > PROBE_PATH_MAX:
+            return self.end_probe("far")
+        p["path"], p["i"] = pts, 0
+        p["limit"] = max(p["limit"], time.time() - p["t0"] + PROBE_S + length / 0.05)
+        self.say(f"더듬기 길 받음: {length:.2f} m, 점 {len(pts)}개")
 
     def drive(self, x, z):
         m = TwistStamped()
@@ -595,29 +650,41 @@ class Explorer(Node):
         if not pose:
             return
         rx, ry, yaw = pose
-        if p["start"] is None:
-            p["start"] = (rx, ry)
         if p["contacts"] >= WHISKER_GIVEUP:
             return self.end_probe("whisker")
         if self.wstate != "drive":
             p["hold"] = now                              # Whisker 가 빼는 중 (브리지는 어차피 Whisker 를 따름) → 기다림
+            if p["path"] is not None or p["planning"]:
+                p["path"], p["planning"], p["gen"] = None, False, p["gen"] + 1   # 빼고 나면 자리가 바뀜 → 길 다시 받기
             p["t0"] += now - p.get("last", now)         # 그동안 더듬기 시계도 멈춤 (빼기·갇힘 대기가 25 s 를 먹지 않게)
             p["last"] = now
             return
         p["last"] = now
         if now - p["hold"] < 1.0:
             return                                       # Whisker 가 막 돌려줌 → 1 s 숨 고르기
-        moved = math.hypot(rx - p["start"][0], ry - p["start"][1])
-        if moved >= PROBE_M or math.hypot(p["x"] - rx, p["y"] - ry) < 0.08:
-            return self.end_probe("다 감")
-        if now - p["t0"] > PROBE_S:
+        if now - p["t0"] > p["limit"]:
             return self.end_probe("시간 끝")
-        err = wrap(math.atan2(p["y"] - ry, p["x"] - rx) - yaw)
-        if not p["going"] and abs(err) > 0.3:            # 먼저 제자리에서 경계 쪽으로 돎 (0.3 rad/s 아래는 바닥선이 세게 돎)
+        if p["path"] is None:
+            if not p["planning"]:
+                self.request_path()                      # 처음, 또는 Whisker 가 뺀 뒤 → 지금 자리에서 길을 새로 받음
+            return
+        pts = p["path"]
+        i = p["i"]
+        while i + 1 < len(pts) and math.hypot(pts[i + 1][0] - rx, pts[i + 1][1] - ry) <= math.hypot(pts[i][0] - rx, pts[i][1] - ry):
+            i += 1                                       # 길 위에서 로봇과 가장 가까운 점 (앞으로만)
+        p["i"] = i
+        if math.hypot(pts[-1][0] - rx, pts[-1][1] - ry) < 0.06:
+            return self.end_probe("다 감")
+        j = i
+        while j + 1 < len(pts) and math.hypot(pts[j][0] - rx, pts[j][1] - ry) < PROBE_LOOK:
+            j += 1
+        err = wrap(math.atan2(pts[j][1] - ry, pts[j][0] - rx) - yaw)
+        if abs(err) > 0.6 or (not p["going"] and abs(err) > 0.3):   # 많이 틀어짐 → 제자리에서 돎 (0.3 rad/s 아래는 바닥선이 세게 돎)
+            p["going"] = False
             self.drive(0.0, math.copysign(max(0.3, min(0.5, 1.2 * abs(err))), err))
             return
-        p["going"] = abs(err) < 0.8
-        self.drive(PROBE_V if p["going"] else 0.0, max(-0.3, min(0.3, 1.0 * err)))
+        p["going"] = True                                # 길 따라가기 (pure pursuit: 곡률 = 2 sin(오차) / 앞보기 거리)
+        self.drive(PROBE_V, max(-0.4, min(0.4, 2 * PROBE_V * math.sin(err) / PROBE_LOOK)))
 
     def end_probe(self, why):
         p, self.probe = self.probe, None
@@ -627,6 +694,9 @@ class Explorer(Node):
             return
         if why == "seen":
             self.say("더듬다가 경계가 보임 → 다음 목표")
+            return
+        if why in ("no_path", "far"):
+            self.give_up(p["x"], p["y"], why)             # 플래너도 길이 없음 = 벽 너머 / 너무 돌아감
             return
         self.reached.append((p["x"], p["y"]))
         self.settle_until = time.time() + SETTLE_S
