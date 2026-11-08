@@ -12,7 +12,8 @@
                (Jasper 11-08 "캡슐"). 실측(명령 중): 평소 ≤ 3.2° / 선 ≤ 2.8° / 올라탄 문턱 5.6~10°
     안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
-  밀림         Nav2 운전 중 1 s 동안 실제 회전(자이로)과 명령 회전의 차이 15°↑ = 누가 밀었음 → 1 s 정지 후 다시 (표시 없음)
+  회전 막힘    Nav2 운전 중 1 s 동안 명령한 회전의 절반도 못 돎 (차이 15°↑) = 곡선·제자리 회전 중 걸림 → 되감기 (길 없으면 15° 되돌림)
+  밀림         같은 비교에서 더 돎·반대로 돎 = 누가 밀었음 → 1 s 정지 후 다시 (표시 없음)
   건드림       서 있을 때 흔들림 하나 = 사건 하나 (캡슐): 잦아들면 시작 전과 비교 → moved(방향 5°·자세 2° 바뀜) / tap / held(10 s)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
@@ -247,9 +248,13 @@ class Whisker(Node):
         if abs(actual - asked) < PUSH_DEG:
             return
         self.push_t = now
-        ev = {"ev": "pushed", "turned_deg": round(actual, 1), "asked_deg": round(asked, 1), "dir": "-", "src": "gyro",
+        # 덜 돎 = 회전이 막힘 (곡선·제자리 회전 중 다리에 걸림) → 접촉. 더 돎·반대로 돎 = 누가 밀었음.
+        #   11-08 측정: 곡선으로 책상 다리에 걸리면 명령 16° 에 실제 0.7° — 예전엔 이걸 pushed 로 불러 1 초 쉬기만 했음
+        under = abs(actual) < 0.5 * abs(asked) and actual * asked >= -abs(asked) * 0.1
+        ev = {"ev": "turn_blocked" if under else "pushed", "turned_deg": round(actual, 1), "asked_deg": round(asked, 1),
+              "dir": "turn", "src": "turn" if under else "gyro",
               "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
-        self.on_contact(ev, 0.0)
+        self.on_contact(ev, 0.0, cut=now - PUSH_S if under else None)
 
     def update_path(self, now):
         """Nav2 가 운전하는 동안 지나온 길. 앞/뒤 방향이 바뀌거나 1 s 넘게 서 있으면 새로 시작"""
@@ -648,6 +653,10 @@ class Whisker(Node):
                 self.trap_mem = (time.time(), pose[1], pose[2], self.spot_n)
             self.episode_hits = 1
             self.esc = self.plan_replay(time.time() if cut is None else cut)
+            if kind == "turn_blocked" and self.esc["len"] < 0.02 and self.odom:
+                # 제자리에서 돌다 막힘 → 되감을 길이 없음 → 돌던 반대로 15° 되돌리기
+                back = -math.copysign(self.back_turn, ev.get("asked_deg", 1.0))
+                self.esc = {"dir": 0, "wps": [(0.0, wrap(self.odom[2] + back))], "len": 0.0, "done": 0.0}
             self.path.clear()
             self.path_sign = 0
             self.go("stop" if kind == "bump" else "back")
