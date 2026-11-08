@@ -51,7 +51,6 @@ NO_PROGRESS_S, PROGRESS_M = 45.0, 0.05   # 11-07: 90 s 는 카펫 표시 너머 
 STUCK_S, STUCK_M = 180.0, 0.10
 REACH_COST = 75          # 전역 비용지도(0~100) 이 미만 = 로봇 중심이 지나갈 수 있는 칸 (몸 외접원 밖 ≈ 78)
 VIEW_COST = 40           # 관찰점은 더 넉넉히 (벽·가구에서 떨어진 곳)
-SEE_R = 0.35             # m, 갈 수 있는 곳에서 이 안의 경계만 = 그 너머는 좁은 틈·구석
 VIEW_MIN, VIEW_MAX = 0.20, 1.00   # m, 관찰점 ↔ 경계 거리
 SETTLE_S = 7.0           # s, 관찰점 도착 후 SLAM 지도 갱신(5 s) 기다림 (11-07 02:25: 도착 즉시 unseen 으로 전부 포기)
 NOVIEW_S = 30.0          # s, 갈 자리가 이만큼 계속 없을 때만 포기 (처음엔 지도가 작아서 잠깐 없을 수 있음)
@@ -190,8 +189,9 @@ class Explorer(Node):
         """explore_lite 의 철학 (11-07 Jasper: "너무 멍청하게 구석에 가려 함"):
           경계 = SLAM 지도의 "아는 빈칸 ↔ 모르는 칸" (채워야 할 건 SLAM 지도. 11-07 02:29: 비용지도는 로봇 따라 움직이는 창이고
                  LiDAR 가 지나간 칸을 빈칸으로 지워서 경계가 안 보임 → 30 초 만에 "경계 없음")
-          1. 그중 로봇에서 "갈 수 있는 칸"(전역 비용지도 < 75)으로 퍼져 닿는 곳 근처만 — 좁은 틈·구석 너머는 없음
-          2. 경계 위가 아니라 경계가 직선으로 보이는 안전한 칸(비용 < 40, 경계에서 가까운 곳) = 관찰점으로 감"""
+          1. 로봇에서 SLAM 빈칸으로 퍼져 닿는 경계 전부 (원본과 같음. 11-08: 비용지도·35 cm 제한으로 지웠던 것 되돌림)
+          2. 경계 위가 아니라 경계가 직선으로 보이는 안전한 칸(비용 < 40, 경계에서 가까운 곳) = 관찰점으로 감 (원본의 약점:
+             목표가 구석·벽 옆에 찍혀 Nav2 가 버벅임 → 우리 방식). 그래도 그대로면 2단계로 경계에 직접"""
         g, cm = self.grid, self.cmap
         if g is None or cm is None:
             return []
@@ -219,13 +219,21 @@ class Explorer(Node):
             if (nxt == reach).all():
                 break
             reach = nxt
-        near = reach.copy()
-        for _ in range(int(SEE_R / res)):
+        # 경계 = 로봇에서 SLAM 지도의 빈칸으로 퍼져서 닿는 "빈칸↔모르는 칸" 전부 (explore_lite 원본과 같음, 거리 제한 없음).
+        #   11-08: 부풀린 비용지도 + "갈 수 있는 칸 35 cm 안" 제한(11-07 내가 붙인 것)이 11시 통로·오른쪽 벽 경계를 지워
+        #   "다 봤다"로 끝냄 → 뺌. 갈 수 있나는 Nav2·Whisker 가 판단하고, 못 가면 이유와 함께 포기
+        free = a == 0
+        seed2 = free & ((yy - r0) ** 2 + (xx - c0) ** 2 <= (0.3 / res) ** 2)
+        near = seed2.copy()
+        while True:
             p = np.pad(near, 1)
-            near = near | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]
+            nxt = (near | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]) & free
+            if (nxt == near).all():
+                break
+            near = nxt
         pad = np.pad(a == -1, 1)
         near_unk = pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
-        fr = (a == 0) & near_unk & near
+        fr = free & near_unk & near
         seen = np.zeros_like(fr)
         safe_r, safe_c = np.nonzero(reach & (cost < VIEW_COST))
         out = []
