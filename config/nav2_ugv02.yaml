@@ -69,7 +69,7 @@ local_costmap:
           expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"   # 252×230 mm (+약간), robot_radius 대신
       inflation_layer:
-        inflation_radius: 0.30           # [m] 시뮬 0.5 → 방이 좁음
+        inflation_radius: 0.25           # [m] 시뮬 0.5 → 방이 좁음 0.30 → 11-08 0.25 (Whisker 가 있으니 벽에 살짝 더. 몸 외접원 0.177)
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:
@@ -102,7 +102,7 @@ global_costmap:
           expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"
       inflation_layer:
-        inflation_radius: 0.30
+        inflation_radius: 0.25           # 11-08 0.30 → 0.25 (지역과 같게)
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:

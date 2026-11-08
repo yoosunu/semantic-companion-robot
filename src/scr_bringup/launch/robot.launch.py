@@ -36,8 +36,9 @@ def generate_launch_description():
         DeclareLaunchArgument("use_lidar", default_value="true"),
         DeclareLaunchArgument("track_width", default_value="0.170",
                               description="/cmd_vel 을 좌우 바퀴 속도로 나눌 때 쓰는 바퀴 간격 [m] (실측)"),
-        DeclareLaunchArgument("drive_mode", default_value="pid",
-                              description="pid = 펌웨어 속도 제어(T:1) / pwm = 저속용 우리 제어(T:11, v5)"),
+        DeclareLaunchArgument("drive_mode", default_value="pwm",
+                              description="pwm = 저속용 우리 제어(T:11, v5, 힘 제한·/motor_out — Whisker 필수) / pid = 펌웨어 속도 제어(T:1). "
+                                          "11-08: 기본이 pid 라 Whisker 시험이 명령을 못 보고 힘 제한도 꺼졌었음 → pwm"),
 
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"robot_description": description}]),
