@@ -60,7 +60,8 @@ W_DIST, W_SIZE = 3.0, 1.0
 WHISKER_GIVEUP = 2       # 가는 중 접촉 이만큼이면 포기
 NO_PROGRESS_S, PROGRESS_M = 45.0, 0.05   # 11-07: 90 s 는 카펫 표시 너머 목표에 98 s 버팀
 STUCK_S, STUCK_M = 180.0, 0.10
-REACH_COST = 75          # 전역 비용지도(0~100) 이 미만 = 로봇 중심이 지나갈 수 있는 칸 (몸 외접원 밖 ≈ 78)
+REACH_COST = 99          # 전역 비용지도(0~100) 이 미만 = Nav2 플래너가 지나갈 수 있는 칸 (99 = 몸이 닿음). 11-08 23:38 거실: 75 는 플래너보다
+                         #   엄격해서 30~36 cm 틈(비용 75~98)을 "못 감"으로 봄 → 다른 방 경계 9곳이 관찰점 없음(no_view)으로 한꺼번에 포기
 APPROACH_COST = 85       # 2단계 "경계 옆 칸"은 더 비싸도 됨 (Jasper 11-08: "안전하게 부딪히면 된다 — 비용이 너무 높지 않으면 가 보자").
                          #   85 ≈ 몸 중심이 벽에서 16 cm (몸 옆면 3~4 cm 틈, 돌 때 모서리가 스칠 수 있음 → Whisker). 99 = 몸이 벽에 닿음
 VIEW_COST = 40           # 관찰점은 더 넉넉히 (벽·가구에서 떨어진 곳)
@@ -73,7 +74,8 @@ STATUS_S = 30.0          # s, 상태 한 줄 주기
 STALL_S = 15.0           # s, 2단계(경계로 다가감)에서 이만큼 5 cm 도 못 다가가면 Nav2 멈칫 → 바로 더듬기 (45 s 기다리지 않음)
 PROBE_V = 0.07           # m/s, 더듬기 속도 (0.05 아래는 브리지가 톡톡 모드로 바꿈)
 PROBE_NEAR = 0.80        # m, 2단계 멈칫 → 더듬기는 경계에서 이만큼 안일 때만 (멀면 Nav2 에 계속 맡김 → 45 s 규칙)
-PROBE_PATH_MAX = 1.5     # m, 플래너 길이 이보다 길면 더듬기가 아니라 이동 → far 포기
+PROBE_PATH_MAX = 2.5     # m, 플래너 길이 이보다 길면 더듬기가 아니라 이동 → far 포기 (11-08 23:38: 1.5 는 가구 뒤 경계에서 2번 걸림)
+VIEW_NEAR = 0.50         # m, 1단계: 관찰점 이만큼 안에서 15 s 멈칫(MPPI 가 거의 0 명령) → 도착으로 봄 (거의 같은 자리에서 봄)
 PROBE_LOOK = 0.12        # m, 길 따라가기: 이만큼 앞의 길 점을 봄
 PROBE_S = 25.0           # s, 더듬기 시간 제한 = 이것 + 길 길이 / 0.05 m/s (Whisker 가 맡는 동안은 멈춤)
 WHISKER_BUSY = ("stop", "back", "trapped", "help")   # Whisker 가 몰고 있는 상태 (pause = 밀림 1 s 정지는 짧아서 Nav2 그대로)
@@ -150,6 +152,7 @@ class Explorer(Node):
         self.errors = 0
         self.settle_until = 0.0
         self.no_view = {}                        # (x, y) 경계 → 처음 "갈 자리 없음" 본 시각 (보류)
+        self.idle_t = None                       # 갈 데가 보류 경계뿐인 상태가 시작된 시각
         self.last_status = time.time()
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
@@ -335,6 +338,10 @@ class Explorer(Node):
                 f["ax"], f["ay"] = ox + (reach_c[i] + 0.5) * res, oy + (reach_r[i] + 0.5) * res
             if vp:
                 f["vx"], f["vy"] = ox + (vp[1] + 0.5) * res, oy + (vp[0] + 0.5) * res
+            elif len(safe_r):                             # 왜 없는지 (no_view 로그용): 갈 수 있는 안전한 칸이 경계에서 얼마나 먼가
+                f["why"] = f"가장 가까운 안전 칸 {float(np.min(np.hypot(safe_r - gr, safe_c - gc))) * res:.2f} m"
+            else:
+                f["why"] = "갈 수 있는 안전 칸 0개"
             out.append(f)
         return out
 
@@ -364,9 +371,9 @@ class Explorer(Node):
     def near(x, y, pts, r=REGION):
         return any(math.hypot(x - p[0], y - p[1]) < r for p in pts)
 
-    def give_up(self, x, y, reason):
+    def give_up(self, x, y, reason, why=None):
         self.gave_up.append({"x": round(x, 3), "y": round(y, 3), "reason": reason})
-        self.say(f"포기 ({reason}) @({x:.2f}, {y:.2f}) — 지금까지 포기 {len(self.gave_up)}곳", warn=True)
+        self.say(f"포기 ({reason}{', ' + why if why else ''}) @({x:.2f}, {y:.2f}) — 지금까지 포기 {len(self.gave_up)}곳", warn=True)
 
     # ------------------------------------------------------------------ 한 걸음 (1 s 마다)
     @safe
@@ -407,16 +414,27 @@ class Explorer(Node):
             if f["vx"] is None and going:
                 cands.append(f)                                # 지금 가고 있는 목표는 이 규칙으로 포기하지 않음
                 continue
-            if f["vx"] is None:                                # 근처에 안전한 자리가 없음 → 보류, 30 s 계속이면 포기
+            if f["vx"] is None:                                # 근처에 안전한 자리가 없음 → 보류 (다른 데 다 보고도 30 s 그대로면 포기)
                 if key is None:
                     self.no_view[(f["x"], f["y"])] = now
-                elif now - self.no_view[key] > NOVIEW_S:
-                    self.give_up(f["x"], f["y"], "no_view")
-                    given.append((f["x"], f["y"]))
-                    del self.no_view[key]
                 held.append(f)
                 continue
             cands.append(f)
+        # no_view 포기는 "할 일이 없을 때"만 센다 (11-08 23:38 거실: 다른 곳을 보러 가는 동안 30 s 가 지나 9곳 한꺼번에 포기.
+        #   돌아다니면 지도·비용지도가 바뀌어 관찰점이 생길 수 있음)
+        busy = self.goal or self.probe or self.paused or now < self.settle_until or any(f["vx"] is not None for f in cands)
+        if busy or not held:
+            self.idle_t = None
+        elif self.idle_t is None:
+            self.idle_t = now
+        elif now - self.idle_t > NOVIEW_S:
+            for f in held:
+                self.give_up(f["x"], f["y"], "no_view", f.get("why"))
+                given.append((f["x"], f["y"]))
+                k = next((k for k in self.no_view if math.hypot(k[0] - f["x"], k[1] - f["y"]) < REGION), None)
+                if k:
+                    del self.no_view[k]
+            held, self.idle_t = [], None
         self.publish_markers()
 
         if self.phase == "home":
@@ -438,6 +456,9 @@ class Explorer(Node):
             self.say(f"취소 답이 {CANCEL_WAIT:.0f}초 넘게 없음 → 우리가 정리", warn=True)
             if g["cancel_reason"] == "pause":
                 self.paused = g
+            elif g["cancel_reason"] == "near":
+                self.viewed.append((g["x"], g["y"]))
+                self.settle_until = now + SETTLE_S
             elif g["cancel_reason"] == "stall":
                 self.approached.append((g["x"], g["y"]))
             elif g["cancel_reason"] != "replan":
@@ -473,6 +494,9 @@ class Explorer(Node):
             elif g["stage"] == 2 and now - g["best_t"] > STALL_S and math.hypot(rx - g["x"], ry - g["y"]) < PROBE_NEAR:
                 self.say(f"경계 옆에서 Nav2 가 {STALL_S:.0f}초 멈칫 → 더듬기로")
                 self.cancel_goal("stall")
+            elif g["stage"] == 1 and now - g["best_t"] > STALL_S and math.hypot(rx - g["vx"], ry - g["vy"]) < VIEW_NEAR:
+                self.say(f"관찰점 {math.hypot(rx - g['vx'], ry - g['vy']):.2f} m 앞에서 Nav2 가 {STALL_S:.0f}초 멈칫 → 여기서 본 걸로")
+                self.cancel_goal("near")                   # (11-08 23:38: 37 cm 앞에서 MPPI 0 명령 45 s → no_progress 포기)
             elif now - g["best_t"] > NO_PROGRESS_S:
                 self.cancel_goal("no_progress")
             elif not still:
@@ -481,7 +505,7 @@ class Explorer(Node):
             return
         if not cands and held:
             if int(now) % 5 == 0:
-                self.say(f"갈 자리 없는 경계 {len(held)}곳 보류 중 ({NOVIEW_S:.0f}초 지나면 포기)")
+                self.say(f"갈 자리 없는 경계 {len(held)}곳 보류 중 (할 일 없이 {NOVIEW_S:.0f}초 지나면 포기)")
             return
         if not cands:
             self.say(f"남은 경계 없음 (포기 {len(self.gave_up)}곳) → 집으로")
@@ -574,7 +598,11 @@ class Explorer(Node):
         if g.get("cancel_reason") == "pause":
             self.paused = g                                     # 포기 아님 → Whisker 가 돌려주면 다시 보냄
             return
-        if g.get("cancel_reason") == "stall":
+        if g.get("cancel_reason") == "near":
+            self.viewed.append((g["x"], g["y"]))                # 관찰점 바로 앞 = 거기서 본 것과 같음 → 지도 기다렸다 다음 단계
+            self.settle_until = time.time() + SETTLE_S
+            self.say(f"관찰점 앞에서 봄 (경계 {g['x']:.2f}, {g['y']:.2f}) — 지도 갱신 {SETTLE_S:.0f}초 기다림")
+        elif g.get("cancel_reason") == "stall":
             self.approached.append((g["x"], g["y"]))            # 포기 아님 → 다음 걸음에서 더듬기
         elif status == 4:
             (self.approached if g.get("stage") == 2 else self.viewed).append((g["x"], g["y"]))
@@ -627,6 +655,7 @@ class Explorer(Node):
             return self.end_probe("no_path")
         length = sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
         if length > PROBE_PATH_MAX:
+            self.say(f"더듬기 길 {length:.2f} m > {PROBE_PATH_MAX} m")
             return self.end_probe("far")
         p["path"], p["i"] = pts, 0
         p["limit"] = max(p["limit"], time.time() - p["t0"] + PROBE_S + length / 0.05)

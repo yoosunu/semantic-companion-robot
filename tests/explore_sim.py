@@ -206,8 +206,8 @@ ok("M 벽 너머 경계 → 직진(북쪽) 말고 길 따라 서쪽으로 먼저
 fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); AUTO[0] = None; ptick(X, 20); give_path([])
 ok("N1 플래너 길 없음 → no_path 포기", reasons(X) == ["no_path"] and X.probe is None)
 fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); ptick(X, 20)
-give_path(line((-0.25, 0.36), (-0.25, 1.36)) + line((-0.25, 1.36), (-0.45, 0.36)))
-ok("N2 길이 1.5 m 넘음 → far 포기 (더듬기 아님)", reasons(X) == ["far"])
+give_path(line((-0.25, 0.36), (-0.25, 1.86)) + line((-0.25, 1.86), (-0.45, 0.36)))
+ok("N2 길이 2.5 m 넘음 → far 포기 (더듬기 아님)", reasons(X) == ["far"])
 # O) 더듬다 Whisker 가 빼면 → 돌려받은 자리에서 길을 새로 받음
 AUTO[0] = line((-0.25, 0.36), (-0.45, 0.36))
 fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1); ptick(X, 20); n0 = len(plans)
@@ -222,6 +222,23 @@ ok("P 멀리서 20 s 멈칫 → 더듬기 안 함 (45 s 규칙까지 Nav2)", X.p
 fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1)
 fr[0] = [{"x": -0.55, "y": 0.30, "size": 0.5, "cells": [(-0.55, 0.30), (-0.45, 0.36)], "vx": None, "vy": None}]; AUTO[0] = None; tick(X, 40)
 ok("Q 더듬는 중 옆 경계(10 cm) 관찰점 40 s 없음 → 포기 안 함", X.gave_up == [] and X.probe is not None)
+
+# R) 거실 (11-08 23:38): 관찰점 없는 먼 경계 → 다른 곳 보러 다니는 동안은 포기 안 함, 할 일 없이 30 s 면 이유와 함께 포기
+fr = [[{"x": 1.0, "y": 0.5, "size": 0.5, "cells": [(1.0, 0.5)], "vx": 0.8, "vy": 0.4},
+       {"x": -1.3, "y": 2.0, "size": 3.0, "cells": [(-1.3, 2.0)], "vx": None, "vy": None, "why": "가장 가까운 안전 칸 1.40 m"}]]
+X = make(fr); sent.clear(); tick(X, 2); f = sent[-1][2]; f.cb(f)
+for i in range(60): move(X, 0.013 * i, 0.006 * i); tick(X, 1)
+ok("R1 다른 경계로 가는 60 s 동안 먼 경계 포기 안 함", X.gave_up == [])
+fr[0] = fr[0][1:]; answer(5); tick(X, 25)
+ok("R2 할 일 없이 25 s → 아직 보류", X.gave_up == [])
+tick(X, 10)
+ok("R3 할 일 없이 30 s 넘음 → no_view 포기 (이유 로그)", reasons(X) == ["no_view"] and any("1.40 m" in l for l in X.logs))
+# S) 1단계: 관찰점 37 cm 앞에서 MPPI 멈칫 15 s → 본 걸로 (45 s no_progress 포기 아님)
+fr = [[{"x": 5.14, "y": 1.04, "size": 0.5, "cells": [(5.14, 1.04)], "vx": 4.69, "vy": 0.79}]]
+X = make(fr); move(X, 4.64, 0.42); sent.clear(); tick(X, 2); f = sent[-1][2]; f.cb(f); tick(X, 16)
+ok("S1 관찰점 앞 15 s 멈칫 → 취소 (near)", X.goal and X.goal.get("cancel_reason") == "near")
+answer(5); tick(X, 9)
+ok("S2 포기 없이 '봤음' → 2단계로", X.gave_up == [] and X.near(5.14, 1.04, X.viewed) and (X.goal is not None or X.probe is not None))
 
 # C) 1단계에서 경계가 사라지면(보임) 포기 없이 다음
 fr = [[{"x": 1.0, "y": 0.5, "size": 0.5, "cells": [(1.0, 0.5)], "vx": 0.8, "vy": 0.4}]]
