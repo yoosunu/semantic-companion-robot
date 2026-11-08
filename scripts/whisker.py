@@ -650,6 +650,12 @@ class Whisker(Node):
         #   돌아갈 길을 스스로 막았음)
         backing = self.state == "back"
         ev["marked"] = kind not in ("touch", "pushed") and ev.get("src") == "motion" and not backing and self.mark(ang, ttl, half)
+        if kind == "turn_blocked" and not backing and not ev["marked"]:
+            pose = self.map_pose()                   # 회전 막힘: 어느 쪽이 닿았는지 몰라 장애물로는 안 그림 → 그 자리를 흉터로만 기억
+            if pose and pose[0] == "map":            #   (11-08 22:54: 3시 수건에서 회전 막힘 2번으로 포기했는데 지도엔 흔적 없음)
+                self.scars.append((pose[1], pose[2], time.time()))
+                ev["scar"] = True
+                self.publish_cloud()
         self.record(ev)
         if kind == "touch" or not self.react:
             return

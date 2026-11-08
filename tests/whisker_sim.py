@@ -144,7 +144,8 @@ def scenes():
     s = Sim(); s.run(40, nav=(0.05, 0.3)); s.run(40, nav=(0.05, 0.3), block=True); s.run(80)
     R.append(check("16 곡선 중 걸림 → turn_blocked → 되감기", s, None, ["turn_blocked"], ["pushed"]) and "back" in s.states)
     s = Sim(); s.run(30, nav=(0.0, 0.3), block=True); s.run(80)
-    R.append(check("17 제자리 회전 막힘 → turn_blocked → 15° 되돌림", s, None, ["turn_blocked"], ["pushed"]) and "back" in s.states)
+    R.append(check("17 제자리 회전 막힘 → turn_blocked → 15° 되돌림, 흉터만 (장애물 아님)", s, None, ["turn_blocked"], ["pushed"]) and "back" in s.states
+             and len(s.W.scars) >= 1 and not any(e.get("marked") for e in s.ev if e["ev"] == "turn_blocked"))
     s = Sim(); s.run(80, nav=(-0.015, 0.07), floor_z=0.33)
     R.append(check("18 Nav2 는 살짝(z 0.07), 브리지는 바닥선으로 세게 돎 → 아무 일 없음", s, "drive", no_ev=["pushed", "turn_blocked"]))
     s = Sim(); s.run(21, nav=(-0.05, 0.05), block=True); s.run(20, nav=(-0.05, 0.05), off=True); s.run(20)

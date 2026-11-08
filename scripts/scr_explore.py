@@ -402,7 +402,8 @@ class Explorer(Node):
             if f["vx"] is not None and key is not None:
                 del self.no_view[key]                          # 관찰점이 다시 생김 → "없음" 기록 지움 (11-08 22:14: 초반 기록이
                 key = None                                     #   남아 있다가 잠깐 사라진 순간 바로 "30 s 지남" → 11시 가는 중 포기)
-            going = self.goal and math.hypot(self.goal["x"] - f["x"], self.goal["y"] - f["y"]) < REGION
+            going = any(t and math.hypot(t["x"] - f["x"], t["y"] - f["y"]) < REGION for t in (self.goal, self.probe, self.paused))
+            #   (11-08 22:54: 더듬는 중 10 cm 옆 경계가 no_view 로 따로 포기됨 → 더듬기·쉬는 목표도 보호)
             if f["vx"] is None and going:
                 cands.append(f)                                # 지금 가고 있는 목표는 이 규칙으로 포기하지 않음
                 continue

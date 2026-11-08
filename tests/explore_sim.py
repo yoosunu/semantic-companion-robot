@@ -218,6 +218,11 @@ fr = [[{"x": 1.68, "y": 0.30, "size": 0.5, "cells": [(1.68, 0.30)], "vx": 1.27, 
 X = make(fr); move(X, 1.50, -0.60); X.viewed.append((1.68, 0.30)); sent.clear(); tick(X, 1); f = sent[-1][2]; f.cb(f); tick(X, 20)
 ok("P 멀리서 20 s 멈칫 → 더듬기 안 함 (45 s 규칙까지 Nav2)", X.probe is None and X.goal is not None and X.gave_up == [])
 
+# Q) 더듬는 중 바로 옆 경계가 관찰점 없음 → 따로 포기하지 않음 (11-08 22:54 11시 포기 2개)
+fr = F(); X = make(fr); move(X, -0.25, 0.36); X.approached.append((-0.45, 0.36)); tick(X, 1)
+fr[0] = [{"x": -0.55, "y": 0.30, "size": 0.5, "cells": [(-0.55, 0.30), (-0.45, 0.36)], "vx": None, "vy": None}]; AUTO[0] = None; tick(X, 40)
+ok("Q 더듬는 중 옆 경계(10 cm) 관찰점 40 s 없음 → 포기 안 함", X.gave_up == [] and X.probe is not None)
+
 # C) 1단계에서 경계가 사라지면(보임) 포기 없이 다음
 fr = [[{"x": 1.0, "y": 0.5, "size": 0.5, "cells": [(1.0, 0.5)], "vx": 0.8, "vy": 0.4}]]
 X = make(fr); sent.clear(); tick(X, 2); f = sent[-1][2]; f.cb(f); fr[0] = []; tick(X, 1); answer(5); tick(X, 2)
