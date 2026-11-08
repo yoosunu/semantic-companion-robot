@@ -107,7 +107,9 @@ class Explorer(Node):
         self.cmap = None                         # 전역 비용지도 (경계·관찰점은 이걸로: 팽창·Whisker 표시 포함)
         self.whisker = []                        # [(x, y)] Whisker 표시
         self.gave_up = []                        # [{"x","y","reason"}]
-        self.reached = []                        # 도착했던 목표 (x, y)
+        self.viewed = []                         # 1단계: 관찰점에서 본 경계 (x, y)
+        self.reached = []                        # 2단계: 경계 칸까지 직접 간 경계 (x, y)
+        # 11-08: 예전엔 관찰점 도착도 reached 에 넣어 "가 봤다"로 기억 → 통로에 들어가 보지도 않고 unseen (11시)
         self.frontiers = []                      # 마지막으로 찾은 [{"x","y","size","cells":[(x,y)]}]
         self.goal = None                         # {"x","y","t0","best","best_t","contacts","handle"}
         self.phase = "explore"                   # explore → home → done
@@ -371,12 +373,18 @@ class Explorer(Node):
             return
         best = min(cands, key=lambda f: W_DIST * math.hypot(f["vx"] - rx, f["vy"] - ry) - W_SIZE * f["size"])
         if self.near(best["x"], best["y"], self.reached, 0.3):
-            self.give_up(best["x"], best["y"], "unseen")     # 관찰점에 갔는데 그대로 = LiDAR 로 못 보는 곳
+            self.give_up(best["x"], best["y"], "unseen")     # 경계까지 직접 갔는데도 그대로 = LiDAR 로 못 보는 곳
             return
-        self.send(best["x"], best["y"], rx, ry, view=(best["vx"], best["vy"]))
+        if self.near(best["x"], best["y"], self.viewed, 0.3):
+            # 2단계: 관찰점에서 봤는데 그대로 → 경계 칸으로 직접 가 봄. 가다 Whisker 2번 → whisker / 길 없음 → no_path /
+            #   45 s 못 다가감 → no_progress / 가서도 그대로 → unseen (Jasper 11-08: "들어가려다 위스커로 포기")
+            self.say(f"봤는데 그대로 → 경계로 직접 가 봄 ({best['x']:.2f}, {best['y']:.2f})")
+            self.send(best["x"], best["y"], rx, ry, view=None, stage=2)
+            return
+        self.send(best["x"], best["y"], rx, ry, view=(best["vx"], best["vy"]), stage=1)
 
     # ------------------------------------------------------------------ Nav2
-    def send(self, x, y, rx, ry, home=False, view=None):
+    def send(self, x, y, rx, ry, home=False, view=None, stage=1):
         """x, y = 경계 (포기·기억은 경계 기준), view = 실제로 갈 관찰점"""
         vx, vy = view if view else (x, y)
         ps = PoseStamped()
@@ -388,9 +396,9 @@ class Explorer(Node):
         goal = NavigateToPose.Goal()
         goal.pose = ps
         if not home:
-            self.goal = {"x": x, "y": y, "vx": vx, "vy": vy, "t0": time.time(), "best": math.hypot(vx - rx, vy - ry),
+            self.goal = {"x": x, "y": y, "vx": vx, "vy": vy, "stage": stage, "t0": time.time(), "best": math.hypot(vx - rx, vy - ry),
                          "best_t": time.time(), "contacts": 0, "handle": None, "cancel_reason": None}
-            self.say(f"목표 경계 ({x:.2f}, {y:.2f}) ← 관찰점 ({vx:.2f}, {vy:.2f}) — 거리 {math.hypot(vx - rx, vy - ry):.2f} m")
+            self.say(f"목표 경계 ({x:.2f}, {y:.2f}) ← {'관찰점' if stage == 1 else '직접'} ({vx:.2f}, {vy:.2f}) — 거리 {math.hypot(vx - rx, vy - ry):.2f} m")
         g = None if home else self.goal
         fut = self.nav.send_goal_async(goal)
         fut.add_done_callback(lambda f: self.on_accepted(f, home, g))
@@ -431,9 +439,10 @@ class Explorer(Node):
         self.goal = None
         self.say(f"Nav2 답: {dict(((4, '도착'), (5, '취소됨'), (6, '실패'))).get(status, status)}")
         if status == 4:
-            self.reached.append((g["x"], g["y"]))
+            (self.reached if g.get("stage") == 2 else self.viewed).append((g["x"], g["y"]))
             self.settle_until = time.time() + SETTLE_S
-            self.say(f"관찰점 도착 (경계 {g['x']:.2f}, {g['y']:.2f}) — 지도 갱신 {SETTLE_S:.0f}초 기다림")
+            where = "경계까지 직접" if g.get("stage") == 2 else "관찰점"
+            self.say(f"{where} 도착 (경계 {g['x']:.2f}, {g['y']:.2f}) — 지도 갱신 {SETTLE_S:.0f}초 기다림")
         elif g.get("cancel_reason") and g["cancel_reason"] != "replan":
             self.give_up(g["x"], g["y"], g["cancel_reason"])
         elif status == 6:
