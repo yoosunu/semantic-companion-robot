@@ -115,6 +115,9 @@ global_costmap:
 
 collision_monitor:                       # 마지막 안전망: 로봇 바로 앞 상자 안에 점이 생기면 정지/감속
   ros__parameters:
+    polygons: ["PolygonSlow"]            # 11-08 Jasper: 정지 상자(PolygonStop)·접근 제한(FootprintApproach) 끔. Whisker + 힘 제한이
+                                         #   "닿아도 안전하게"를 맡음. 좁은 곳(11시 입구, 좌우 여유 3 cm)에서 둘이 전진·후진·회전을
+                                         #   다 막아 6 분 얼어붙음 (20:55 탐색). 너무 박고 다니면 그때 다시 켤 것
     scan:
       source_timeout: 0.5                # [s] 원본 0.2. 실물 라이다는 늘 0.22~0.23 s 늦게 도착(스캔 시작 시각 표시 + 전달)
                                          #     → 0.2 면 "못 믿을 라이다" → 정지 → 재출발 반복 = 덜컥거림 (10-31 첫 Nav2 목표: 7번)

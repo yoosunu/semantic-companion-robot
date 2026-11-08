@@ -615,6 +615,24 @@ Visualization Manager:
     Position Transformer: XYZ
     Use Fixed Frame: true
     Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Enabled: true
+    Name: Whisker 흉터 (막지 않음)
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /whisker/scars
+    Style: Spheres
+    Size (m): 0.06
+    Color Transformer: FlatColor
+    Color: 150; 150; 150
+    Alpha: 1
+    Decay Time: 0
+    Position Transformer: XYZ
+    Use Fixed Frame: true
+    Value: true
   - Class: rviz_default_plugins/MarkerArray
     Enabled: true
     Name: SCR explore

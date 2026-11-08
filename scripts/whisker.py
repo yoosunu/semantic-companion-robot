@@ -13,7 +13,7 @@
     안 움직임  움직이라는 명령이 1.5 s 이어졌는데 LiDAR 스캔 맞추기로 잰 이동이 1.5 cm 미만이고 자이로도 3° 도 안 돎
                = 헛바퀴·막힘·손으로 막음. 바퀴 거리계는 안 믿음 (11-07 00:36: 헛바퀴를 거리계가 "움직임"으로 봐서 놓침)
   회전 막힘    Nav2 운전 중 1 s 동안 명령한 회전의 절반도 못 돎 (차이 15°↑) = 곡선·제자리 회전 중 걸림 → 되감기 (길 없으면 15° 되돌림)
-  밀림         같은 비교에서 더 돎·반대로 돎 = 누가 밀었음 → 1 s 정지 후 다시 (표시 없음)
+  밀림         같은 비교에서 더 돎·반대로 돎, 그리고 모터 좌우 PWM 으로도 우리가 그쪽으로 돌린 게 아님 = 누가 밀었음 → 1 s 정지
   건드림       서 있을 때 흔들림 하나 = 사건 하나 (캡슐): 잦아들면 시작 전과 비교 → moved(방향 5°·자세 2° 바뀜) / tap / held(10 s)
   탈출 하나    Nav2 를 끊고 지나온 길을 되감음 (Jasper 11-07). 들어올 때 기록한 자이로 방향을 거꾸로 따라가며 후진.
                헛도는 쪽이 있어 차체가 틀어지면 방향 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 → 들어온 곡선 그대로 나옴.
@@ -24,7 +24,7 @@
                풀기: ros2 topic pub --once /whisker/resume std_msgs/msg/Empty
   표시         부딪힘 = 점 10 cm 영구 / 들림 = 선 30 cm 영구 /
                안 움직임 = 선 30 cm 1분, 같은 곳(30 cm 안)에서 또 = 영구 ("헛돌면 못 가는 구역")
-               /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
+               /whisker/cloud → costmap whisker_layer (LiDAR 가 못 지움). 1분짜리가 지나면 /whisker/scars 흉터로 (막지 않고 기억만). 지우기: ros2 topic pub --once /whisker/clear std_msgs/msg/Empty
   힘 제한      브리지 v8.1: PWM ≤ 40 직진 / ≤ 55 회전 — 감지가 늦어도 짓누르지 않게
   기록         ~/scr_logs/whisker/<날짜>.jsonl, 로그 줄 "SENSE {...}" (run_report 가 셈)
 
@@ -86,6 +86,7 @@ HIST_S = 10.0                 # s, 지나온 길 기록 길이
 IDLE_RESET = 1.0              # s, 이만큼 서 있으면 지나온 길 새로 시작
 PUSH_DEG, PUSH_S = 15.0, 1.0  # 1 s 동안 실제 회전(자이로)과 명령한 회전의 차이가 15° 넘음 = 누가 밀었음 → 1 s 정지 (Jasper 11-08)
 PAUSE_S = 1.0                 #   (제자리 회전 0.25 rad/s 가 완전히 헛돌아도 차이 14° → 안 걸림)
+PUSH_OURS = 3.0               # PWM·s, 1 s 동안 좌우 PWM 차이의 합이 이 이상이고 회전과 같은 방향 = 우리가 돌린 것
 REBOUND_MAX = 0.05            # m
 TRAP_MEM_S, TRAP_MEM_R = 30.0, 0.30   # 같은 자리(30 cm)에서 30 s 안에 접촉이 이어지면 계속 셈 → 4 번째 = 구조 요청
 SPOT_HELP = 4                 #   (11-08 실기·흉내: 좁은 틈에선 몇 cm 는 늘 움직여서 "빠짐"이 됨 → 횟수가 0 으로 → 영원히 왔다 갔다)
@@ -132,6 +133,7 @@ class Whisker(Node):
         self.motor = [0.0] * 5               # /motor_out [pwm_l, pwm_r, cmd_x, cmd_z, whisker_active]
         self.motor_hist = collections.deque()          # (t, pwm_l, pwm_r, cmd_x, cmd_z) 최근 0.4 s
         self.cmd_hist = collections.deque()            # (t, cmd_x, cmd_z) 최근 NOMO_S + 1 s
+        self.pwm_hist = collections.deque()            # (t, pwm_r − pwm_l) — 실제로 모터에 준 회전
         self.scans = collections.deque()               # (t, 스캔 점들 (x, y) 몸 기준)
         self.yaw_hist = collections.deque()            # (t, 자이로 방향)
         self.lift_hist = collections.deque()  # (t, 좌우 °/s, 앞뒤 °/s, dt) 최근 0.3 s
@@ -174,7 +176,9 @@ class Whisker(Node):
         self.trapped = 0
         self.left_hits, self.right_hits = 0, 0
         # 기억
-        self.points = []                     # (x, y, 만료 시각 또는 None=영구)
+        self.points = []                     # (x, y, 만료 시각 또는 None=영구) — 장애물 (costmap whisker_layer)
+        self.scars = []                      # (x, y, 생긴 시각) — 1분이 지나 장애물에서 빠진 부드러운 표시. 지도엔 안 막고 기억만
+        #   (Jasper 11-08: 영구 장애물이면 고정 가구인지 잠깐 막은 건지 구분 못 함 → 기억으로 남겨 나중에 "조심" 규칙에 쓸 수 있게)
         self.contacts = 0
 
         self.create_subscription(Imu, "imu", self.on_imu, 50)
@@ -187,7 +191,8 @@ class Whisker(Node):
         self.create_subscription(Empty, "whisker/resume", self.on_resume, 1)
         self.cmd_pub = self.create_publisher(TwistStamped, "whisker/cmd_vel", 10)
         self.cloud_pub = self.create_publisher(PointCloud2, "whisker/cloud", 1)
-        self.soft_pub = self.create_publisher(PointCloud2, "whisker/soft_cloud", 1)   # RViz 색 구분용 (임시 표시만)
+        self.soft_pub = self.create_publisher(PointCloud2, "whisker/soft_cloud", 1)
+        self.scar_pub = self.create_publisher(PointCloud2, "whisker/scars", 1)   # 흉터: 장애물은 아니지만 "여기 뭔가 있었음" (11-08)   # RViz 색 구분용 (임시 표시만)
         self.sense_pub = self.create_publisher(String, "sense", 10)
         self.state_pub = self.create_publisher(String, "whisker/state", 10)
         self.create_timer(0.05, self.tick)
@@ -218,6 +223,9 @@ class Whisker(Node):
         if abs(d[0] - o[1]) > 8 or abs(d[1] - o[2]) > 8 or abs(d[2] - o[3]) > 0.02 or abs(d[3] - o[4]) > 0.05:
             self.last_self = max(self.last_self, now)
         self.cmd_hist.append((now, d[2], d[3]))
+        self.pwm_hist.append((now, d[1] - d[0]))      # 오른쪽 − 왼쪽 = 우리가 실제로 돌리는 방향 (+ = 왼쪽)
+        while self.pwm_hist and now - self.pwm_hist[0][0] > NOMO_BACK_S + 1.0:
+            self.pwm_hist.popleft()
         while self.cmd_hist and now - self.cmd_hist[0][0] > NOMO_BACK_S + 1.0:
             self.cmd_hist.popleft()
 
@@ -251,6 +259,13 @@ class Whisker(Node):
         # 덜 돎 = 회전이 막힘 (곡선·제자리 회전 중 다리에 걸림) → 접촉. 더 돎·반대로 돎 = 누가 밀었음.
         #   11-08 측정: 곡선으로 책상 다리에 걸리면 명령 16° 에 실제 0.7° — 예전엔 이걸 pushed 로 불러 1 초 쉬기만 했음
         under = abs(actual) < 0.5 * abs(asked) and actual * asked >= -abs(asked) * 0.1
+        if not under:
+            # 더 돎: 우리가 실제로 그쪽으로 돌리고 있었으면 우리 회전 (11-08 탐색: Nav2 는 z 0.07 인데 브리지가 바닥선·톡톡으로
+            #   더 세게 돌려 18.8° → pushed 헛것 4번). Nav2 명령이 아니라 모터에 준 PWM 차이로 = efference copy
+            pw = [p for p in self.pwm_hist if p[0] >= now - PUSH_S]
+            ours = sum(p[1] * (n[0] - p[0]) for p, n in zip(pw, pw[1:]))   # PWM·s
+            if abs(ours) >= PUSH_OURS and ours * actual > 0:
+                return
         ev = {"ev": "turn_blocked" if under else "pushed", "turned_deg": round(actual, 1), "asked_deg": round(asked, 1),
               "dir": "turn", "src": "turn" if under else "gyro",
               "cmd_x": round(self.motor[2], 3), "cmd_z": round(self.motor[3], 2), "state": self.state}
@@ -917,6 +932,7 @@ class Whisker(Node):
 
     def on_clear(self, _):
         self.points.clear()
+        self.scars.clear()
         self.stuck_spots.clear()
         self.contacts = 0
         self.get_logger().warn("WHISKER clear: 표시 전부 지움")
@@ -924,7 +940,12 @@ class Whisker(Node):
 
     def publish_cloud(self):
         now = time.time()
+        gone = [p for p in self.points if p[2] is not None and p[2] <= now]
+        if gone:
+            self.scars += [(x, y, now) for x, y, _ in gone]
+            self.get_logger().info(f"WHISKER 흉터 {len(gone)}점 (장애물에서 빠짐, 기억은 남음) — 지금 흉터 {len(self.scars)}점")
         self.points = [p for p in self.points if p[2] is None or p[2] > now]
+        self.scar_pub.publish(self.cloud([(x, y) for x, y, _ in self.scars]))
         self.cloud_pub.publish(self.cloud([(x, y) for x, y, _ in self.points]))
         self.soft_pub.publish(self.cloud([(x, y) for x, y, exp in self.points if exp is not None]))
 

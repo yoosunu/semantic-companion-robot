@@ -61,10 +61,12 @@ class Sim:
                 d = np.where((t > 0) & (t < d), t, d)
         s.W.on_scan(types.SimpleNamespace(ranges=list(d + np.random.normal(0, 0.01, 450)), angle_min=-math.pi,
                                           angle_increment=2 * math.pi / 450, range_min=0.05))
-    def step(s, nav=(0.0, 0.0), trac=(1.0, 1.0), ax=0.0, ay=0.0, gx=0.0, gy=0.0, block=False, push=0.0, gap=None):
+    def step(s, nav=(0.0, 0.0), trac=(1.0, 1.0), ax=0.0, ay=0.0, gx=0.0, gy=0.0, block=False, push=0.0, gap=None, floor_z=0.0):
         dt = 0.05; T[0] += dt; s.n += 1
         mine = T[0] - s.wt < 0.3
         cx, cz = s.wcmd if mine else nav
+        ncx, ncz = cx, cz                                   # Nav2(또는 Whisker) 명령 = /motor_out 에 실리는 값
+        if floor_z and 0 < abs(cz) < floor_z: cz = math.copysign(floor_z, cz)   # 브리지 바닥선: 실제로는 더 세게 돌림
         vl, vr = cx - cz * B, cx + cz * B
         tl, tr = (0.0, 0.0) if block else trac
         v, w = (tl * vl + tr * vr) / 2, (tr * vr - tl * vl) / (2 * B) + push
@@ -76,7 +78,8 @@ class Sim:
         ov = 0.0 if block else (vl + vr) / 2
         s.odo = [s.odo[0] + ov * math.cos(s.true[2]) * dt, s.odo[1] + ov * math.sin(s.true[2]) * dt, s.true[2]]
         pwm = 0 if abs(cx) < 1e-3 and abs(cz) < 1e-3 else 30
-        s.W.on_motor(types.SimpleNamespace(data=[pwm, pwm, cx, cz, 1.0 if mine else 0.0]))
+        dp = 0 if pwm == 0 else 60 * cz * B / max(abs(cx) + abs(cz) * B, 1e-3)   # 회전만큼 좌우 PWM 차이
+        s.W.on_motor(types.SimpleNamespace(data=[pwm - dp / 2, pwm + dp / 2, ncx, ncz, 1.0 if mine else 0.0]))
         q = types.SimpleNamespace(x=0, y=0, z=math.sin(s.odo[2] / 2), w=math.cos(s.odo[2] / 2))
         s.W.on_odom(types.SimpleNamespace(header=types.SimpleNamespace(stamp=stamp(T[0])), pose=types.SimpleNamespace(
             pose=types.SimpleNamespace(position=types.SimpleNamespace(x=s.odo[0], y=s.odo[1]), orientation=q))))
@@ -141,6 +144,8 @@ def scenes():
     R.append(check("16 곡선 중 걸림 → turn_blocked → 되감기", s, None, ["turn_blocked"], ["pushed"]) and "back" in s.states)
     s = Sim(); s.run(30, nav=(0.0, 0.3), block=True); s.run(80)
     R.append(check("17 제자리 회전 막힘 → turn_blocked → 15° 되돌림", s, None, ["turn_blocked"], ["pushed"]) and "back" in s.states)
+    s = Sim(); s.run(80, nav=(-0.015, 0.07), floor_z=0.33)
+    R.append(check("18 Nav2 는 살짝(z 0.07), 브리지는 바닥선으로 세게 돎 → 아무 일 없음", s, "drive", no_ev=["pushed", "turn_blocked"]))
     print(f"\n{sum(R)}/{len(R)} 통과")
 
 def replay(burst=False):
