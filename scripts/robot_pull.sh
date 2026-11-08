@@ -6,7 +6,7 @@
 # 가져온 것은 logs/ 아래 → .gitignore 대상 (커밋 안 됨).
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${PI_HOST:-jasper@scr-pi.local}"
+HOST="${PI_HOST:-jasper@192.168.123.114}"   # 11-08: scr-pi.local 이 자주 못 찾아져서 IP 기본
 SSH="ssh -o ConnectTimeout=8"
 
 ping -c 1 -t 3 "${HOST#*@}" >/dev/null 2>&1 || true   # Pi Wi-Fi 절전 깨우기 (첫 접속 타임아웃 방지)
