@@ -163,8 +163,8 @@ def scenes():
         s.step(nav=(0.05, 0) if first is None else (0.0, 0.0), carpet=x0 + 0.05)
         if first is None and "back" in s.states and s.W.state == "drive": first = i
     logs = " / ".join(s.W.logs)
-    R.append(check("20 발닦개: 보통 힘 못 빠짐 → 사다리 힘 55 → 빠지면 확 섬 → 돌려줌", s, None, ["stuck"])
-             and first is not None and "help" not in s.states and "힘 55 로 빠짐" in logs and "바닥 확인" in logs)
+    R.append(check("20 발닦개: 보통 힘 못 빠짐 → 사다리 힘 70·10 cm/s → 빠지면 확 섬 → 돌려줌", s, None, ["stuck"])
+             and first is not None and "help" not in s.states and "힘 70 로 빠짐" in logs and "바닥 확인" in logs)
     s = Sim(); s.run(40, nav=(0.05, 0)); t0 = T[0]; s.run(1600, nav=(0.05, 0), need_force=999)
     tl = next((t for t, *_r, st in s.trace if st == "help"), None)
     R.append(check("21 양말 끼임 (힘 70 도 안 됨) → 사다리 4칸 다 → 구조 요청, 기다림 없이", s, None, ["stuck"])

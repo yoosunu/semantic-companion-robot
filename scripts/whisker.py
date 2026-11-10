@@ -17,8 +17,8 @@
   건드림       서 있을 때 흔들림 하나 = 사건 하나 (캡슐): 잦아들면 시작 전과 비교 → moved(방향 5°·자세 2° 바뀜) / tap / held(10 s)
   탈출 모듈   (11-10 Jasper: "회전·약하게 돌면 발닦개는 딸려오고 양말은 감긴다 → 앞이나 뒤로 확 빼야") — 회전 없이 곧게만.
                0) 들어온 반대로 곧게, 보통 힘, 지나온 길만큼(최대 15 cm)
-               사다리 (빼다 또 막히면 1 s 쉬고 다음 칸, 기다리지 않음): 1) 같은 쪽 힘 55  2) 같은 쪽 힘 70
-                 3) 반대쪽 5 cm 힘 55  4) 반대쪽 힘 70  (부딪힘(물체)이면 3·4 는 안 함 — 물체 쪽으로 세게 밀지 않음) → 구조 요청
+               사다리 (빼다 또 막히면 1 s 쉬고 다음 칸, 기다리지 않음): 0) 8 cm/s 보통 힘  1) 같은 쪽 10 cm/s 힘 70
+                 2) 같은 쪽 12 cm/s 힘 70  3) 반대쪽 5 cm 8 cm/s 힘 70  4) 반대쪽 10 cm/s 힘 70 (11-11 선 실험: 속도도 올려야 빠짐)  (부딪힘(물체)이면 3·4 는 안 함 — 물체 쪽으로 세게 밀지 않음) → 구조 요청
                힘은 출발하는 순간에만 (/whisker/force → 브리지가 그때만 한도를 올림, 바퀴가 돌면 브리지가 바로 내림).
                LiDAR 로 2 cm 움직인 게 보이면 0.3 s 확 섬 → 남은 거리는 보통 힘 ("빠져나왔으면 더 안 밀리고 확 서기").
                칸마다 빼기 전 LiDAR: 그 방향 "뺄 거리 + 3 cm" 안에 뭐가 보이면 건너뜀. 안 보이면(가려짐) 방금 들어온 거리까지만.
@@ -108,7 +108,10 @@ WEAK_PWM = 25.0               # PWM, 안 움직임 창 동안 가장 센 바퀴�
 SLIP_RATIO = 0.5              # 바퀴 거리계가 명령의 50% 이상 갔는데 LiDAR 는 그대로 = 헛돎 (바닥이 미끄럽거나 몸이 떠 있음)
 ESC_MOVE = 0.02               # m, 힘 올린 빼기에서 이만큼 움직이면 = 빠짐 → 확 섬
 BRAKE_S = 0.3                 # s, 그때 서 있는 시간
-ESC_LADDER = ((True, 55.0), (True, 70.0), (False, 55.0), (False, 70.0))   # (같은 쪽?, 힘 PWM) — 탈출 사다리 1~4
+ESC_V0 = 0.08                 # m/s, 탈출 0칸 (보통 힘) 빼기 속도. 11-11 선 실험: −0.05 는 "깔짝", −0.08 부터 나옴, −0.10↑ 은 잘 나오지만 시끄러움
+ESC_LADDER = ((True, 70.0, 0.10), (True, 70.0, 0.12), (False, 70.0, 0.08), (False, 70.0, 0.10))   # (같은 쪽?, 힘 PWM, 속도 m/s) 사다리 1~4
+                              # 11-11 Jasper 선 실험: 한 바퀴가 선 위면 평지보다 훨씬 세야 함. 힘 한도는 출발 순간만이고 구르기 시작하면
+                              #   브리지가 "속도에 맞는 유지 힘"(0.05 = 21, 0.08 = 30, 0.12 = 36)으로 내림 → 속도도 같이 올려야 빠짐
 ESC_OPP_LEN = 0.05            # m, 반대쪽 빼기 거리
 ESC_CLEAR = 0.03              # m, 빼기 전 LiDAR: 그 방향 몸 앞에 "뺄 거리 + 3 cm" 안에 뭐가 보이면 그 칸은 건너뜀 (11-10 Jasper: 막 빼다 박음)
                               #   그 방향이 안 보이면(팬틸트가 가림 등) = 모름 → 방금 들어온 거리까지만 (지나온 길은 비어 있었음)
@@ -782,11 +785,11 @@ class Whisker(Node):
         rem = max(0.0, b["len"] - b["done"])
         came = b.get("came", b["len"])              # 방금 들어온 거리 (모름일 때 후진 허용 한도)
         dirn0 = b["dir"] or -1
-        rungs = [(True, None)] + self.ladder()
+        rungs = [(True, None, ESC_V0)] + self.ladder()
         skipped = []
         while self.trapped < len(rungs):
             k = self.trapped
-            same, force = rungs[k]
+            same, force, speed = rungs[k]
             dirn = dirn0 if same else -dirn0
             if k == 0:
                 target = b["wps"][0][1] if b["len"] < 0.02 else None   # 제자리 회전 막힘 되돌리기만 방향 목표
@@ -817,12 +820,13 @@ class Whisker(Node):
             return False
         if skipped:
             self.get_logger().warn("WHISKER 사다리 건너뜀 (LiDAR 로 막힘·안 보임): " + ", ".join(skipped))
-        main = (f"곧게 {length * 100:.0f} cm" if length >= 0.02 else f"{math.degrees(abs(wrap(target - self.odom[2]))):.0f}° 되돌리기")
+        main = (f"곧게 {length * 100:.0f} cm, {speed * 100:.0f} cm/s" if length >= 0.02
+                else f"{math.degrees(abs(wrap(target - self.odom[2]))):.0f}° 되돌리기")
         if force:
             main += f", 힘 {force:.0f}"
         self.step = {"dir": dirn, "wps": [(0.0, target)], "len": length, "pre": 0.0, "phase": "main",
                      "start": self.odom, "hold": self.odom[2], "rebound": False, "scan0": self.last_scan(),
-                     "force": force, "kicked": False, "brake_until": 0.0}
+                     "force": force, "kicked": False, "brake_until": 0.0, "v": speed}
         head = f"사다리 {self.trapped}/{len(rungs) - 1}: " if self.trapped else ""
         self.plan_text = f"{head}{'뒤' if dirn < 0 else '앞'}로 {main} ({self.contact_kind})"
         return True
@@ -884,8 +888,9 @@ class Whisker(Node):
             if not old or now - h[0][0] < FREE_S * 0.8:
                 return False, "바닥 확인 중"
             rate = (h[-1][1] - old[1]) / max(h[-1][0] - old[0], 0.3)
-            free = rate >= FREE_RATIO * BACK_SPEED
-            why.append(f"LiDAR {rate * 100:.1f} cm/s (명령 {BACK_SPEED * 100:.0f})")
+            v = st.get("v", BACK_SPEED)
+            free = rate >= FREE_RATIO * v
+            why.append(f"LiDAR {rate * 100:.1f} cm/s (명령 {v * 100:.0f})")
         flat = True
         if self.last_tilt is not None and now - self.last_tilt[0] < 1.5:
             flat = self.last_tilt[1] < self.slope_deg / 2
@@ -938,8 +943,9 @@ class Whisker(Node):
                     # 되감기 = 들어올 때의 곡률(기록) 그대로 + 자이로로 본 실제 방향과의 차이만큼 보정.
                     #   헛도는 쪽이 있어 차체가 그쪽으로 돌면 보정이 그쪽 바퀴를 세게, 반대쪽을 약하게 (Jasper 11-07)
                     ahead = self.wp_yaw(st["wps"], s + 0.01, st["hold"])
-                    ff = wrap(ahead - self.wp_yaw(st["wps"], s, st["hold"])) / 0.01 * BACK_SPEED
-                    x = st["dir"] * BACK_SPEED
+                    v = st.get("v", BACK_SPEED)
+                    ff = wrap(ahead - self.wp_yaw(st["wps"], s, st["hold"])) / 0.01 * v
+                    x = st["dir"] * v
                     z = max(-HEAD_MAX, min(HEAD_MAX, ff + HEAD_K * err))
                 elif abs(err) >= HEAD_ROT:        # 거리는 다 됨, 방향이 남음 (돌던 중 닿음 = 되돌리기) → 제자리에서 맞춤
                     z = math.copysign(TURN_SPEED, err)
@@ -957,7 +963,7 @@ class Whisker(Node):
                         self.go("drive")
                         return
                     if s < st["len"] + EXTEND_MAX:  # 거리는 됐는데 아직 바닥이 아님 → 같은 방향으로 조금 더 (방향 유지)
-                        x = st["dir"] * BACK_SPEED
+                        x = st["dir"] * st.get("v", BACK_SPEED)
                         z = max(-HEAD_MAX, min(HEAD_MAX, HEAD_K * err))
                     else:
                         self.get_logger().warn(f"WHISKER {st['len'] * 100 + EXTEND_MAX * 100:.0f} cm 뺐는데 바닥 아님: {why}")
