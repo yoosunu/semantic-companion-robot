@@ -15,9 +15,9 @@ img = np.frombuffer(raw[-w * h:], np.uint8).reshape(h, w)[::-1]
 occ, free = img < 50, img > 250
 slam = np.where(occ, 100, np.where(free, 0, -1)).astype(np.int16)
 d = np.full((h, w), 9.0); cur = occ.copy(); d[cur] = 0
-for i in range(1, int(0.20 / res) + 1):
+for i in range(1, int(0.18 / res) + 1):
     p = np.pad(cur, 1); cur = cur | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]; d[cur & (d > 8)] = i * res
-infl = np.where(d <= 0.12, 99, np.where(d <= 0.20, np.rint(98 * np.exp(-4 * (d - 0.12))), 0)).astype(np.int16)
+infl = np.where(d <= 0.12, 99, np.where(d <= 0.18, np.rint(98 * np.exp(-4 * (d - 0.12))), 0)).astype(np.int16)
 cost = np.where(free | occ, np.maximum(0, infl), -1).astype(np.int16); cost[occ] = 100
 info = types.SimpleNamespace(width=w, height=h, resolution=res, origin=types.SimpleNamespace(position=types.SimpleNamespace(x=org[0], y=org[1])))
 X = E.Explorer("t"); X.grid = types.SimpleNamespace(info=info, data=slam.ravel().tolist())

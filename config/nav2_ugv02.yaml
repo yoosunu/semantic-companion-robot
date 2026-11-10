@@ -71,11 +71,11 @@ local_costmap:
           expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"   # 252×230 mm (+약간), robot_radius 대신
       inflation_layer:
-        inflation_radius: 0.20           # [m] 시뮬 0.5 → 0.30 → 11-08 0.25 → 11-11 0.20 (Jasper: "집이 좁다, 우리는 우리대로". 몸 외접원 0.177)
+        inflation_radius: 0.18           # [m] 시뮬 0.5 → 0.30 → 0.25 → 0.20 → 11-11 0.18 = 최저선: 몸 외접원 0.177 (이보다 작으면 "돌 수 있는 칸"(비용<78)을 비용지도로 못 가림)
         cost_scaling_factor: 4.0
       whisker_inflation:                 # 11-11 Jasper: 위스커 표시만 얇게 부풀림 (25 cm 로 부풀리면 15 cm 선이 폭 65 cm 덩어리 → 크게 돌아감).
         plugin: "nav2_costmap_2d::InflationLayer"   # 순서: LiDAR → 부풀리기 20 cm → 위스커 → 이것 10 cm. 더 큰 값과 겹치면 큰 값 유지
-        inflation_radius: 0.10           #   (몸 반폭 12 cm 보다 작음 = 거의 긁듯이. Jasper "과감하게, 주행 보고 판단")
+        inflation_radius: 0.12           #   11-11 10 → 12 cm = 몸 반폭 (표시 옆을 몸이 닿지 않고 긁듯이)
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:
@@ -108,11 +108,11 @@ global_costmap:
           expected_update_rate: 0.0
       footprint: "[[0.13, 0.12], [0.13, -0.12], [-0.13, -0.12], [-0.13, 0.12]]"
       inflation_layer:
-        inflation_radius: 0.20           # 11-08 0.30 → 0.25 → 11-11 0.20 (지역과 같게)
+        inflation_radius: 0.18           # 11-11 최저선 0.18 (지역과 같게, 몸 외접원 0.177)
         cost_scaling_factor: 4.0
       whisker_inflation:                 # 11-11 Jasper: 위스커 표시만 얇게 부풀림 (25 cm 로 부풀리면 15 cm 선이 폭 65 cm 덩어리 → 크게 돌아감).
         plugin: "nav2_costmap_2d::InflationLayer"   # 순서: LiDAR → 부풀리기 20 cm → 위스커 → 이것 10 cm. 더 큰 값과 겹치면 큰 값 유지
-        inflation_radius: 0.10           #   (몸 반폭 12 cm 보다 작음 = 거의 긁듯이. Jasper "과감하게, 주행 보고 판단")
+        inflation_radius: 0.12           #   11-11 10 → 12 cm = 몸 반폭 (표시 옆을 몸이 닿지 않고 긁듯이)
         cost_scaling_factor: 4.0
       obstacle_layer:
         scan:
