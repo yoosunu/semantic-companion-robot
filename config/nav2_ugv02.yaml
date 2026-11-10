@@ -30,7 +30,9 @@ controller_server:
       model_dt: 0.1
       batch_size: 1000                   # Pi 5 계산량 확인 대상 (docs/decisions/001 재검증 기준)
       vx_max: 0.08                       # [m/s] 11-03 기어가기 (PWM 모드 0.08 = PWM 30, 덜컹 92). 10-31 PID 모드 땐 0.20
-      vx_min: -0.05                      # 후진 허용 (시뮬에서 갇힘 방지로 확인, 10-24). 바닥선 0.05
+      vx_min: 0.0                        # 11-10 후진 금지 (Jasper: "후진은 특이상황에서만"). −0.05 = 바닥선이라 후진+회전이면 안쪽 바퀴가
+                                         #   바닥선 아래 → 한 바퀴로 몸을 끌고 돌아야 함 → 안 움직임 → 거실 "뒤로 안 움직임" 고스트 5곳 (11-08 23:57).
+                                         #   방향 바꾸기는 제자리 회전, 빼기는 Whisker 탈출이 맡음. (10-24 시뮬 땐 갇힘 방지로 −0.05 허용)
       wz_max: 0.25                       # [rad/s] 11-04 0.4 → 0.25: 회전 = 바퀴 끌림 = 소음. 180° ≈ 13 s. 10-31 땐 0.8
       critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic",
                 "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
@@ -38,7 +40,7 @@ controller_server:
 velocity_smoother:                       # 출발·정지를 부드럽게 (Jasper 10-31: "엑셀 천천히, 브레이크 나눠 밟기")
   ros__parameters:
     max_velocity: [0.08, 0.0, 0.25]      # 11-03 기어가기 (MPPI 와 같은 상한), 11-04 회전 0.25
-    min_velocity: [-0.05, 0.0, -0.25]
+    min_velocity: [0.0, 0.0, -0.25]      # 11-10 후진 금지 (MPPI vx_min 과 같게). Nav2 복구 "backup" 도 사실상 꺼짐 → 빼기는 Whisker
     max_accel: [0.15, 0.0, 0.6]          # [m/s², -, rad/s²] 0 → 0.08 m/s 약 0.5 s (출발 밀기는 브리지가 따로 함)
     max_decel: [-0.3, 0.0, -1.0]
 

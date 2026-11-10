@@ -28,7 +28,7 @@ class Msg:
     def __init__(s, *a, **k): s.__dict__.update(k)
 mod("rclpy"); mod("rclpy.node", Node=Node); mod("rclpy.qos", qos_profile_sensor_data=None)
 for n, it in {"geometry_msgs.msg": ["PoseWithCovarianceStamped", "TwistStamped"], "nav_msgs.msg": ["Odometry"],
-              "sensor_msgs.msg": ["Imu", "PointCloud2", "PointField", "LaserScan"], "std_msgs.msg": ["Empty", "Float32MultiArray", "String"]}.items():
+              "sensor_msgs.msg": ["Imu", "PointCloud2", "PointField", "LaserScan"], "std_msgs.msg": ["Empty", "Float32", "Float32MultiArray", "String"]}.items():
     mod(n, **{i: Msg for i in it})
 for n in ("geometry_msgs", "nav_msgs", "sensor_msgs", "std_msgs"): mod(n)
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 import whisker
 np.random.seed(1)
 B, ROOM = 0.085, (-1.5, 2.5, -1.5, 1.5)
+HL = 0.13
 def stamp(t): return types.SimpleNamespace(sec=int(t), nanosec=int((t % 1) * 1e9))
 
 class Sim:
@@ -48,6 +49,9 @@ class Sim:
         s.wcmd, s.wt = (0.0, 0.0), -9
         def send(x, z): s.wcmd, s.wt = (x, z), T[0]
         W.send = send
+        s.force, s.ft = 0.0, -9
+        def fpub(m): s.force, s.ft = m.data, T[0]
+        W.force_pub = types.SimpleNamespace(publish=fpub)
         s.true = [0.0, 0.0, 0.0]; s.odo = [0.0, 0.0, 0.0]; s.n = 0
         s.run(40)
         s.ev.clear(); s.states.clear(); W.logs.clear()
@@ -61,7 +65,7 @@ class Sim:
                 d = np.where((t > 0) & (t < d), t, d)
         s.W.on_scan(types.SimpleNamespace(ranges=list(d + np.random.normal(0, 0.01, 450)), angle_min=-math.pi,
                                           angle_increment=2 * math.pi / 450, range_min=0.05))
-    def step(s, nav=(0.0, 0.0), trac=(1.0, 1.0), ax=0.0, ay=0.0, gx=0.0, gy=0.0, block=False, push=0.0, gap=None, floor_z=0.0, off=False):
+    def step(s, nav=(0.0, 0.0), trac=(1.0, 1.0), ax=0.0, ay=0.0, gx=0.0, gy=0.0, block=False, push=0.0, gap=None, floor_z=0.0, off=False, need_force=0.0, carpet=None):
         dt = 0.05; T[0] += dt; s.n += 1
         mine = T[0] - s.wt < 0.3
         cx, cz = s.wcmd if mine else nav
@@ -69,6 +73,9 @@ class Sim:
         if floor_z and 0 < abs(cz) < floor_z: cz = math.copysign(floor_z, cz)   # 브리지 바닥선: 실제로는 더 세게 돌림
         vl, vr = cx - cz * B, cx + cz * B
         block = block or off                                # 모터 꺼짐 = 안 움직임
+        forced = mine and T[0] - s.ft < 0.3                 # 탈출 힘 (브리지 v8.2: Whisker 가 말하는 동안만)
+        if need_force and not (forced and s.force >= need_force): block = True   # 발닦개: 이 힘 아래로는 출발 못 함
+        if carpet is not None and s.true[0] >= carpet and not (forced and s.force >= 55): block = True   # 카펫 위: 힘 55 아래로는 못 움직임
         tl, tr = (0.0, 0.0) if block else trac
         v, w = (tl * vl + tr * vr) / 2, (tr * vr - tl * vl) / (2 * B) + push
         x, y, th = s.true
@@ -78,7 +85,7 @@ class Sim:
         s.true = [nx, y + v * math.sin(th) * dt, th + w * dt]
         ov = 0.0 if block else (vl + vr) / 2
         s.odo = [s.odo[0] + ov * math.cos(s.true[2]) * dt, s.odo[1] + ov * math.sin(s.true[2]) * dt, s.true[2]]
-        pwm = 0 if off or (abs(cx) < 1e-3 and abs(cz) < 1e-3) else 30
+        pwm = 0 if off or (abs(cx) < 1e-3 and abs(cz) < 1e-3) else (max(30, s.force) if forced else 30)
         dp = 0 if pwm == 0 else 60 * cz * B / max(abs(cx) + abs(cz) * B, 1e-3)   # 회전만큼 좌우 PWM 차이
         s.W.on_motor(types.SimpleNamespace(data=[pwm - dp / 2, pwm + dp / 2, ncx, ncz, 1.0 if mine else 0.0]))
         q = types.SimpleNamespace(x=0, y=0, z=math.sin(s.odo[2] / 2), w=math.cos(s.odo[2] / 2))
@@ -150,6 +157,38 @@ def scenes():
     R.append(check("18 Nav2 는 살짝(z 0.07), 브리지는 바닥선으로 세게 돎 → 아무 일 없음", s, "drive", no_ev=["pushed", "turn_blocked"]))
     s = Sim(); s.run(21, nav=(-0.05, 0.05), block=True); s.run(20, nav=(-0.05, 0.05), off=True); s.run(20)
     R.append(check("19 후진: 약한 힘 + 브리지 톡톡 꺼짐 0.5 s → 아무 일 없음 (11-08 3시 고스트)", s, "drive", no_ev=["stuck"]))
+    # ---- 11-10 탈출 모듈
+    s = Sim(); x0 = s.true[0]; first = None
+    for i in range(900):
+        s.step(nav=(0.05, 0) if first is None else (0.0, 0.0), carpet=x0 + 0.05)
+        if first is None and "back" in s.states and s.W.state == "drive": first = i
+    logs = " / ".join(s.W.logs)
+    R.append(check("20 발닦개: 보통 힘 못 빠짐 → 사다리 힘 55 → 빠지면 확 섬 → 돌려줌", s, None, ["stuck"])
+             and first is not None and "help" not in s.states and "힘 55 로 빠짐" in logs and "바닥 확인" in logs)
+    s = Sim(); s.run(40, nav=(0.05, 0)); t0 = T[0]; s.run(1600, nav=(0.05, 0), need_force=999)
+    tl = next((t for t, *_r, st in s.trace if st == "help"), None)
+    R.append(check("21 양말 끼임 (힘 70 도 안 됨) → 사다리 4칸 다 → 구조 요청, 기다림 없이", s, None, ["stuck"])
+             and "help" in s.states and s.force >= 70 and tl is not None and tl - t0 < 60)
+    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(40, nav=(0.05, 0), trac=(0.03, 0.03)); s.run(10)
+    e = next((e for e in s.ev if e["ev"] == "stuck"), {})
+    R.append(check("22 헛돎 (바퀴는 도는데 세상 그대로) → 미확인: 장애물 안 긋고 흉터만", s, None, ["stuck"])
+             and e.get("wheels") == "헛돎" and e.get("feel") == "unsure" and not e.get("marked") and len(s.W.scars) >= 1)
+    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(40, nav=(0.05, 0), block=True); s.run(10)
+    e = next((e for e in s.ev if e["ev"] == "stuck"), {})
+    R.append(check("23 막힘 (바퀴도 안 돎, 힘 충분) → 1분짜리 장애물", s, None, ["stuck"])
+             and e.get("wheels") == "막힘" and e.get("feel") == "soft" and e.get("marked"))
+    s = Sim(); s.run(40, nav=(0.08, 0)); s.run(8, nav=(0.08, 0), gy=8.0); s.run(120)
+    R.append(check("24 들림 처음 → 1분짜리 (영구 아님, 11-08 문 앞 고스트가 출구를 영구로 막음)", s, None, ["lift"])
+             and s.W.points and all(p[2] is not None for p in s.W.points))
+    s = Sim(); s.run(20); s.true[0] = ROOM[1] - 0.18; s.run(20)
+    s.W.on_escape(None); s.run(200)
+    R.append(check("25 탈출 요청 (끼었음) → 더 트인 뒤쪽으로 곧게 → 바닥 확인 → 돌려줌", s, "drive → back → drive")
+             and any(e["ev"] == "wedged" and e["dir"] == "rear" for e in s.ev))
+    s = Sim(); s.true[0] = ROOM[0] + HL + 0.03; s.run(20); s.run(60, nav=(0.05, 0)); s.run(900, nav=(0.05, 0), block=True)
+    backs = [cx for t, x, y, th, cx, cz, st in s.trace if st in ("back",) and cx < -1e-6]
+    logs = " / ".join(s.W.logs)
+    R.append(check("26 뒤 3 cm 벽 (LiDAR 로 보임) → 뒤로 빼는 칸 다 건너뜀, 앞으로만 → 구조 요청", s, None, ["stuck"])
+             and not backs and "건너뜀" in logs and "help" in s.states)
     print(f"\n{sum(R)}/{len(R)} 통과")
 
 def replay(burst=False):

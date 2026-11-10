@@ -99,6 +99,8 @@ def generate_launch_description():
                 launch_arguments={"use_sim_time": "false", "params_file": params, "autostart": "true"}.items()),
             # 11-06 Whisker: 촉각 (느끼기·멈춤·빼기·갇힘·구조 요청·지도 표시). 브리지 v8 은 /imu·/motor_out 만 주고 /whisker/cmd_vel 을 우선 따름
             ExecuteProcess(cmd=["python3", os.path.join(REPO, "scripts", "whisker.py")], output="screen"),
+            # 11-10 상태 표시: /robot/state·/whisker/state·전압 → /robot/display → 브리지가 UGV02 OLED 4줄에 씀
+            ExecuteProcess(cmd=["python3", os.path.join(REPO, "scripts", "status_display.py")], output="screen"),
         ]),
 
         RegisterEventHandler(OnShutdown(on_shutdown=[OpaqueFunction(function=report_after_shutdown)])),

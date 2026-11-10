@@ -24,6 +24,11 @@
 //      a wall, MPPI asked x ±0.005 z ±0.02-0.06 flipping sign every tick → every flip became a real tap → back-and-forth
 //      and head-shaking for 80 s). Flipping noise averages to ~0 → rest. A real slow ask keeps its sign → still taps.
 // v8.1 FORCE LIMIT (11-06): PWM ≤ 40 straight / ≤ 55 turning (params push_cap_*) — blocked wheels no longer push harder.
+// v8.2 ESCAPE FORCE (11-10): /whisker/force (Float32, PWM) raises the breakaway limit ONLY while whisker drives and keeps
+//      sending it (0.3 s), never above kForceMax (70). Breakaway only: once the wheel turns, the push drops to the holding
+//      PWM as before → a freed robot does not shoot off. Whisker quiet → normal limits again (Jasper 11-10: 탈출 모듈).
+// v8.3 OLED (11-10): /robot/display (String, up to 4 lines joined by \n, from scripts/status_display.py) → only the lines
+//      that changed go out as {"T":3,"lineNum":i,"Text":...}. The bridge is the only serial writer, so the display lives here.
 // v8  Whisker hooks (11-06), the bridge stays thin — all touch logic lives in scripts/whisker.py (Python, no rebuild):
 //     ① /motor_out [pwm_l, pwm_r, cmd_x, cmd_z, whisker] every feedback line → whisker's "efference copy" (our own jolts)
 //     ② /whisker/cmd_vel has PRIORITY over /cmd_vel while it keeps coming (0.3 s): stop, back off, wait — Nav2 is ignored.
@@ -55,7 +60,9 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2/LinearMath/Quaternion.hpp"       // yaw → quaternion
 #include "tf2_ros/transform_broadcaster.hpp"   // sends the odom → base_footprint TF
 
@@ -121,6 +128,17 @@ public:
         last_whisker_time_ = now();
         apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
       });
+    // v8.3: OLED lines
+    display_sub_ = create_subscription<std_msgs::msg::String>(
+      "robot/display", 10,
+      [this](const std_msgs::msg::String::SharedPtr msg) {on_display(msg->data);});
+    // v8.2: escape force (PWM) — only counts while whisker drives
+    force_sub_ = create_subscription<std_msgs::msg::Float32>(
+      "whisker/force", 10,
+      [this](const std_msgs::msg::Float32::SharedPtr msg) {
+        force_ = msg->data;
+        last_force_time_ = now();
+      });
 
     // Two heartbeats with different jobs:
     //   20 ms → on_read  : read feedback (arrives every 50 ms; read faster than it comes so nothing piles up)
@@ -147,6 +165,26 @@ private:
   void on_cmd_vel(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
     if (whisker_active()) {return;}   // v8: Whisker is handling a touch → Nav2 waits
     apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
+  }
+
+  // v8.3: write only the OLED lines that changed. Text kept to printable ASCII without quotes/backslash (JSON-safe), 20 chars.
+  void on_display(const std::string & text) {
+    size_t start = 0;
+    for (int i = 0; i < 4; ++i) {
+      const size_t end = text.find('\n', start);
+      std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+      std::string safe;
+      for (char c : line) {
+        if (c >= 32 && c < 127 && c != '"' && c != '\\') {safe += c;}
+        if (safe.size() >= 20) {break;}
+      }
+      if (safe != oled_[i]) {
+        char json[96];
+        std::snprintf(json, sizeof(json), "{\"T\":3,\"lineNum\":%d,\"Text\":\"%s\"}", i, safe.c_str());
+        if (serial_.write_line(json)) {oled_[i] = safe;}
+      }
+      if (end == std::string::npos) {start = text.size();} else {start = end + 1;}
+    }
   }
 
   bool whisker_active() {
@@ -306,7 +344,10 @@ private:
     } else {
       turn_trim_ = 0.0; turn_trim_dir_ = 0;
     }
-    const double cap = turn ? push_cap_turn_ : push_cap_straight_;   // v8.1 force limit
+    double cap = turn ? push_cap_turn_ : push_cap_straight_;   // v8.1 force limit
+    if (whisker_active() && last_force_time_.nanoseconds() != 0 && (t - last_force_time_).seconds() < kWhiskerHold) {
+      cap = std::max(cap, std::min(static_cast<double>(force_), kForceMax));   // v8.2 escape: higher breakaway limit
+    }
     control_wheel(wheel_l_, fwd - dif, t, cap);
     control_wheel(wheel_r_, fwd + dif, t, cap);
 
@@ -574,6 +615,12 @@ private:
   rclcpp::Time last_whisker_time_{0, 0, RCL_ROS_TIME};
   double push_cap_straight_{40.0}, push_cap_turn_{55.0};   // v8.1 force limit (PWM)
   static constexpr double kWhiskerHold = 0.3;   // s, whisker keeps priority this long after its last command
+  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr force_sub_;   // v8.2
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr display_sub_;  // v8.3
+  std::string oled_[4];
+  float force_{0.0f};
+  rclcpp::Time last_force_time_{0, 0, RCL_ROS_TIME};
+  static constexpr double kForceMax = 70.0;     // PWM, escape breakaway never above this (11-07 threshold test climbed at 70)
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr read_timer_;
