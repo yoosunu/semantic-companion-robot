@@ -169,6 +169,9 @@ private:
 
   // v8.3: write only the OLED lines that changed. Text kept to printable ASCII without quotes/backslash (JSON-safe), 20 chars.
   void on_display(const std::string & text) {
+    const bool refresh = (now() - oled_time_).seconds() > 5.0;   // 5 s 마다 4줄 다시 (펌웨어가 덮어써도 돌아오게)
+    if (refresh) {oled_time_ = now();}
+    int written = 0;
     size_t start = 0;
     for (int i = 0; i < 4; ++i) {
       const size_t end = text.find('\n', start);
@@ -178,12 +181,15 @@ private:
         if (c >= 32 && c < 127 && c != '"' && c != '\\') {safe += c;}
         if (safe.size() >= 20) {break;}
       }
-      if (safe != oled_[i]) {
+      if (safe != oled_[i] || refresh) {
         char json[96];
         std::snprintf(json, sizeof(json), "{\"T\":3,\"lineNum\":%d,\"Text\":\"%s\"}", i, safe.c_str());
-        if (serial_.write_line(json)) {oled_[i] = safe;}
+        if (serial_.write_line(json)) {oled_[i] = safe; ++written;}
       }
       if (end == std::string::npos) {start = text.size();} else {start = end + 1;}
+    }
+    if (written) {
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 10000, "oled: %d line(s) → \"%s\"", written, oled_[0].c_str());
     }
   }
 
@@ -618,6 +624,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr force_sub_;   // v8.2
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr display_sub_;  // v8.3
   std::string oled_[4];
+  rclcpp::Time oled_time_{0, 0, RCL_ROS_TIME};
   float force_{0.0f};
   rclcpp::Time last_force_time_{0, 0, RCL_ROS_TIME};
   static constexpr double kForceMax = 70.0;     // PWM, escape breakaway never above this (11-07 threshold test climbed at 70)

@@ -74,7 +74,7 @@ class StatusDisplay(Node):
     def tick(self):
         now = time.time()
         ls = lines(self.robot, self.whisker, self.volt, now)
-        if ls != self.last or now - self.last_t > 10.0:     # 바뀌었을 때 + 10 s 마다 한 번 (OLED 가 지워졌을 때 대비)
+        if ls != self.last or now - self.last_t > 2.0:      # 바뀌었을 때 + 2 s 마다 (브리지가 5 s 마다 4줄 다시 씀)
             self.last, self.last_t = ls, now
             self.pub.publish(String(data="\n".join(ls)))
 

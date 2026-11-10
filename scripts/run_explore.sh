@@ -10,7 +10,11 @@ LOGD=~/scr_logs/$(date +%Y-%m-%d); mkdir -p "$LOGD"; STAMP=$(date +%H%M)
 echo "nav 켜는 중 (25초)… 기록: $LOGD/{nav,explore}_$STAMP.log"
 tmux new -d -s nav "bash -ic 'ros2 launch scr_bringup nav.launch.py ugv_port:=/dev/ttyAMA0 2>&1 | tee -ia $LOGD/nav_$STAMP.log; exec bash'"
 sleep 25
-n=$(ros2 node list 2>/dev/null | grep -c whisker)
+# 11-11: ros2 데몬이 옛 목록을 주면 0 개로 보임 (위스커는 멀쩡히 돌고 있었음) → 데몬 없이, 3번까지 다시 봄
+for i in 1 2 3; do
+  n=$(ros2 node list --no-daemon 2>/dev/null | grep -c '^/whisker$')
+  [ "$n" = "1" ] && break; sleep 3
+done
 echo "Whisker 노드: $n 개 (1 이어야 함)"
 [ "$n" = "1" ] || { echo "→ 이상함. tmux capture-pane -J -pt nav | tail -30 로 확인"; exit 1; }
 tmux new -d -s hb "bash -ic 'python3 $REPO/scripts/heartbeat.py --period 30; exec bash'"
