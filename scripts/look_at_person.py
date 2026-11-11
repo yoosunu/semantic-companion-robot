@@ -2,26 +2,25 @@
 """look_at_person — 사람을 찾아 얼굴을 쳐다보기 (11-12, NERI 첫 시선).
 
   입력  /camera/image_raw (camera_ros, bgr8/rgb8)
-  출력  /pantilt/cmd  Float32MultiArray [팬°, 틸트°]  → 브리지 v8.4 {"T":133} (팬 −180~180, 틸트 −30~90)
-        /look/state   String JSON {"person", "face", "conf", "err", "pan", "tilt", "target", "infer_ms"} (상태 머신·말하기용)
+  출력  /pantilt/cmd  Float32MultiArray [팬°, 틸트°, SPD, ACC] → 브리지 v8.5 {"T":133} (팬 −180~180, 틸트 −30~90)
+        /look/state   String JSON {"mode", "person", "face", "conf", "err", "pan", "tilt", "infer_ms"} (상태 머신·말하기용)
 
-  보기  0.2 s 마다 최신 영상 → ① YuNet(얼굴)을 화면 전체(320 폭으로 줄여)에서 먼저 → 있으면 가장 큰 얼굴 가운데
-        ② 얼굴이 없으면 YOLO11n(사람) 상자 위에서 15% (머리 쪽 — 멀거나 뒤돌았을 때).
-        11-12 3차: 가까이서 위를 보면 몸이 화면에 다 안 들어와 YOLO 가 깜빡임(사람 있음/없음 반복) + 얼굴↔머리 추정 점이
-        번갈아 바뀌어 목표가 10° 넘게 왔다 갔다 → 덜덜. 가까울수록 얼굴이 확실하니 얼굴 먼저.
-        화면 가운데와의 각도 차이 (160° 어안 = 각도가 화면 거리에 비례한다고 봄).
-  목표  영상이 찍힐 때(받은 시각 − 0.15 s) 고개가 어디였나(기록) + 화면 오차 = 사람 방향 (11-12 1차: "지금 고개 + 오차"는
-        이미 돈 만큼 또 돌아 지나침). 탐지가 조금씩 튀는 건 평균(새 값 30%)으로 거름.
-        25° 넘게 튀는 값은 한 번은 무시, 다음에도 그 근처면 새 사람.
-        팬 목표가 ±180 을 넘으면 반대편 각도로 (선 때문에 그 사이를 못 지나감 → 크게 돌아감).
-  움직임 (11-12 2차, Jasper: "자연스럽게") 20 Hz 스프링: 출발은 천천히 가속, 도착은 부드럽게 멈춤 (임계 감쇠).
-        4° 넘게 벗어나야 움직이기 시작, 1.5° 안이면 멈춤 (작은 떨림 없음). 30° 넘는 큰 차이는 더 빠르게 (휙 돌아보기).
-  놓침  2 s 는 마지막 본 곳을 바라봄 → 틸트만 천천히 정면 높이(10°) → 10 s 넘으면 팬도 천천히 정면(0°).
+  보기  0.2 s 마다 최신 영상 → ① YuNet(얼굴)을 화면 전체(320 폭)에서 먼저 → 가장 큰 얼굴 가운데
+        ② 얼굴이 없으면 YOLO11n(사람) 상자 위에서 15% (머리 쪽 — 멀거나 뒤돌았을 때)
+  방향  영상이 찍힐 때(받은 시각 − 0.15 s) 고개가 어디였나(기록) + 화면 오차 = 사람 방향.
+
+  움직임 (11-12 Jasper: "정밀 추적보다 확 돌려 맞추고, 위아래 훑는 생명체 느낌") — 눈의 "도약 + 응시":
+    응시   얼굴이 화면 가운데 근처(좌우 ±10°, 위아래 ±8°)면 고개를 가만히 둠. 미세 추적 안 함 (덜덜 없음)
+    도약   그 밖으로 나가 두 번 연속 보이면 → 한 번에 확 (서보 최고 속도) → 0.6 s 는 영상 무시 (도는 중 영상)
+    인사   5 s 넘게 못 보던 얼굴이 나타나면 → 그쪽으로 도약 + 고개 끄덕 (틸트 −8° → 원래)
+    훑기   사람을 2 s 놓치면 마지막 본 곳 응시 → 5 s 넘으면 두리번: 4~7 s 마다 좌우 한 곳 + 높이 살짝 바꿔 봄
+  (11-12 1·2·3차의 부드러운 따라가기는 20 Hz 작은 걸음 = 서보가 걸음마다 섰다 갔다 → 덜덜. 가속 제한 10~40 도 안 됨)
   모델  ~/models/yolo11n.onnx (onnxruntime), ~/models/face_yunet.onnx (OpenCV ≥ 4.8 FaceDetectorYN, 없으면 얼굴 생략)
 """
 import collections
 import json
 import os
+import random
 import time
 
 import numpy as np
@@ -37,33 +36,11 @@ try:
 except ImportError:
     cv2 = None
 
-DT = 0.05
-START_DEG, STOP_DEG = 4.0, 1.5       # 움직이기 시작 / 멈춤 (히스테리시스)
-WN, WN_FAST, FAST_DEG = 4.0, 7.0, 30.0   # 스프링 고유 진동수 [rad/s] — 4 ≈ 1.2 s 에 도착, 큰 차이는 7 (11-12: 5 는 덜덜)
-WN_SLOW = 1.5                        # 놓쳤을 때 정면으로 돌아오기
-VMAX = 150.0                         # °/s
-JUMP_DEG = 25.0                      # 탐지가 이만큼 튀면 한 번은 무시, 두 번 연속이면 새 사람
-ALPHA = 0.3                          # 평균: 새 값 30%
-
-
-class Axis:
-    """한 축 스프링 (임계 감쇠) + 히스테리시스"""
-    def __init__(self, pos, lo, hi):
-        self.pos, self.v, self.target, self.lo, self.hi, self.moving = pos, 0.0, pos, lo, hi, False
-
-    def step(self, wn_override=None):
-        e = self.target - self.pos
-        if not self.moving and abs(e) > START_DEG:
-            self.moving = True
-        if self.moving and abs(e) < STOP_DEG and abs(self.v) < 5.0:
-            self.moving, self.v = False, 0.0
-        if not self.moving:
-            return False
-        wn = wn_override or (WN_FAST if abs(e) > FAST_DEG else WN)
-        self.v += (wn * wn * e - 2.0 * wn * self.v) * DT
-        self.v = max(-VMAX, min(VMAX, self.v))
-        self.pos = max(self.lo, min(self.hi, self.pos + self.v * DT))
-        return True
+ZONE_X, ZONE_Y = 10.0, 8.0            # 응시: 이 안이면 가만히
+SETTLE_S = 0.6                       # 도약 뒤 영상 무시
+GREET_AFTER = 5.0                    # 이만큼 못 보던 얼굴 = 새로 만남 → 끄덕
+SCAN_AFTER = 5.0                     # 이만큼 아무도 없으면 두리번
+SCAN_PANS = (-70.0, -35.0, 0.0, 35.0, 70.0)
 
 
 class Look(Node):
@@ -77,15 +54,15 @@ class Look(Node):
         self.hfov = p("hfov_deg", 120.0).value      # 160° 는 대각. 가로 ≈ 120° 로 시작 (화면 보며 조정)
         self.vfov = p("vfov_deg", 90.0).value
         self.lat = p("latency_s", 0.15).value       # 찍힘 → 받음
-        # 서보 자체 속도·가속 (0 = 최고, 단위는 펌웨어 기준 — 문서에 없음). 11-12: 최고 속도로 20 Hz 작은 걸음 = 덜덜
-        #   → 서보가 부드럽게 따라오게 값을 줌. 돌리는 중에 바꿔 보기: ros2 param set /look_at_person servo_acc 20
-        p("servo_spd", 0)
-        p("servo_acc", 20)
-        self.pan, self.tilt = Axis(0.0, -180.0, 180.0), Axis(10.0, -30.0, 90.0)
+        self.pan, self.tilt = 0.0, 10.0              # 보낸 고개
         self.hist = collections.deque(maxlen=60)     # (t, pan, tilt) 보낸 고개 기록 (늦은 영상 보정)
         self.img, self.img_t = None, 0.0
-        self.seen_t, self.log_t = 0.0, 0.0
-        self.odd = None                              # 크게 튄 값 (한 번 보류)
+        self.seen_t, self.face_t, self.log_t = 0.0, 0.0, 0.0
+        self.busy_until = 0.0                        # 도약·끄덕 중 (영상 무시)
+        self.out = None                              # 응시 구역 밖에서 한 번 본 방향 (두 번 연속이면 도약)
+        self.queue = []                              # 예약된 고개 [(시각, 팬, 틸트)] — 끄덕
+        self.scan_t = 0.0
+        self.mode = "idle"
         self.sess = ort.InferenceSession(self.model, providers=["CPUExecutionProvider"])
         self.inp = self.sess.get_inputs()[0].name
         self.face = None
@@ -98,33 +75,37 @@ class Look(Node):
         self.pub = self.create_publisher(Float32MultiArray, "pantilt/cmd", 10)
         self.state_pub = self.create_publisher(String, "look/state", 10)
         self.create_timer(0.2, self.tick)
-        self.create_timer(DT, self.smooth)
-        self.send()
+        self.create_timer(0.05, self.play)
+        self.move(0.0, 10.0)
         self.get_logger().info(f"LOOK 준비: {os.path.basename(self.model)} ({self.size}), "
                                f"얼굴={'YuNet' if self.face else '없음(머리 위치)'}, cv2={cv2.__version__ if cv2 else '없음'}")
 
     def on_img(self, m):
         self.img, self.img_t = m, time.time()
 
-    def send(self):
-        spd = float(self.get_parameter("servo_spd").value)
-        acc = float(self.get_parameter("servo_acc").value)
-        self.pub.publish(Float32MultiArray(data=[float(self.pan.pos), float(self.tilt.pos), spd, acc]))
-        self.hist.append((time.time(), self.pan.pos, self.tilt.pos))
+    def move(self, pan, tilt, settle=SETTLE_S):
+        """한 번에 확 (서보 최고 속도). 도는 동안 영상은 무시"""
+        if pan > 180.0:
+            pan -= 360.0                                         # ±180 너머는 반대편 각도 (선 때문에 크게 돌아감)
+        elif pan < -180.0:
+            pan += 360.0
+        self.pan, self.tilt = max(-180.0, min(180.0, pan)), max(-30.0, min(90.0, tilt))
+        self.pub.publish(Float32MultiArray(data=[float(self.pan), float(self.tilt), 0.0, 0.0]))
+        now = time.time()
+        self.hist.append((now, self.pan, self.tilt))
+        self.busy_until = now + settle
+
+    def play(self):
+        """예약된 고개 (끄덕) 차례대로"""
+        if self.queue and time.time() >= self.queue[0][0]:
+            _, pn, tl = self.queue.pop(0)
+            self.move(pn, tl, settle=0.35)
 
     def pose_at(self, t):
         for ht, hp, htl in reversed(self.hist):
             if ht <= t:
                 return hp, htl
-        return (self.hist[0][1], self.hist[0][2]) if self.hist else (self.pan.pos, self.tilt.pos)
-
-    def smooth(self):
-        lost = time.time() - self.seen_t
-        slow = WN_SLOW if lost > 2.0 else None
-        a = self.pan.step(slow)
-        b = self.tilt.step(slow)
-        if a or b:
-            self.send()
+        return (self.hist[0][1], self.hist[0][2]) if self.hist else (self.pan, self.tilt)
 
     def frame(self, m):
         a = np.frombuffer(bytes(m.data), np.uint8).reshape(m.height, m.step)[:, : m.width * 3].reshape(m.height, m.width, 3)
@@ -168,15 +149,15 @@ class Look(Node):
     def tick(self):
         now = time.time()
         m = self.img
-        if m is None:
-            return
+        if m is None or now < self.busy_until or self.queue or self.img_t - self.lat < self.busy_until - SETTLE_S + 0.3:
+            return                                               # 도는 중이거나, 돌기 전·도는 중에 찍힌 영상
         self.img = None
-        shot = self.img_t - self.lat                             # 이 영상이 찍힌 때
+        shot = self.img_t - self.lat
         rgb = self.frame(m)
         t0 = time.time()
         fc = self.find_face(rgb)
         d = None if fc else self.detect(rgb)                     # 얼굴이 있으면 YOLO 는 안 돌림 (전력도 아낌)
-        st = {"person": bool(fc or d), "face": fc is not None, "pan": round(self.pan.pos, 1), "tilt": round(self.tilt.pos, 1)}
+        st = {"person": bool(fc or d), "face": fc is not None}
         if fc or d:
             if fc:
                 hx, hy, c = fc
@@ -185,34 +166,35 @@ class Look(Node):
                 hx, hy = x, y - bh / 2 + 0.15 * bh               # 머리 쪽
             ex = (hx - m.width / 2) / (m.width / 2) * (self.hfov / 2)      # + = 오른쪽
             ey = (m.height / 2 - hy) / (m.height / 2) * (self.vfov / 2)    # + = 위
-            bp, bt = self.pose_at(shot)                          # 찍힐 때 고개 + 화면 오차 = 사람 방향
-            wp, wt = bp + ex, bt + ey
-            if wp > 180.0:
-                wp -= 360.0                                      # ±180 을 넘으면 반대편 각도 (선 때문에 크게 돌아감)
-            elif wp < -180.0:
-                wp += 360.0
-            far = max(abs(wp - self.pan.target), abs(wt - self.tilt.target)) > JUMP_DEG
-            if now - self.seen_t > 1.0:
-                self.pan.target, self.tilt.target, self.odd = wp, wt, None          # 오랜만 = 바로
-            elif far:
-                if self.odd and abs(self.odd[0] - wp) < 10.0 and abs(self.odd[1] - wt) < 10.0:
-                    self.pan.target, self.tilt.target, self.odd = wp, wt, None      # 두 번 연속 = 진짜 옮겨감
-                else:
-                    self.odd = (wp, wt)                                              # 한 번은 보류
-            else:
-                self.odd = None
-                self.pan.target += ALPHA * (wp - self.pan.target)
-                self.tilt.target += ALPHA * (wt - self.tilt.target)
-            self.seen_t = now
+            bp, bt = self.pose_at(shot)
+            wp, wt = bp + ex, bt + ey                            # 사람 방향
             st.update(conf=round(c, 2), err=[round(ex, 1), round(ey, 1)])
+            new_face = fc and now - self.face_t > GREET_AFTER
+            if fc:
+                self.face_t = now
+            self.seen_t = now
+            if new_face:
+                self.mode = "greet"                              # 오랜만의 얼굴: 확 보고 끄덕
+                self.move(wp, wt)
+                self.queue = [(now + 0.7, wp, wt - 8.0), (now + 1.05, wp, wt)]
+                self.out = None
+            elif abs(ex) <= ZONE_X and abs(ey) <= ZONE_Y:
+                self.mode, self.out = "gaze", None               # 가운데 근처: 가만히 응시
+            elif self.out and abs(self.out[0] - wp) < 15.0 and abs(self.out[1] - wt) < 15.0:
+                self.mode, self.out = "saccade", None            # 두 번 연속 밖: 확 돌림
+                self.move(wp, wt)
+            else:
+                self.out = (wp, wt)                              # 한 번은 지켜봄
         else:
             lost = now - self.seen_t
-            if lost > 2.0:
-                self.tilt.target = 10.0                          # 정면 높이로 (천천히 — smooth 가 느린 스프링으로)
-            if lost > 10.0:
-                self.pan.target = 0.0
-        st["target"] = [round(self.pan.target, 1), round(self.tilt.target, 1)]
-        st["infer_ms"] = round((time.time() - t0) * 1000)
+            if lost > SCAN_AFTER and now > self.scan_t:
+                self.mode = "scan"                               # 두리번: 좌우 한 곳 + 높이 살짝
+                choices = [x for x in SCAN_PANS if abs(x - self.pan) > 20.0]
+                self.move(random.choice(choices), random.uniform(5.0, 25.0), settle=1.0)
+                self.scan_t = now + random.uniform(4.0, 7.0)
+            elif lost > 2.0 and self.mode != "scan":
+                self.mode = "lost"
+        st.update(mode=self.mode, pan=round(self.pan, 1), tilt=round(self.tilt, 1), infer_ms=round((time.time() - t0) * 1000))
         self.state_pub.publish(String(data=json.dumps(st)))
         if now - self.log_t > 1.0:
             self.log_t = now
