@@ -27,6 +27,9 @@
 // v8.2 ESCAPE FORCE (11-10): /whisker/force (Float32, PWM) raises the breakaway limit ONLY while whisker drives and keeps
 //      sending it (0.3 s), never above kForceMax (70). Breakaway only: once the wheel turns, the push drops to the holding
 //      PWM as before → a freed robot does not shoot off. Whisker quiet → normal limits again (Jasper 11-10: 탈출 모듈).
+// v8.4 PAN-TILT (11-12): at start {"T":4,"cmd":2} (module = pan-tilt). /pantilt/cmd (Float32MultiArray [pan°, tilt°]) →
+//      {"T":133,"X":pan,"Y":tilt,"SPD":0,"ACC":0}, pan clamped −180..180 (never wraps past — cables), tilt −30..90,
+//      sent only when it changed ≥ 0.5° and at most every 50 ms. /pantilt/led (Float32 0..255) → {"T":132,"IO4":0,"IO5":v}.
 // v8.3 OLED (11-10): /robot/display (String, up to 4 lines joined by \n, from scripts/status_display.py) → only the lines
 //      that changed go out as {"T":3,"lineNum":i,"Text":...}. The bridge is the only serial writer, so the display lives here.
 // v8  Whisker hooks (11-06), the bridge stays thin — all touch logic lives in scripts/whisker.py (Python, no rebuild):
@@ -108,6 +111,7 @@ public:
     char hb[48];
     std::snprintf(hb, sizeof(hb), "{\"T\":136,\"cmd\":%d}", heartbeat_ms_);
     serial_.write_line(hb);
+    serial_.write_line("{\"T\":4,\"cmd\":2}");   // v8.4: extra module = pan-tilt (official table: 0 none / 1 arm / 2 pan-tilt)
     RCLCPP_INFO(get_logger(), "firmware heartbeat %d ms (auto-stop if bridge goes silent)", heartbeat_ms_);
 
     // Outputs (up direction).
@@ -127,6 +131,21 @@ public:
       [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
         last_whisker_time_ = now();
         apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
+      });
+    // v8.4: pan-tilt head + LED
+    pantilt_sub_ = create_subscription<std_msgs::msg::Float32MultiArray>(
+      "pantilt/cmd", 10,
+      [this](const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
+        if (msg->data.size() < 2) {return;}
+        on_pantilt(msg->data[0], msg->data[1]);
+      });
+    led_sub_ = create_subscription<std_msgs::msg::Float32>(
+      "pantilt/led", 10,
+      [this](const std_msgs::msg::Float32::SharedPtr msg) {
+        const int v = static_cast<int>(std::lround(std::clamp(static_cast<double>(msg->data), 0.0, 255.0)));
+        char json[48];
+        std::snprintf(json, sizeof(json), "{\"T\":132,\"IO4\":0,\"IO5\":%d}", v);
+        serial_.write_line(json);
       });
     // v8.3: OLED lines
     display_sub_ = create_subscription<std_msgs::msg::String>(
@@ -165,6 +184,18 @@ private:
   void on_cmd_vel(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
     if (whisker_active()) {return;}   // v8: Whisker is handling a touch → Nav2 waits
     apply_cmd(msg->twist.linear.x, msg->twist.angular.z);
+  }
+
+  // v8.4: head. Clamp (pan never past ±180 — the cables are wound for one turn), skip tiny changes, ≤ 20 Hz.
+  void on_pantilt(double pan, double tilt) {
+    pan = std::clamp(pan, -180.0, 180.0);
+    tilt = std::clamp(tilt, -30.0, 90.0);
+    const rclcpp::Time t = now();
+    if (std::abs(pan - pt_pan_) < 0.5 && std::abs(tilt - pt_tilt_) < 0.5) {return;}
+    if (pt_time_.nanoseconds() != 0 && (t - pt_time_).seconds() < 0.05) {return;}
+    char json[80];
+    std::snprintf(json, sizeof(json), "{\"T\":133,\"X\":%.1f,\"Y\":%.1f,\"SPD\":0,\"ACC\":0}", pan, tilt);
+    if (serial_.write_line(json)) {pt_pan_ = pan; pt_tilt_ = tilt; pt_time_ = t;}
   }
 
   // v8.3: write only the OLED lines that changed. Text kept to printable ASCII without quotes/backslash (JSON-safe), 20 chars.
@@ -623,6 +654,10 @@ private:
   static constexpr double kWhiskerHold = 0.3;   // s, whisker keeps priority this long after its last command
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr force_sub_;   // v8.2
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr display_sub_;  // v8.3
+  rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr pantilt_sub_;   // v8.4
+  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr led_sub_;
+  double pt_pan_{999.0}, pt_tilt_{999.0};
+  rclcpp::Time pt_time_{0, 0, RCL_ROS_TIME};
   std::string oled_[4];
   rclcpp::Time oled_time_{0, 0, RCL_ROS_TIME};
   float force_{0.0f};

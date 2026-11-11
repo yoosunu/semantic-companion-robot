@@ -28,3 +28,7 @@ __pycache__/
 
 # 개인 이력서·포트폴리오 작업 파일 (비공개, Mac 에만)
 docs/portfolio.md
+
+# 모델 파일 (크기 큼, Pi 로는 scp)
+models/
+*.onnx
