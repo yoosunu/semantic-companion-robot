@@ -5,11 +5,14 @@
   출력  /pantilt/cmd  Float32MultiArray [팬°, 틸트°]  → 브리지 v8.4 {"T":133} (팬 −180~180, 틸트 −30~90)
         /look/state   String JSON {"person", "face", "conf", "err", "pan", "tilt", "target", "infer_ms"} (상태 머신·말하기용)
 
-  보기  0.2 s 마다 최신 영상 → YOLO11n(사람) → 가장 확실한 사람 상자 위쪽 45% 만 잘라 YuNet(얼굴) →
-        얼굴이 있으면 얼굴 가운데, 없으면(뒤돌았을 때) 상자 위에서 15% (머리 쪽).
+  보기  0.2 s 마다 최신 영상 → ① YuNet(얼굴)을 화면 전체(320 폭으로 줄여)에서 먼저 → 있으면 가장 큰 얼굴 가운데
+        ② 얼굴이 없으면 YOLO11n(사람) 상자 위에서 15% (머리 쪽 — 멀거나 뒤돌았을 때).
+        11-12 3차: 가까이서 위를 보면 몸이 화면에 다 안 들어와 YOLO 가 깜빡임(사람 있음/없음 반복) + 얼굴↔머리 추정 점이
+        번갈아 바뀌어 목표가 10° 넘게 왔다 갔다 → 덜덜. 가까울수록 얼굴이 확실하니 얼굴 먼저.
         화면 가운데와의 각도 차이 (160° 어안 = 각도가 화면 거리에 비례한다고 봄).
   목표  영상이 찍힐 때(받은 시각 − 0.15 s) 고개가 어디였나(기록) + 화면 오차 = 사람 방향 (11-12 1차: "지금 고개 + 오차"는
-        이미 돈 만큼 또 돌아 지나침). 탐지가 조금씩 튀는 건 평균(새 값 50%)으로 거름, 25° 넘게 튀면 새 사람으로 보고 바로.
+        이미 돈 만큼 또 돌아 지나침). 탐지가 조금씩 튀는 건 평균(새 값 30%)으로 거름.
+        25° 넘게 튀는 값은 한 번은 무시, 다음에도 그 근처면 새 사람.
         팬 목표가 ±180 을 넘으면 반대편 각도로 (선 때문에 그 사이를 못 지나감 → 크게 돌아감).
   움직임 (11-12 2차, Jasper: "자연스럽게") 20 Hz 스프링: 출발은 천천히 가속, 도착은 부드럽게 멈춤 (임계 감쇠).
         4° 넘게 벗어나야 움직이기 시작, 1.5° 안이면 멈춤 (작은 떨림 없음). 30° 넘는 큰 차이는 더 빠르게 (휙 돌아보기).
@@ -36,10 +39,11 @@ except ImportError:
 
 DT = 0.05
 START_DEG, STOP_DEG = 4.0, 1.5       # 움직이기 시작 / 멈춤 (히스테리시스)
-WN, WN_FAST, FAST_DEG = 5.0, 8.0, 30.0   # 스프링 고유 진동수 [rad/s] — 5 ≈ 1 s 에 도착, 큰 차이는 8
+WN, WN_FAST, FAST_DEG = 4.0, 7.0, 30.0   # 스프링 고유 진동수 [rad/s] — 4 ≈ 1.2 s 에 도착, 큰 차이는 7 (11-12: 5 는 덜덜)
 WN_SLOW = 1.5                        # 놓쳤을 때 정면으로 돌아오기
 VMAX = 150.0                         # °/s
-JUMP_DEG = 25.0                      # 탐지가 이만큼 튀면 평균 내지 않고 바로 (새 사람)
+JUMP_DEG = 25.0                      # 탐지가 이만큼 튀면 한 번은 무시, 두 번 연속이면 새 사람
+ALPHA = 0.3                          # 평균: 새 값 30%
 
 
 class Axis:
@@ -77,6 +81,7 @@ class Look(Node):
         self.hist = collections.deque(maxlen=60)     # (t, pan, tilt) 보낸 고개 기록 (늦은 영상 보정)
         self.img, self.img_t = None, 0.0
         self.seen_t, self.log_t = 0.0, 0.0
+        self.odd = None                              # 크게 튄 값 (한 번 보류)
         self.sess = ort.InferenceSession(self.model, providers=["CPUExecutionProvider"])
         self.inp = self.sess.get_inputs()[0].name
         self.face = None
@@ -140,23 +145,19 @@ class Look(Node):
         cx, cy, bw, bh = out[0, i], out[1, i], out[2, i], out[3, i]
         return (float((cx - px) / s), float((cy - py) / s), float(bw / s), float(bh / s), float(score[i]))   # numpy float32 → float (JSON)
 
-    def find_face(self, rgb, x, y, bw, bh):
-        """사람 상자 위쪽 45% 에서 얼굴 가운데 (원래 영상 좌표), 없으면 None"""
+    def find_face(self, rgb):
+        """화면 전체(320 폭)에서 가장 큰 얼굴 가운데 (원래 영상 좌표, 정확도), 없으면 None"""
         if self.face is None:
             return None
         H, W = rgb.shape[:2]
-        x0, x1 = int(max(0, x - bw / 2)), int(min(W, x + bw / 2))
-        y0 = int(max(0, y - bh / 2))
-        y1 = int(min(H, y0 + 0.45 * bh))
-        if x1 - x0 < 16 or y1 - y0 < 16:
-            return None
-        crop = np.ascontiguousarray(rgb[y0:y1, x0:x1, ::-1])     # YuNet 은 BGR
-        self.face.setInputSize((crop.shape[1], crop.shape[0]))
-        _, faces = self.face.detect(crop)
+        k = 320.0 / W
+        small = cv2.resize(np.ascontiguousarray(rgb[:, :, ::-1]), (320, int(round(H * k))))   # YuNet 은 BGR
+        self.face.setInputSize((small.shape[1], small.shape[0]))
+        _, faces = self.face.detect(small)
         if faces is None or not len(faces):
             return None
-        f = max(faces, key=lambda r: r[-1])
-        return float(x0 + f[0] + f[2] / 2), float(y0 + f[1] + f[3] / 2)
+        f = max(faces, key=lambda r: r[2] * r[3])
+        return float((f[0] + f[2] / 2) / k), float((f[1] + f[3] / 2) / k), float(f[-1])
 
     def tick(self):
         now = time.time()
@@ -167,15 +168,14 @@ class Look(Node):
         shot = self.img_t - self.lat                             # 이 영상이 찍힌 때
         rgb = self.frame(m)
         t0 = time.time()
-        d = self.detect(rgb)
-        st = {"person": d is not None, "face": False, "pan": round(self.pan.pos, 1), "tilt": round(self.tilt.pos, 1)}
-        if d:
-            x, y, bw, bh, c = d
-            fc = self.find_face(rgb, x, y, bw, bh)
+        fc = self.find_face(rgb)
+        d = None if fc else self.detect(rgb)                     # 얼굴이 있으면 YOLO 는 안 돌림 (전력도 아낌)
+        st = {"person": bool(fc or d), "face": fc is not None, "pan": round(self.pan.pos, 1), "tilt": round(self.tilt.pos, 1)}
+        if fc or d:
             if fc:
-                hx, hy = fc
-                st["face"] = True
+                hx, hy, c = fc
             else:
+                x, y, bw, bh, c = d
                 hx, hy = x, y - bh / 2 + 0.15 * bh               # 머리 쪽
             ex = (hx - m.width / 2) / (m.width / 2) * (self.hfov / 2)      # + = 오른쪽
             ey = (m.height / 2 - hy) / (m.height / 2) * (self.vfov / 2)    # + = 위
@@ -185,9 +185,18 @@ class Look(Node):
                 wp -= 360.0                                      # ±180 을 넘으면 반대편 각도 (선 때문에 크게 돌아감)
             elif wp < -180.0:
                 wp += 360.0
-            for ax, w_ in ((self.pan, wp), (self.tilt, wt)):
-                fresh = now - self.seen_t > 1.0 or abs(w_ - ax.target) > JUMP_DEG
-                ax.target = w_ if fresh else ax.target + 0.5 * (w_ - ax.target)
+            far = max(abs(wp - self.pan.target), abs(wt - self.tilt.target)) > JUMP_DEG
+            if now - self.seen_t > 1.0:
+                self.pan.target, self.tilt.target, self.odd = wp, wt, None          # 오랜만 = 바로
+            elif far:
+                if self.odd and abs(self.odd[0] - wp) < 10.0 and abs(self.odd[1] - wt) < 10.0:
+                    self.pan.target, self.tilt.target, self.odd = wp, wt, None      # 두 번 연속 = 진짜 옮겨감
+                else:
+                    self.odd = (wp, wt)                                              # 한 번은 보류
+            else:
+                self.odd = None
+                self.pan.target += ALPHA * (wp - self.pan.target)
+                self.tilt.target += ALPHA * (wt - self.tilt.target)
             self.seen_t = now
             st.update(conf=round(c, 2), err=[round(ex, 1), round(ey, 1)])
         else:
