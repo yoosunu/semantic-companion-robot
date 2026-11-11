@@ -138,7 +138,7 @@ class Look(Node):
         if score[i] < self.conf:
             return None
         cx, cy, bw, bh = out[0, i], out[1, i], out[2, i], out[3, i]
-        return ((cx - px) / s, (cy - py) / s, bw / s, bh / s, float(score[i]))
+        return (float((cx - px) / s), float((cy - py) / s), float(bw / s), float(bh / s), float(score[i]))   # numpy float32 → float (JSON)
 
     def find_face(self, rgb, x, y, bw, bh):
         """사람 상자 위쪽 45% 에서 얼굴 가운데 (원래 영상 좌표), 없으면 None"""
@@ -156,7 +156,7 @@ class Look(Node):
         if faces is None or not len(faces):
             return None
         f = max(faces, key=lambda r: r[-1])
-        return x0 + f[0] + f[2] / 2, y0 + f[1] + f[3] / 2
+        return float(x0 + f[0] + f[2] / 2), float(y0 + f[1] + f[3] / 2)
 
     def tick(self):
         now = time.time()
