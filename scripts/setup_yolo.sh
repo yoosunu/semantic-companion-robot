@@ -6,7 +6,7 @@
 set -e
 mkdir -p ~/models
 [ -d ~/yolo_venv ] || python3 -m venv --system-site-packages ~/yolo_venv
-~/yolo_venv/bin/pip install -q onnxruntime
+~/yolo_venv/bin/pip install -q onnxruntime numpy
 ~/yolo_venv/bin/python -c "import onnxruntime, numpy; print('onnxruntime', onnxruntime.__version__, 'numpy', numpy.__version__)"
 ~/yolo_venv/bin/python -c "import cv2; print('cv2', cv2.__version__)" 2>/dev/null || echo "cv2 없음 → numpy 로 줄임 (조금 느림, 괜찮음)"
 ls -la ~/models/yolo11n.onnx 2>/dev/null || echo "⚠ ~/models/yolo11n.onnx 없음 → Mac 에서 scp 먼저"

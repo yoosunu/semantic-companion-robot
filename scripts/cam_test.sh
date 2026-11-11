@@ -7,4 +7,4 @@ P=$!; sleep 6
 echo "--- 노드 로그 (마지막 8줄)"; tail -8 /tmp/cam_node.log
 echo "--- 초당 장수 (5 s)"; timeout 5 ros2 topic hz /camera/image_raw 2>/dev/null | tail -2
 python3 ~/semantic-companion-robot/scripts/cam_snap.py
-kill $P 2>/dev/null; wait $P 2>/dev/null
+kill $P 2>/dev/null; pkill -f "camera_ros/camera_node" 2>/dev/null   # ros2 run 만 죽이면 카메라 노드가 남아 카메라를 붙잡음 (11-12)
