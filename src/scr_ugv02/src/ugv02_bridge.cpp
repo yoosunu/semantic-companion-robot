@@ -27,6 +27,8 @@
 // v8.2 ESCAPE FORCE (11-10): /whisker/force (Float32, PWM) raises the breakaway limit ONLY while whisker drives and keeps
 //      sending it (0.3 s), never above kForceMax (70). Breakaway only: once the wheel turns, the push drops to the holding
 //      PWM as before → a freed robot does not shoot off. Whisker quiet → normal limits again (Jasper 11-10: 탈출 모듈).
+// v8.5 (11-12): /pantilt/cmd may carry [pan, tilt, SPD, ACC] — servo's own speed/accel profile (0 = fastest, units per
+//      Waveshare json_cmd.h, not documented). Fastest + 20 Hz small steps looked shaky ("덜덜") → let the servo smooth.
 // v8.4 PAN-TILT (11-12): at start {"T":4,"cmd":2} (module = pan-tilt). /pantilt/cmd (Float32MultiArray [pan°, tilt°]) →
 //      {"T":133,"X":pan,"Y":tilt,"SPD":0,"ACC":0}, pan clamped −180..180 (never wraps past — cables), tilt −30..90,
 //      sent only when it changed ≥ 0.5° and at most every 50 ms. /pantilt/led (Float32 0..255) → {"T":132,"IO4":0,"IO5":v}.
@@ -137,7 +139,9 @@ public:
       "pantilt/cmd", 10,
       [this](const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
         if (msg->data.size() < 2) {return;}
-        on_pantilt(msg->data[0], msg->data[1]);
+        const double spd = msg->data.size() >= 3 ? msg->data[2] : 0.0;   // v8.5: servo speed/accel (0 = fastest)
+        const double acc = msg->data.size() >= 4 ? msg->data[3] : 0.0;
+        on_pantilt(msg->data[0], msg->data[1], spd, acc);
       });
     led_sub_ = create_subscription<std_msgs::msg::Float32>(
       "pantilt/led", 10,
@@ -187,14 +191,15 @@ private:
   }
 
   // v8.4: head. Clamp (pan never past ±180 — the cables are wound for one turn), skip tiny changes, ≤ 20 Hz.
-  void on_pantilt(double pan, double tilt) {
+  void on_pantilt(double pan, double tilt, double spd, double acc) {
     pan = std::clamp(pan, -180.0, 180.0);
     tilt = std::clamp(tilt, -30.0, 90.0);
     const rclcpp::Time t = now();
     if (std::abs(pan - pt_pan_) < 0.5 && std::abs(tilt - pt_tilt_) < 0.5) {return;}
     if (pt_time_.nanoseconds() != 0 && (t - pt_time_).seconds() < 0.05) {return;}
     char json[80];
-    std::snprintf(json, sizeof(json), "{\"T\":133,\"X\":%.1f,\"Y\":%.1f,\"SPD\":0,\"ACC\":0}", pan, tilt);
+    std::snprintf(json, sizeof(json), "{\"T\":133,\"X\":%.1f,\"Y\":%.1f,\"SPD\":%d,\"ACC\":%d}", pan, tilt,
+      static_cast<int>(std::lround(std::max(0.0, spd))), static_cast<int>(std::lround(std::max(0.0, acc))));
     if (serial_.write_line(json)) {pt_pan_ = pan; pt_tilt_ = tilt; pt_time_ = t;}
   }
 

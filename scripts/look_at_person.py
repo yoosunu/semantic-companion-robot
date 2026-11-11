@@ -77,6 +77,10 @@ class Look(Node):
         self.hfov = p("hfov_deg", 120.0).value      # 160° 는 대각. 가로 ≈ 120° 로 시작 (화면 보며 조정)
         self.vfov = p("vfov_deg", 90.0).value
         self.lat = p("latency_s", 0.15).value       # 찍힘 → 받음
+        # 서보 자체 속도·가속 (0 = 최고, 단위는 펌웨어 기준 — 문서에 없음). 11-12: 최고 속도로 20 Hz 작은 걸음 = 덜덜
+        #   → 서보가 부드럽게 따라오게 값을 줌. 돌리는 중에 바꿔 보기: ros2 param set /look_at_person servo_acc 20
+        p("servo_spd", 0)
+        p("servo_acc", 20)
         self.pan, self.tilt = Axis(0.0, -180.0, 180.0), Axis(10.0, -30.0, 90.0)
         self.hist = collections.deque(maxlen=60)     # (t, pan, tilt) 보낸 고개 기록 (늦은 영상 보정)
         self.img, self.img_t = None, 0.0
@@ -87,7 +91,7 @@ class Look(Node):
         self.face = None
         if cv2 is not None and hasattr(cv2, "FaceDetectorYN") and os.path.exists(self.face_model):
             try:
-                self.face = cv2.FaceDetectorYN.create(self.face_model, "", (160, 160), 0.6)
+                self.face = cv2.FaceDetectorYN.create(self.face_model, "", (160, 160), 0.5)   # 0.6 은 가까이서 자주 놓침
             except cv2.error as e:
                 self.get_logger().warn(f"LOOK 얼굴 모델 못 씀 ({e}) → 머리 위치만")
         self.create_subscription(Image, "camera/image_raw", self.on_img, qos_profile_sensor_data)
@@ -103,7 +107,9 @@ class Look(Node):
         self.img, self.img_t = m, time.time()
 
     def send(self):
-        self.pub.publish(Float32MultiArray(data=[float(self.pan.pos), float(self.tilt.pos)]))
+        spd = float(self.get_parameter("servo_spd").value)
+        acc = float(self.get_parameter("servo_acc").value)
+        self.pub.publish(Float32MultiArray(data=[float(self.pan.pos), float(self.tilt.pos), spd, acc]))
         self.hist.append((time.time(), self.pan.pos, self.tilt.pos))
 
     def pose_at(self, t):
