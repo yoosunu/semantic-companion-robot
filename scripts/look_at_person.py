@@ -5,6 +5,7 @@
 
   입력  people             scr_interfaces/People (face_perception)
         scan               LiDAR — 잠잘 때 가까운 움직임으로 깨기
+        odom               바퀴 — 로봇이 움직이는 중엔 "다가옴" 안 셈 (우리가 다가가도 얼굴은 커짐)
   출력  pantilt/cmd        [팬, 틸트, SPD, ACC] → 브리지 v8.5
         pantilt/led        LED 밝기 0~255 (깨어있음 40 / 꾸벅 8 / 잠 0 / 반짝 255)
         perception/enable  Bool — 잠들면 False (face_perception 이 영상 처리 멈춤)
@@ -26,6 +27,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from scr_interfaces.msg import People
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, Float32, Float32MultiArray, String
 
@@ -49,6 +51,8 @@ class Look(Node):
         self.log_t = 0.0
         self.create_subscription(People, "people", self.on_people, 10)
         self.create_subscription(LaserScan, "scan", self.on_scan, qos_profile_sensor_data)
+        self.create_subscription(Odometry, "odom", self.on_odom, 10)
+        self.moving_t = 0.0                                       # 마지막으로 바퀴가 움직인 시각
         self.pub_cmd = self.create_publisher(Float32MultiArray, "pantilt/cmd", 10)
         self.pub_led = self.create_publisher(Float32, "pantilt/led", 10)
         self.pub_enable = self.create_publisher(Bool, "perception/enable", 10)
@@ -69,6 +73,10 @@ class Look(Node):
         self.people = [{"id": x.track_id, "pan": x.pan, "tilt": x.tilt, "px": x.face_px, "yaw": x.yaw,
                         "pitch": x.pitch, "unseen": x.unseen_s, "name": x.name} for x in m.people]
 
+    def on_odom(self, m):
+        if abs(m.twist.twist.linear.x) > 0.02 or abs(m.twist.twist.angular.z) > 0.05:
+            self.moving_t = time.time()
+
     def on_scan(self, m):
         if self.brain.mode == "sleep" and self.motion.step(time.time(), list(m.ranges)):
             self.moved = True
@@ -76,7 +84,7 @@ class Look(Node):
     def tick(self):
         now = time.time()
         people = self.people if now - self.people_t < 1.0 else []     # face_perception 이 멈췄으면 아무도 없음
-        acts = self.brain.tick(now, people, self.moved)
+        acts = self.brain.tick(now, people, self.moved, now - self.moving_t < 1.0)
         self.moved = False
         if self.brain.last_trig and self.brain.last_trig != getattr(self, "logged_trig", None):
             self.logged_trig = self.brain.last_trig

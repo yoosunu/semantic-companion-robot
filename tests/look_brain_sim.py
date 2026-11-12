@@ -21,13 +21,13 @@ def person(pan=0.0, tilt=30.0, px=25.0, yaw=60.0, pid=1, unseen=0.0):
     return {"id": pid, "pan": pan, "tilt": tilt, "px": px, "yaw": yaw, "pitch": 0.0, "unseen": unseen}
 
 
-def run(world, secs, b=None, motion=lambda t: False, t0=0.0):
+def run(world, secs, b=None, motion=lambda t: False, t0=0.0, moving=lambda t: False):
     """world(t) → people 목록. 기록: [(t, 모드, 이유, 동작들)]"""
     b = b or lb.Brain(random.Random(1))
     log = []
     t = t0
     while t < t0 + secs:
-        acts = b.tick(t, world(t), motion(t))
+        acts = b.tick(t, world(t), motion(t), moving(t))
         log.append((round(t, 1), b.mode, b.reason, acts))
         t += DT
     return b, log
@@ -166,6 +166,18 @@ w = lambda t: [person(px=15 if t < 30 else min(30, 15 + (t - 30) * 15), yaw=60)]
 b, log = run(w, 33)
 real = any(rr == "approach" for t, m, rr, _ in log)
 check("16 크기 흔들림 ≠ 다가옴", not noisy and real, f"흔들림 {noisy} 진짜 {real}")
+
+# 17. 로봇이 움직이는 중 얼굴이 커짐 → 다가옴 아님 (우리가 다가간 것)
+w = lambda t: [person(px=15 if t < 30 else min(30, 15 + (t - 30) * 15), yaw=60)]
+b, log = run(w, 33, moving=lambda t: t >= 29)
+check("17 로봇이 움직이면 다가옴 아님", not any(rr == "approach" for t, m, rr, _ in log))
+
+# 18. 꾸벅 모양: 느리게 스르르 → 빠르게 툭 → 빠르게 제자리
+b, log = run(lambda t: [person(yaw=60)], 90)
+dz = [(t, x) for t, m, _, a in log if m == "doze" for x in a if x[0] == "move"][1:4]
+shape = [(round(x[2]), x[3]) for t, x in dz]
+check("18 꾸벅: 스르르(느림)→툭(빠름)→번쩍(빠름)", len(shape) == 3 and shape[0][1] > 0 and shape[1][1] == 0 and shape[2][1] == 0
+      and shape[1][0] < shape[0][0] < shape[2][0], shape)
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

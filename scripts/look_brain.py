@@ -10,12 +10,15 @@
     idle    딴짓: 사람은 곁눈(화면 안)에 두고 15~30° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
             사람을 놓쳐도 마지막 본 곳 기준 (11-12: 놓친 뒤 지금 고개 기준으로 또 옆을 봐서 −58° → −96° 로 멀어짐)
     doze    꾸벅: 1 분 동안 아무 일(트리거) 없으면. 고개 천천히 내려가고 LED 어둡게, 가끔 꾸벅. 트리거 → 번쩍 깸
+            꾸벅 한 번 = 아주 천천히 스르르 (3 s, 8°) → 툭 떨어짐 (빠르게 10°) → 0.3 s → 번쩍 제자리 (빠르게)
+            (11-12 Jasper: 예전 것은 "그냥 밑에 봤다 올라오는 것" 같음. 사람 조는 건 천천히 기울다 툭 → 화들짝)
     sleep   잠: 꾸벅 3 분 더. 고개 끝까지 숙이고 LED 끔, 얼굴 처리도 멈춤 (보안·절약). LiDAR 로 가까운 움직임 → 깸
 
   다시 쳐다볼 이유 (트리거) — 이게 있어야 attend 로
     contact   사람이 나를 쳐다보기 시작 (2 s 넘게 딴 데(|yaw|>35°) 보던 사람이 20° 안으로)
     glance    사람이 두리번 (1 s 안에 yaw 25° 넘게 바뀜) → 짧게 3 s 만 봄. ※ 기본 끔 (아래)
-    approach  다가옴 (최근 0.5 s 평균 얼굴이 1 s 전보다 1.3 배, 20 px 이상)
+    approach  다가옴 — 로봇이 서 있을 때만 (로봇이 다가가도 얼굴은 커지니까. 11-12 Jasper)
+              (최근 0.5 s 평균 얼굴이 1 s 전보다 1.3 배, 20 px 이상)
     arrive    새 사람 (10 s 동안 아무도 없다가) → 쳐다보고 끄덕 인사
   단순히 "있음" 은 트리거가 아님 → 사람이 컴퓨터만 보고 있으면 로봇은 딴짓하다 졸게 됨.
   이미 쳐다보는 중(attend)엔 contact·glance 가 시간을 늘리지 않음 → 10~30 s 지나면 꼭 딴짓 (다시 보려면 고개 돌렸다 다시 봐야 함)
@@ -52,7 +55,8 @@ APPROACH_RATIO, APPROACH_WIN = 1.3, 1.5    # 평균끼리 비교라 1.3 (1 s 전
 APPROACH_MIN_PX = 20.0               # 다가와서 이만큼은 커져야 (11-12: 먼 얼굴 15↔21 px 흔들림이 "다가옴" 으로 잡힘)
 ARRIVE_GAP = 10.0
 LED_AWAKE, LED_DOZE, LED_FLASH = 40, 8, 255
-SLOW = (150, 5)                      # 꾸벅용 느린 SPD, ACC (ST3215: SPD 걸음/s, 4096 걸음 = 한 바퀴 → 150 ≈ 13°/s)
+SLOW = (150, 5)                      # 졸기 시작 느린 SPD, ACC (ST3215: SPD 걸음/s, 4096 걸음 = 한 바퀴 → 150 ≈ 13°/s)
+DRIFT = (30, 2)                      # 꾸벅 전 스르르 (30 ≈ 2.6°/s → 8° 에 3 s)
 TILT_HOME, TILT_DOZE, TILT_SLEEP = 10.0, -5.0, -30.0
 
 
@@ -100,7 +104,7 @@ class Brain:
             self.mode, self.reason = mode, reason
 
     # ---------- 트리거 감지 ----------
-    def triggers(self, now, people):
+    def triggers(self, now, people, moving=False):
         """사람마다 이번에 생긴 트리거 → [(이름, 트랙)]"""
         found = []
         for p in people:
@@ -111,7 +115,9 @@ class Brain:
             m["px"].append((now, p["px"]))
             cur = [x for t, x in m["px"] if now - t <= 0.5]          # 최근 0.5 s 평균 vs 1 s 전쯤 평균 (흔들림은 평균에서 상쇄)
             old = [x for t, x in m["px"] if 0.8 <= now - t <= APPROACH_WIN]
-            if cur and old and sum(cur) / len(cur) >= max(APPROACH_MIN_PX, APPROACH_RATIO * sum(old) / len(old)):
+            if moving:
+                m["px"].clear()                              # 로봇이 움직이는 중: 크기 변화는 우리 탓
+            elif cur and old and sum(cur) / len(cur) >= max(APPROACH_MIN_PX, APPROACH_RATIO * sum(old) / len(old)):
                 found.append(("approach", p))
                 m["px"].clear()
             if p["px"] < YAW_MIN_PX:
@@ -141,8 +147,8 @@ class Brain:
         return found
 
     # ---------- 한 번 (0.1 s 마다) ----------
-    def tick(self, now, people, motion=False):
-        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), motion: LiDAR 가까운 움직임"""
+    def tick(self, now, people, motion=False, moving=False):
+        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), motion: LiDAR 가까운 움직임, moving: 로봇 바퀴가 움직이는 중"""
         out = []
         if not self.started:
             self.started, self.event_t = True, now
@@ -167,7 +173,7 @@ class Brain:
             else:
                 trig = []
             self.seen_t = now
-            trig += self.triggers(now, visible)
+            trig += self.triggers(now, visible, moving)
         else:
             trig = []
 
@@ -181,8 +187,9 @@ class Brain:
                 out += [("led", 0), ("perceive", False)]
             elif not self.clip and now > self.until:        # 가끔 꾸벅
                 self.until = now + self.rng.uniform(8.0, 15.0)
-                self.play(now, [(0.0, ("move", self.pan, TILT_DOZE - 12.0, *SLOW, 1.5)),
-                                (1.6, ("move", self.pan, TILT_DOZE, 0, 0, 0.4))])
+                self.play(now, [(0.0, ("move", self.pan, TILT_DOZE - 8.0, *DRIFT, 3.0)),      # 스르르
+                                (3.1, ("move", self.pan, TILT_DOZE - 18.0, 0, 0, 0.3)),     # 툭
+                                (3.6, ("move", self.pan, TILT_DOZE, 0, 0, 0.4))])           # 번쩍
             return out
 
         if trig:
