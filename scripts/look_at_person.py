@@ -15,7 +15,8 @@
   판단은 전부 look_brain.Brain (ROS 없음, tests/look_brain_sim.py 로 시험):
     scan 두리번 / attend 쳐다봄 / idle 딴짓 / doze 꾸벅 / sleep 잠.  쳐다볼 "이유"(트리거)가 있을 때만 쳐다봄.
   파라미터  doze_after (60 s), sleep_after (180 s), sleep (true — false 면 꾸벅까지만),
-            led (false — 11-12 실측: 8 도 눈부신 조명이라 표현에 안 씀)
+            led (false — 11-12 실측: 8 도 눈부신 조명이라 표현에 안 씀),
+            doze_style ("soft" 스르르→툭→번쩍 / "hard" 실험: 끝까지 툭 → 화들짝 → 도리도리)
   로그      LOOK {...} 1 s 마다 + TRIG 트리거가 생길 때마다 (다가옴·눈맞춤이 실제로 잡혔는지 확인용)
 """
 import json
@@ -42,6 +43,7 @@ class Look(Node):
         look_brain.DOZE_AFTER = float(p("doze_after", look_brain.DOZE_AFTER).value)
         look_brain.SLEEP_AFTER = float(p("sleep_after", look_brain.SLEEP_AFTER).value)
         self.led = p("led", False).value
+        look_brain.DOZE_STYLE = p("doze_style", look_brain.DOZE_STYLE).value
         if not p("sleep", True).value:
             look_brain.SLEEP_AFTER = 1e9
         self.brain = look_brain.Brain()

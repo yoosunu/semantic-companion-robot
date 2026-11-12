@@ -57,6 +57,7 @@ ARRIVE_GAP = 10.0
 LED_AWAKE, LED_DOZE, LED_FLASH = 40, 8, 255
 SLOW = (150, 5)                      # 졸기 시작 느린 SPD, ACC (ST3215: SPD 걸음/s, 4096 걸음 = 한 바퀴 → 150 ≈ 13°/s)
 DRIFT = (30, 2)                      # 꾸벅 전 스르르 (30 ≈ 2.6°/s → 8° 에 3 s)
+DOZE_STYLE = "soft"                  # soft: 스르르→툭→번쩍 / hard: 실험 — 더 깊이 툭 → 화들짝 (위로 튐) → 도리도리
 TILT_HOME, TILT_DOZE, TILT_SLEEP = 10.0, -5.0, -30.0
 
 
@@ -187,9 +188,19 @@ class Brain:
                 out += [("led", 0), ("perceive", False)]
             elif not self.clip and now > self.until:        # 가끔 꾸벅
                 self.until = now + self.rng.uniform(8.0, 15.0)
-                self.play(now, [(0.0, ("move", self.pan, TILT_DOZE - 8.0, *DRIFT, 3.0)),      # 스르르
-                                (3.1, ("move", self.pan, TILT_DOZE - 18.0, 0, 0, 0.3)),     # 툭
-                                (3.6, ("move", self.pan, TILT_DOZE, 0, 0, 0.4))])           # 번쩍
+                pn, td = self.pan, TILT_DOZE
+                if DOZE_STYLE == "hard":                     # 진짜 졸았다 깬 것처럼 (11-12 실험)
+                    self.play(now, [(0.0, ("move", pn, td - 10.0, *DRIFT, 4.0)),            # 스르르 (더 깊게)
+                                    (4.1, ("move", pn, -30.0, 0, 0, 0.25)),                # 툭 (끝까지)
+                                    (4.45, ("move", pn, td + 12.0, 0, 0, 0.25)),           # 화들짝 (위로 튐)
+                                    (4.8, ("move", pn - 7.0, td + 8.0, 0, 0, 0.15)),       # 도리
+                                    (5.0, ("move", pn + 7.0, td + 8.0, 0, 0, 0.15)),       # 도리
+                                    (5.2, ("move", pn, td + 5.0, 0, 0, 0.3)),
+                                    (6.5, ("move", pn, td, *SLOW, 1.0))])                  # 다시 졸린 자세로
+                else:
+                    self.play(now, [(0.0, ("move", pn, td - 8.0, *DRIFT, 3.0)),             # 스르르
+                                    (3.1, ("move", pn, td - 18.0, 0, 0, 0.3)),             # 툭
+                                    (3.6, ("move", pn, td, 0, 0, 0.4))])                   # 번쩍
             return out
 
         if trig:
