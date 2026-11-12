@@ -44,7 +44,7 @@ class FacePerception(Node):
         self.tracker = Tracker()
         self.head = collections.deque(maxlen=100)          # (받은 시각, 팬, 틸트)
         self.moved_t = 0.0                                 # 마지막으로 고개 명령이 바뀐 시각
-        self.log_t, self.n_frames, self.n_skip = 0.0, 0, 0
+        self.log_t, self.n_frames, self.n_skip, self.det_ms = 0.0, 0, 0, 0.0
         self.create_subscription(Image, "camera/image_raw", self.on_img, qos_profile_sensor_data)
         self.create_subscription(Float32MultiArray, "pantilt/cmd", self.on_head, 10)
         self.pub = self.create_publisher(People, "people", 10)
@@ -77,7 +77,9 @@ class FacePerception(Node):
         s = min(1.0, self.det_w / w)
         small = cv2.resize(bgr, (int(w * s), int(h * s))) if s < 1.0 else bgr
         self.det.setInputSize((small.shape[1], small.shape[0]))
+        t0 = time.time()
         _, faces = self.det.detect(small)
+        self.det_ms += (time.time() - t0) * 1000
         hp, ht = self.head_at(shot)
         dets = []
         for r in ([] if faces is None else faces):
@@ -106,8 +108,9 @@ class FacePerception(Node):
             self.log_t = time.time()
             ps = [f"#{p.track_id} 팬{p.pan:.0f} 틸트{p.tilt:.0f} {p.face_px:.0f}px yaw{p.yaw:.0f} pitch{p.pitch:.0f}"
                   f"{' (안보임 %.1fs)' % p.unseen_s if p.unseen_s > 0 else ''}" for p in msg.people]
-            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}]  처리 {self.n_frames}장 / 고개 도는 중 버림 {self.n_skip}장")
+            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}]  처리 {self.n_frames}장 (검출 평균 {self.det_ms / max(1, self.n_frames):.0f} ms) / 고개 도는 중 버림 {self.n_skip}장")
             self.n_frames = self.n_skip = 0
+            self.det_ms = 0.0
 
 
 def main():
