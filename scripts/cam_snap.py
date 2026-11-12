@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""/camera/image_raw 한 장을 ~/cam_snap.png 로 (OpenCV·cv_bridge 없이, PNG 는 zlib 로 직접). bgr8/rgb8 만."""
+"""/camera/image_raw 한 장을 ~/cam_snap.png (또는 인자 경로) 로 (OpenCV·cv_bridge 없이, PNG 는 zlib 로 직접). bgr8/rgb8 만."""
 import os
 import struct
 import sys
@@ -35,7 +35,7 @@ def chunk(t, d):
     return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
 
 
-path = os.path.expanduser("~/cam_snap.png")
+path = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/cam_snap.png")
 with open(path, "wb") as f:
     f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", m.width, m.height, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
