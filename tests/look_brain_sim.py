@@ -109,19 +109,39 @@ b, log = run(w, 5)
 mv = [(t, round(x[1], 1)) for t, m, _, a in log if t >= 3 for x in a if x[0] == "move" and x[2] > 20]
 check("9b 조금(5°) 움직이면 도약 없이 다듬기 한 번", len(mv) == 1 and 4 <= mv[0][1] <= 5.5, mv)
 
-# 10. LiDAR 움직임 감지
+# 10. LiDAR "새로 들어옴" (11-12 실측: 옆에 앉은 Jasper 가 꼼지락 → 잠들자마자 깸 반복)
+rng = random.Random(3)
+
+
+def scan(t, fidget=True, enter=False, far=False):
+    r = [3.0 + rng.uniform(-0.05, 0.05) for _ in range(360)]
+    r[100] = 1.0 if int(t * 10) % 2 else 3.0          # 물체 모서리 빔: 원래 들쭉날쭉
+    r[200:205] = [0.2] * 5                              # 로봇 몸 (0.3 m 안)
+    if fidget:
+        r[50:62] = [rng.uniform(0.6, 1.1) for _ in range(12)]   # 옆에 앉아 꼼지락거리는 Jasper
+    if enter:
+        r[120:132] = [1.0] * 12                         # 새로 걸어 들어온 사람
+    if far:
+        r[150:162] = [2.5] * 12                         # 먼 곳 변화
+    return r
+
+
 m = lb.Motion()
-base = [3.0] * 360
-quiet = [m.step(t, base) for t in range(5)]
-near = base[:]
-near[10:20] = [1.0] * 10
-hit = [m.step(10 + t, near) for t in range(2)]
-far = base[:]
-far[50:60] = [2.5] * 10
-m2 = lb.Motion()
-m2.step(0, base)
-far_hit = [m2.step(1 + t, far) for t in range(3)]
-check("10 LiDAR: 가까운 움직임만", not any(quiet) and hit[-1] and not any(far_hit), f"{quiet} {hit} {far_hit}")
+t, fired = 0.0, []
+while t < 20:
+    fired.append(m.step(t, scan(t)))
+    t += 0.1
+quiet = any(fired)
+far_hit = [m.step(t + k * 0.1, scan(t, far=True)) for k in range(5)]
+near_hit = [m.step(t + 1 + k * 0.1, scan(t, enter=True)) for k in range(4)]
+check("10 LiDAR: 옆사람 꼼지락·모서리·먼 변화 무시, 새로 들어온 사람만", not quiet and not any(far_hit) and near_hit[-1],
+      f"꼼지락 {quiet} 먼것 {any(far_hit)} 들어옴 {near_hit} 빔 {m.last}")
+
+# 10b. LiDAR 로 깼는데 얼굴 없음 → 10 s 둘러보고 다시 꾸벅 (1 분 기다리지 않음)
+b, log = run(lambda t: [], 245)
+b, log = run(lambda t: [], 15, b, motion=lambda t: 246 < t < 246.2, t0=245)
+back = first([x for x in log if x[0] > 246.5], "doze")
+check("10b LiDAR 로 깼는데 아무도 없음 → 10 s 뒤 다시 꾸벅", back and back - 246 <= 12, f"다시 꾸벅 {back}s")
 
 # 11. 실측 재현: yaw 가 1 s 마다 -8 ↔ -52 ↔ -90 으로 튐 (얼굴 22 px) → 쳐다보는 시간이 안 늘어남, 30 s 안에 딴짓
 seq = [-8, -52, -90, -20, -90, -8, -54]

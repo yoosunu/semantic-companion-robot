@@ -40,9 +40,10 @@ IDLE_EVERY = (5.0, 12.0)             # 딴짓 시선 바꾸는 간격
 IDLE_OFF = (15.0, 30.0)              # 딴짓: 사람에서 이만큼 옆 (화각 ±60° 안. 11-12: 45° 면 어안 가장자리라 먼 얼굴 놓침)
 FINE, FINE_WAIT = 3.0, 1.2           # 눈맞춤 다듬기: 오차 3° 넘고, 마지막 이동 뒤 1.2 s
 SCAN_AFTER = 5.0
-SCAN_EVERY = (4.0, 7.0)
+SCAN_EVERY = (6.0, 14.0)            # 11-12 Jasper: 4~7 s 는 너무 두리번거림
 SCAN_PANS = (-70.0, -35.0, 0.0, 35.0, 70.0)
 LOST_S = 2.0
+LIDAR_LOOK = 10.0                    # LiDAR 로 깼는데 이만큼 둘러봐도 얼굴 없으면 다시 꾸벅 (바로 1 분 기다리지 않음)
 DOZE_AFTER = 60.0                    # 11-12 Jasper: 꾸벅 1 분
 SLEEP_AFTER = 180.0                  # 꾸벅 뒤 3 분 (짧으면 5 분)
 CONTACT_IN, CONTACT_OUT = 20.0, 35.0
@@ -214,10 +215,11 @@ class Brain:
             else:
                 self.attend(out, now, name, p)
         elif now - self.event_t > DOZE_AFTER and not self.clip and now >= self.busy_until:
-            self.set_mode("doze", "no event", now)
-            self.doze_t, self.until = now, now + self.rng.uniform(8.0, 15.0)
-            self.move(out, now, self.pan, TILT_DOZE, *SLOW, settle=2.0)
-            out.append(("led", LED_DOZE))
+            self.doze(out, now, "no event")
+            return out
+        elif self.reason == "wake:lidar" and self.mode == "scan" and not visible and now - self.event_t > LIDAR_LOOK \
+                and not self.clip and now >= self.busy_until:
+            self.doze(out, now, "lidar: nobody")             # 누가 왔나 둘러봤는데 얼굴 없음 → 다시 꾸벅
             return out
 
         if self.clip or now < self.busy_until:
@@ -274,9 +276,16 @@ class Brain:
         if why == "arrive":
             self.nod(now, p["pan"], p["tilt"])
 
+    def doze(self, out, now, why):
+        self.set_mode("doze", why, now)
+        self.doze_t, self.until = now, now + self.rng.uniform(8.0, 15.0)
+        self.move(out, now, self.pan, TILT_DOZE, *SLOW, settle=2.0)
+        out.append(("led", LED_DOZE))
+
     def wake(self, out, now, why, p=None):
         """번쩍: 빠르게 고개 들기 + LED 반짝"""
         self.event_t, self.clip = now, []
+        self.last_trig = (round(now, 1), "wake:" + why, p["id"] if p else None)
         out += [("perceive", True), ("led", LED_FLASH)]
         self.play(now, [(0.5, ("led", LED_AWAKE))])
         if p is not None:
@@ -289,21 +298,35 @@ class Brain:
 
 
 class Motion:
-    """LiDAR 가까운 움직임 감지 (잠잘 때 깨우기). 로봇이 서 있다는 가정.
-       기준 스캔과 비교해 near_m 안에서 0.25 m 넘게 바뀐 빔이 n 개 이상인 스캔이 2 번 연속이면 움직임."""
+    """LiDAR 로 "누가 새로 가까이 옴" 감지 (잠잘 때 깨우기). 로봇이 서 있다는 가정.
 
-    def __init__(self, near_m=1.5, diff_m=0.25, n=5):
-        self.near, self.diff, self.n = near_m, diff_m, n
-        self.base, self.hits, self.base_t = None, 0, 0.0
+       11-12 실측: 잠들자마자 2 s 만에 깸 반복 (꾸벅 30 s → 잠 → 곧 깸 → 두리번 20 s → … 52 s 주기).
+       원인: Jasper 가 로봇 바로 옆(1.5 m 안)에 앉아 있음 → 몸을 조금만 움직여도 "가까운 움직임" 으로 깸.
+       Jasper 가 지루해서 잠든 건데 Jasper 가 있다고 깨면 안 됨 → 규칙을 "움직임" 에서 "새로 들어옴" 으로:
+         1. 잠든 뒤 learn_s (3 s) 동안 빔마다 최소·최대 거리를 배움 (이미 있는 사람·물체, 원래 흔들리는 폭)
+         2. 그때 near_m 밖(비어 있던 곳)이던 빔에 near_m 안쪽으로 무언가 들어오면 "들어옴"
+            (이미 안에 있던 사람이 꼼지락거리는 건 안 셈)
+         3. 0.3 m 안쪽 빔은 무시 (로봇 몸)
+         4. 들어온 빔 n 개 이상이 3 스캔 연속이면 깸
+       last = 마지막 스캔에서 들어온 빔 수 (로그용)"""
+
+    def __init__(self, near_m=1.5, n=6, learn_s=3.0):
+        self.near, self.n, self.learn = near_m, n, learn_s
+        self.t0, self.lo, self.hi = None, None, None
+        self.hits, self.last = 0, 0
 
     def step(self, now, ranges):
-        r = [x if (x == x and 0.05 < x < 12.0) else 12.0 for x in ranges]   # nan·inf·0 → 멀다
-        if self.base is None or len(self.base) != len(r) or now - self.base_t > 30.0 and self.hits == 0:
-            self.base, self.base_t = r, now                  # 30 s 조용하면 기준 새로 (천천히 바뀐 것 흡수)
+        r = [x if (x == x and 0.3 < x < 12.0) else None for x in ranges]   # nan·inf·0·몸 → 무시
+        if self.t0 is None or self.lo is None or len(self.lo) != len(r):
+            self.t0 = now
+            self.lo, self.hi = [99.0] * len(r), [-1.0] * len(r)
+        if now - self.t0 < self.learn:                        # 지금 있는 것들 배우기
+            for i, x in enumerate(r):
+                if x is not None:
+                    self.lo[i], self.hi[i] = min(self.lo[i], x), max(self.hi[i], x)
             return False
-        changed = sum(1 for a, b in zip(r, self.base) if min(a, b) < self.near and abs(a - b) > self.diff)
-        self.hits = self.hits + 1 if changed >= self.n else 0
-        if self.hits >= 2:
-            self.base, self.base_t, self.hits = r, now, 0
-            return True
-        return False
+        came = sum(1 for i, x in enumerate(r)
+                   if x is not None and x < self.near and self.lo[i] > self.near + 0.2)   # 비어 있던 곳에 들어옴
+        self.last = came
+        self.hits = self.hits + 1 if came >= self.n else 0
+        return self.hits >= 3

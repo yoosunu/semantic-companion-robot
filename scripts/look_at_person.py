@@ -82,6 +82,7 @@ class Look(Node):
     def on_scan(self, m):
         if self.brain.mode == "sleep" and self.motion.step(time.time(), list(m.ranges)):
             self.moved = True
+            self.get_logger().info(f"WAKE LiDAR: 비어 있던 1.5 m 안으로 빔 {self.motion.last} 개 들어옴 (3 스캔 연속)")
 
     def tick(self):
         now = time.time()
