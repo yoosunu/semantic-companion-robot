@@ -6,7 +6,7 @@ bash $R/scripts/stop_all.sh quiet; pkill -f "camera_ros/camera_node" 2>/dev/null
 tmux new -d -s robot "bash -ic 'ros2 launch scr_bringup robot.launch.py ugv_port:=/dev/ttyAMA0; exec bash'"
 sleep 6
 # 카메라: cam_run.sh (video 그룹 없으면 sg video 로 알아서)
-tmux new -d -s cam "bash $R/scripts/cam_run.sh ${CAM:-640 480 30}; exec bash"   # CAM="320 240 10" 로 바꿔 시험
+tmux new -d -s cam "bash $R/scripts/cam_run.sh ${CAM:-320 240 10}; exec bash"   # 11-12 실측: 화각 같고 CPU 절반. 예전 값은 CAM="640 480 30"
 sleep 5
 tmux new -d -s look "bash -ic '~/yolo_venv/bin/python -u $R/scripts/look_at_person.py; exec bash'"
 sleep 8
