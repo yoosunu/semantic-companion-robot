@@ -53,8 +53,15 @@ class Look(Node):
         self.pub_enable = self.create_publisher(Bool, "perception/enable", 10)
         self.pub_state = self.create_publisher(String, "look/state", 10)
         self.create_timer(0.1, self.tick)
+        self.led_off_n = 0 if self.led else 3                     # led 끔이면 처음 3 s 동안 1 s 마다 0 보냄
+        self.create_timer(1.0, self.led_off)                      # (브리지·펌웨어는 마지막 밝기를 그대로 들고 있음 → 예전 실행의 40 이 남아 있었음)
         self.get_logger().info(f"LOOK v2 준비: /people 로 판단, 꾸벅 {look_brain.DOZE_AFTER:.0f} s, "
                                f"잠 {'끔' if look_brain.SLEEP_AFTER > 1e8 else '%.0f s' % look_brain.SLEEP_AFTER}")
+
+    def led_off(self):
+        if self.led_off_n > 0:
+            self.led_off_n -= 1
+            self.pub_led.publish(Float32(data=0.0))
 
     def on_people(self, m):
         self.people_t = time.time()
