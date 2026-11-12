@@ -12,7 +12,9 @@
 
   판단은 전부 look_brain.Brain (ROS 없음, tests/look_brain_sim.py 로 시험):
     scan 두리번 / attend 쳐다봄 / idle 딴짓 / doze 꾸벅 / sleep 잠.  쳐다볼 "이유"(트리거)가 있을 때만 쳐다봄.
-  파라미터  doze_after (60 s), sleep_after (180 s), sleep (true — false 면 꾸벅까지만)
+  파라미터  doze_after (60 s), sleep_after (180 s), sleep (true — false 면 꾸벅까지만),
+            led (false — 11-12 실측: 8 도 눈부신 조명이라 표현에 안 씀)
+  로그      LOOK {...} 1 s 마다 + TRIG 트리거가 생길 때마다 (다가옴·눈맞춤이 실제로 잡혔는지 확인용)
 """
 import json
 import os
@@ -36,6 +38,7 @@ class Look(Node):
         p = self.declare_parameter
         look_brain.DOZE_AFTER = float(p("doze_after", look_brain.DOZE_AFTER).value)
         look_brain.SLEEP_AFTER = float(p("sleep_after", look_brain.SLEEP_AFTER).value)
+        self.led = p("led", False).value
         if not p("sleep", True).value:
             look_brain.SLEEP_AFTER = 1e9
         self.brain = look_brain.Brain()
@@ -67,10 +70,15 @@ class Look(Node):
         people = self.people if now - self.people_t < 1.0 else []     # face_perception 이 멈췄으면 아무도 없음
         acts = self.brain.tick(now, people, self.moved)
         self.moved = False
+        if self.brain.last_trig and self.brain.last_trig != getattr(self, "logged_trig", None):
+            self.logged_trig = self.brain.last_trig
+            t, name, pid = self.brain.last_trig
+            p = next((x for x in people if x["id"] == pid), {})
+            self.get_logger().info(f"TRIG {name} #{pid} (yaw {p.get('yaw', 0):.0f}, {p.get('px', 0):.0f}px) → {self.brain.mode}")
         for a in acts:
             if a[0] == "move":
                 self.pub_cmd.publish(Float32MultiArray(data=[float(a[1]), float(a[2]), float(a[3]), float(a[4])]))
-            elif a[0] == "led":
+            elif a[0] == "led" and self.led:
                 self.pub_led.publish(Float32(data=float(a[1])))
             elif a[0] == "perceive":
                 self.pub_enable.publish(Bool(data=bool(a[1])))
@@ -80,7 +88,7 @@ class Look(Node):
         st = {"mode": b.mode, "reason": b.reason, "target": b.target, "pan": round(b.pan, 1), "tilt": round(b.tilt, 1),
               "people": [f"#{p['id']} yaw{p['yaw']:.0f} {p['px']:.0f}px" for p in people if p["unseen"] <= 0.5]}
         self.pub_state.publish(String(data=json.dumps(st, ensure_ascii=False)))
-        if now - self.log_t > 1.0 or any(a[0] != "move" for a in acts):
+        if now - self.log_t > 1.0 or any(a[0] == "perceive" for a in acts):
             self.log_t = now
             self.get_logger().info("LOOK " + json.dumps(st, ensure_ascii=False))
 

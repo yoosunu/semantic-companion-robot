@@ -10,11 +10,16 @@
     sleep   잠: 꾸벅 3 분 더. 고개 끝까지 숙이고 LED 끔, 얼굴 처리도 멈춤 (보안·절약). LiDAR 로 가까운 움직임 → 깸
 
   다시 쳐다볼 이유 (트리거) — 이게 있어야 attend 로
-    contact   사람이 나를 쳐다보기 시작 (|yaw| 35° 넘던 사람이 20° 안으로)
-    glance    사람이 두리번 (1 s 안에 yaw 25° 넘게 바뀜) → 짧게 3 s 만 봄
+    contact   사람이 나를 쳐다보기 시작 (2 s 넘게 딴 데(|yaw|>35°) 보던 사람이 20° 안으로)
+    glance    사람이 두리번 (1 s 안에 yaw 25° 넘게 바뀜) → 짧게 3 s 만 봄. ※ 기본 끔 (아래)
     approach  다가옴 (1.5 s 안에 얼굴 1.4 배)
     arrive    새 사람 (10 s 동안 아무도 없다가) → 쳐다보고 끄덕 인사
   단순히 "있음" 은 트리거가 아님 → 사람이 컴퓨터만 보고 있으면 로봇은 딴짓하다 졸게 됨.
+  이미 쳐다보는 중(attend)엔 contact·glance 가 시간을 늘리지 않음 → 10~30 s 지나면 꼭 딴짓 (다시 보려면 고개 돌렸다 다시 봐야 함)
+
+  yaw 믿을 조건 (11-12 실측: 얼굴 14~25 px 에선 yaw 가 −8 → −52 → −90 으로 1 s 마다 튐 → glance 가 계속 터져 영원히 쳐다봄)
+    얼굴 YAW_MIN_PX 이상일 때만, 최근 0.6 s 중앙값으로. glance 는 그래도 불안해서 기본 끔 (GLANCE_ON)
+  LED (11-12 실측: 8 도 눈부신 조명) → 노드 파라미터 led (기본 false) 로 안 보냄. 나중에 밤 조명 등으로
 
   출력 동작: ("move", 팬, 틸트, SPD, ACC)  SPD/ACC 0 = 서보 최고 속도 / ("led", 0~255) / ("perceive", bool)
 """
@@ -34,7 +39,11 @@ LOST_S = 2.0
 DOZE_AFTER = 60.0                    # 11-12 Jasper: 꾸벅 1 분
 SLEEP_AFTER = 180.0                  # 꾸벅 뒤 3 분 (짧으면 5 분)
 CONTACT_IN, CONTACT_OUT = 20.0, 35.0
+CONTACT_AWAY_S = 2.0                 # 이만큼 딴 데 봐야 다음 contact 인정
 GLANCE_YAW = 25.0
+GLANCE_ON = False
+YAW_MIN_PX = 20.0                    # 이보다 작은 얼굴은 yaw 안 믿음
+YAW_MED_S = 0.6
 APPROACH_RATIO, APPROACH_WIN = 1.4, 1.5
 ARRIVE_GAP = 10.0
 LED_AWAKE, LED_DOZE, LED_FLASH = 40, 8, 255
@@ -57,6 +66,7 @@ class Brain:
         self.out_n = 0                       # attend: 가운데 밖으로 연속 몇 번
         self.mem = {}                        # 트랙별 {"yaw": deque[(t,yaw)], "px": deque[(t,px)], "contact": bool}
         self.started = False
+        self.last_trig = None                # (시각, 이름, 트랙) 로그용
 
     # ---------- 작은 도구 ----------
     def move(self, out, now, pan, tilt, spd=0, acc=0, settle=SETTLE):
@@ -89,24 +99,33 @@ class Brain:
             if p["unseen"] > 0:
                 continue
             m = self.mem.setdefault(p["id"], {"yaw": collections.deque(maxlen=30), "px": collections.deque(maxlen=30),
-                                              "contact": abs(p["yaw"]) <= CONTACT_IN, "new": True})
-            m["yaw"].append((now, p["yaw"]))
+                                              "smooth": collections.deque(maxlen=30), "contact": None, "away_t": now})
             m["px"].append((now, p["px"]))
-            if m.pop("new", False):
-                continue                                     # 첫 관측은 기준만
-            if not m["contact"] and abs(p["yaw"]) <= CONTACT_IN:
-                m["contact"] = True
-                found.append(("contact", p))
-            elif m["contact"] and abs(p["yaw"]) >= CONTACT_OUT:
-                m["contact"] = False
-            old = [y for t, y in m["yaw"] if now - t <= 1.0]
-            if old and max(old) - min(old) >= GLANCE_YAW:
-                found.append(("glance", p))
-                m["yaw"].clear()
             olds = [x for t, x in m["px"] if now - t <= APPROACH_WIN]
-            if olds and p["px"] >= APPROACH_RATIO * min(olds):
+            if len(olds) > 1 and p["px"] >= APPROACH_RATIO * min(olds):
                 found.append(("approach", p))
                 m["px"].clear()
+            if p["px"] < YAW_MIN_PX:
+                continue                                     # 작은 얼굴: yaw 못 믿음
+            m["yaw"].append((now, p["yaw"]))
+            recent = sorted(y for t, y in m["yaw"] if now - t <= YAW_MED_S)
+            yaw = recent[len(recent) // 2]                  # 중앙값 (튀는 값 하나는 무시)
+            m["smooth"].append((now, yaw))
+            if m["contact"] is None:
+                m["contact"] = abs(yaw) <= CONTACT_IN        # 첫 관측은 기준만
+            elif not m["contact"] and abs(yaw) <= CONTACT_IN:
+                m["contact"] = True
+                if now - m["away_t"] >= CONTACT_AWAY_S:
+                    found.append(("contact", p))
+            elif m["contact"] and abs(yaw) >= CONTACT_OUT:
+                m["contact"], m["away_t"] = False, now
+            elif not m["contact"] and abs(yaw) < CONTACT_OUT and abs(yaw) > CONTACT_IN:
+                pass
+            if GLANCE_ON:
+                old = [y for t, y in m["smooth"] if now - t <= 1.0]
+                if old and max(old) - min(old) >= GLANCE_YAW:
+                    found.append(("glance", p))
+                    m["smooth"].clear()
         ids = {p["id"] for p in people}
         for k in [k for k in self.mem if k not in ids]:
             del self.mem[k]
@@ -158,10 +177,13 @@ class Brain:
             return out
 
         if trig:
-            self.event_t = now
+            self.event_t = now                               # 무슨 일이든 있으면 졸지 않음
             name, p = trig[0]
+            self.last_trig = (round(now, 1), name, p["id"])
             if self.clip and name != "arrive":
                 pass                                         # 인사 중이면 끝까지
+            elif self.mode == "attend" and name in ("contact", "glance"):
+                pass                                         # 이미 쳐다보는 중: 시간 안 늘림
             else:
                 self.attend(out, now, name, p)
         elif now - self.event_t > DOZE_AFTER and not self.clip and now >= self.busy_until:

@@ -74,10 +74,13 @@ check("4 눈 맞추면 쳐다봄", any(m == "attend" and rr == "contact" for _, 
 
 # 5. 두리번 (1 s 안에 yaw 50→85, 나를 보진 않음) → 3 s 만 힐끗
 w = lambda t: [person(yaw=50 if t < 40 else (50 + (t - 40) * 50 if t < 40.7 else 85))]
+lb.GLANCE_ON = True
 b, log = run(w, 48)
+lb.GLANCE_ON = False
 g = [(t, m, rr) for t, m, rr, _ in log if rr == "glance"]
-gi = first([x for x in log if x[0] > 40.5], "idle")
-check("5 두리번 → 힐끗 3 s", g and gi and gi - g[0][0] <= 3.5, f"힐끗 {g[0][0] if g else None}s → 딴짓 {gi}s")
+gt = g[0][0] if g else 99
+gi = first([x for x in log if x[0] > gt], "idle")
+check("5 두리번 → 힐끗 3 s (켰을 때)", g and gi and 2.5 <= gi - gt <= 3.5, f"힐끗 {g[0][0] if g else None}s → 딴짓 {gi}s")
 
 # 6. 다가옴 (얼굴 20→30 px, 1 s) → 쳐다봄
 w = lambda t: [person(yaw=60, px=20 if t < 40 else min(30, 20 + (t - 40) * 10))]
@@ -119,6 +122,28 @@ m2 = lb.Motion()
 m2.step(0, base)
 far_hit = [m2.step(1 + t, far) for t in range(3)]
 check("10 LiDAR: 가까운 움직임만", not any(quiet) and hit[-1] and not any(far_hit), f"{quiet} {hit} {far_hit}")
+
+# 11. 실측 재현: yaw 가 1 s 마다 -8 ↔ -52 ↔ -90 으로 튐 (얼굴 22 px) → 쳐다보는 시간이 안 늘어남, 30 s 안에 딴짓
+seq = [-8, -52, -90, -20, -90, -8, -54]
+w = lambda t: [person(yaw=seq[int(t) % len(seq)], px=22)]
+b, log = run(w, 40)
+i = first(log, "idle")
+trig = sorted({rr for t, m, rr, _ in log})
+check("11 튀는 yaw 로 영원히 쳐다보지 않음", i and i <= 31, f"딴짓 {i}s, 이유들 {trig}")
+
+# 12. 작은 얼굴(15 px) 은 yaw 가 바뀌어도 눈맞춤 아님 (못 믿음)
+w = lambda t: [person(yaw=60 if t < 40 else 5, px=15)]
+b, log = run(w, 42)
+check("12 작은 얼굴 yaw 무시", not any(rr == "contact" for t, m, rr, _ in log if t >= 40), b.reason)
+
+# 13. 딴짓하다 1 s 만 딴 데 봤다 다시 보면 contact 아님, 3 s 딴 데 봤다 보면 contact
+w = lambda t: [person(yaw=5 if t < 35 else (60 if t < 36 else 5))]
+b, log = run(w, 38)
+short = any(rr == "contact" and t >= 35 for t, m, rr, _ in log)
+w = lambda t: [person(yaw=5 if t < 35 else (60 if t < 38 else 5))]
+b, log = run(w, 40)
+long_ = any(rr == "contact" and t >= 38 for t, m, rr, _ in log)
+check("13 잠깐 딴 데 → 아님 / 3 s 딴 데 → 눈맞춤", not short and long_, f"1s {short} 3s {long_}")
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
