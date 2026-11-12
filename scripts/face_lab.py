@@ -12,6 +12,8 @@
     face_lab.py watch             1 s 마다 화면의 얼굴마다 이름·유사도 → 그림 ~/face_lab/latest.jpg (3 s 마다 기록도)
     face_lab.py forget jasper     등록 지우기
     face_lab.py watch --stream    실시간 영상: Mac 브라우저로 http://scr-pi.local:8080 (집 Wi-Fi 안에서만, 시험할 때만 켜기)
+    face_lab.py watch --stream --det-w 640 --min-px 0   멀리 실험: 검출도 원본 크기로, 작은 얼굴도 인식해 보기
+                                  (검출 결과는 ~/face_lab/log.csv 에 계속 쌓임: 얼굴 크기 vs 유사도 그래프용)
     face_lab.py watch --image 사진.png   카메라 없이 사진 한 장으로 (Mac/VM 시험용)
 
   개인정보: 얼굴 벡터는 생체정보. 본인 동의로만 등록, repo 밖 ~/.scr_faces/ (권한 600) 에만, forget 으로 지움.
@@ -31,12 +33,13 @@ OUT = os.path.join(HOME, "face_lab")
 MODELS = os.path.join(HOME, "models")
 DET_W = 320            # 검출은 320 폭으로 줄여서 (빠름). 자르기는 원본에서 (선명)
 COS_OK = 0.363         # SFace 코사인 기준 (OpenCV 문서)
-MIN_FACE = 28          # 320 폭 기준 얼굴 폭 px. 이보다 작으면 인식 안 함 (너무 흐림)
+MIN_FACE = 28          # 320 폭 기준 얼굴 폭 px. 이보다 작으면 인식 안 함 (너무 흐림). watch 는 --min-px 로 바꿈
 
 
 class Lab:
-    def __init__(self, models=MODELS):
-        self.det = cv2.FaceDetectorYN.create(os.path.join(models, "face_yunet.onnx"), "", (DET_W, DET_W), 0.6)
+    def __init__(self, models=MODELS, det_w=DET_W, min_px=MIN_FACE):
+        self.det_w, self.min_px = det_w, min_px          # 검출 폭 (320 빠름 / 640 멀리), 인식할 최소 얼굴 폭 (320 기준 px)
+        self.det = cv2.FaceDetectorYN.create(os.path.join(models, "face_yunet.onnx"), "", (det_w, det_w), 0.6)
         self.rec = cv2.FaceRecognizerSF.create(os.path.join(models, "face_sface.onnx"), "")
         self.gallery = {}
         for p in glob.glob(os.path.join(DB, "*.npy")):
@@ -45,15 +48,15 @@ class Lab:
     def faces(self, bgr):
         """원본 좌표의 얼굴들 [(행 15개: x y w h, 점5개 x y, 점수), 320 기준 폭]"""
         h, w = bgr.shape[:2]
-        s = DET_W / w
-        small = cv2.resize(bgr, (DET_W, int(round(h * s))))
+        s = min(1.0, self.det_w / w)
+        small = cv2.resize(bgr, (int(round(w * s)), int(round(h * s)))) if s < 1.0 else bgr
         self.det.setInputSize((small.shape[1], small.shape[0]))
         _, f = self.det.detect(small)
         out = []
         for r in ([] if f is None else f):
             full = r.copy()
             full[:14] /= s
-            out.append((full, float(r[2])))
+            out.append((full, float(full[2]) * 320.0 / w))      # 얼굴 폭을 늘 320 기준 px 로 (설정과 상관없이 비교)
         return out
 
     def embed(self, bgr, face):
@@ -79,7 +82,9 @@ class Lab:
             cv2.rectangle(img, (x, y), (x + w, y + h), col, sc)
             for i, c in zip(range(5), [(255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 0, 255), (0, 255, 255)]):
                 cv2.circle(img, (int(face[4 + 2 * i]), int(face[5 + 2 * i])), 2 * sc, c, -1)
-            label = f"det {face[14]:.2f}"
+            if crop is not None and px < MIN_FACE:
+                col = (0, 160, 255)                      # 주황: 원래라면 small 로 건너뛸 크기인데 억지로 인식한 것
+            label = f"det {face[14]:.2f} {px:.0f}px"
             if crop is not None:
                 label += f" | {name or '?'} {cos:.2f}"
             else:
@@ -100,7 +105,7 @@ class Lab:
         t0 = time.time()
         res = []
         for face, px in self.faces(bgr):
-            if px < MIN_FACE:
+            if px < self.min_px:
                 res.append((face, None, None, 0.0, px))
                 continue
             crop, feat = self.embed(bgr, face)
@@ -108,7 +113,7 @@ class Lab:
             res.append((face, crop, name, cos, px))
         ms = (time.time() - t0) * 1000
         log = {"faces": len(res), "ms": round(ms),
-               "who": [{"name": r[2], "cos": round(r[3], 3), "det": round(float(r[0][14]), 2), "px": round(r[4])} for r in res]}
+               "who": [{"name": r[2], "cos": round(r[3], 3), "det": round(float(r[0][14]), 2), "px": round(r[4], 1)} for r in res]}
         return res, log
 
 
@@ -223,6 +228,9 @@ def serve(port=8080):
 
 def watch(lab, image=None, stream=False):
     os.makedirs(OUT, exist_ok=True)
+    csv = open(os.path.join(OUT, "log.csv"), "a")
+    if csv.tell() == 0:
+        csv.write("t,px320,det,cos,name\n")
     push = serve() if stream else None
     print(f"등록된 사람: {', '.join(f'{k}({len(v)}장)' for k, v in lab.gallery.items()) or '없음 (전부 ? 로 나옴)'}")
     src = [cv2.imread(image)] if image else frames()
@@ -230,6 +238,9 @@ def watch(lab, image=None, stream=False):
     for bgr in src:
         res, log = lab.look(bgr)
         now = time.time()
+        for r in log["who"]:
+            csv.write(f"{now:.2f},{r['px']},{r['det']},{r['cos'] if r['cos'] else ''},{r['name'] or ''}\n")
+        csv.flush()
         if push:
             push(lab.draw(bgr, res))
         if image or now - t_log >= 1.0:
@@ -258,7 +269,9 @@ def main():
     models = MODELS
     if "--models" in a:
         models = a[a.index("--models") + 1]
-    lab = Lab(models)
+    arg = lambda k, d: type(d)(a[a.index(k) + 1]) if k in a else d
+    lab = Lab(models, arg("--det-w", DET_W), arg("--min-px", MIN_FACE))
+    print(f"검출 폭 {lab.det_w}, 인식 최소 얼굴 {lab.min_px}px (320 기준)")
     if a[0] == "enroll":
         enroll(lab, a[1])
     else:
