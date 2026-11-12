@@ -11,6 +11,7 @@
     face_lab.py enroll jasper     15 s 동안 고개를 천천히 좌우·위아래로 → 벡터 여러 장 저장 + 잘린 얼굴 모음 사진
     face_lab.py watch             1 s 마다 화면의 얼굴마다 이름·유사도 → 그림 ~/face_lab/latest.jpg (3 s 마다 기록도)
     face_lab.py forget jasper     등록 지우기
+    face_lab.py watch --stream    실시간 영상: Mac 브라우저로 http://scr-pi.local:8080 (집 Wi-Fi 안에서만, 시험할 때만 켜기)
     face_lab.py watch --image 사진.png   카메라 없이 사진 한 장으로 (Mac/VM 시험용)
 
   개인정보: 얼굴 벡터는 생체정보. 본인 동의로만 등록, repo 밖 ~/.scr_faces/ (권한 600) 에만, forget 으로 지움.
@@ -169,14 +170,68 @@ def enroll(lab, name, secs=15.0):
     print(f"잘린 얼굴 모음: {OUT}/enroll_{name}.jpg")
 
 
-def watch(lab, image=None):
+PAGE = b"""<html><body style="margin:0;background:#111;color:#ccc;font-family:sans-serif">
+<img src="/stream" style="width:100%;max-width:960px;display:block;margin:auto">
+<p style="text-align:center">green = known, red = ?, gray = too small | dots = YuNet 5 points | bottom = aligned face for SFace</p>
+</body></html>"""
+
+
+def serve(port=8080):
+    """MJPEG 스트림: 가장 최근 그림을 JPEG 로 계속 보냄. 640x480 ≈ 40 KB × 초당 몇 장 → Wi-Fi 로 충분"""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    state = {"jpg": None, "n": 0}
+    cond = threading.Condition()
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path != "/stream":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(PAGE)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=f")
+            self.end_headers()
+            seen = -1
+            try:
+                while True:
+                    with cond:
+                        cond.wait_for(lambda: state["n"] != seen, timeout=5)
+                        jpg, seen = state["jpg"], state["n"]
+                    if jpg:
+                        self.wfile.write(b"--f\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg) + jpg + b"\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    srv = ThreadingHTTPServer(("0.0.0.0", port), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    print(f"실시간 영상: Mac 브라우저로 http://scr-pi.local:{port}  (끄기 Ctrl+C)")
+
+    def push(img):
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        if ok:
+            with cond:
+                state["jpg"], state["n"] = buf.tobytes(), state["n"] + 1
+                cond.notify_all()
+    return push
+
+
+def watch(lab, image=None, stream=False):
     os.makedirs(OUT, exist_ok=True)
+    push = serve() if stream else None
     print(f"등록된 사람: {', '.join(f'{k}({len(v)}장)' for k, v in lab.gallery.items()) or '없음 (전부 ? 로 나옴)'}")
     src = [cv2.imread(image)] if image else frames()
     k, t_save, t_log = 0, 0.0, 0.0
     for bgr in src:
         res, log = lab.look(bgr)
         now = time.time()
+        if push:
+            push(lab.draw(bgr, res))
         if image or now - t_log >= 1.0:
             t_log = now
             print("FACE " + json.dumps(log, ensure_ascii=False))
@@ -185,8 +240,8 @@ def watch(lab, image=None):
             t_save = now
             cv2.imwrite(os.path.join(OUT, f"watch_{k % 30:02d}.jpg"), lab.draw(bgr, res))
             k += 1
-        if not image:
-            time.sleep(0.5)
+        if not image and not push:
+            time.sleep(0.5)                              # 스트림이면 쉬지 않고 (카메라 10 fps 만큼)
 
 
 def main():
@@ -207,7 +262,7 @@ def main():
     if a[0] == "enroll":
         enroll(lab, a[1])
     else:
-        watch(lab, a[a.index("--image") + 1] if "--image" in a else None)
+        watch(lab, a[a.index("--image") + 1] if "--image" in a else None, "--stream" in a)
 
 
 if __name__ == "__main__":
