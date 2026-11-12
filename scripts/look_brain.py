@@ -4,15 +4,18 @@
 
   모드
     scan    아무도 없음 → 4~7 s 마다 좌우 한 곳 두리번
-    attend  사람을 쳐다봄 (가운데 ±10°/±8° 면 가만히, 밖이면 한 번에 확). 10~30 s (매번 랜덤) 지나면 → idle
-    idle    딴짓: 사람은 곁눈(화면 안)에 두고 25~45° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
+    attend  사람을 쳐다봄 (가운데 ±10°/±8° 밖이면 한 번에 확). 10~30 s (매번 랜덤) 지나면 → idle
+            눈맞춤 다듬기: 안쪽이어도 1.2 s 가만히 있은 뒤 평균 오차가 3° 넘으면 작게 한 번 더 (사람 눈의 "보정 도약").
+            11-12 Jasper: "끄덕일 때·가까울 때 눈을 살짝 비껴 봄 → 눈맞춤 느낌이 안 남". 계속 따라가는 게 아니라 한 번씩 → 덜덜 없음
+    idle    딴짓: 사람은 곁눈(화면 안)에 두고 15~30° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
+            사람을 놓쳐도 마지막 본 곳 기준 (11-12: 놓친 뒤 지금 고개 기준으로 또 옆을 봐서 −58° → −96° 로 멀어짐)
     doze    꾸벅: 1 분 동안 아무 일(트리거) 없으면. 고개 천천히 내려가고 LED 어둡게, 가끔 꾸벅. 트리거 → 번쩍 깸
     sleep   잠: 꾸벅 3 분 더. 고개 끝까지 숙이고 LED 끔, 얼굴 처리도 멈춤 (보안·절약). LiDAR 로 가까운 움직임 → 깸
 
   다시 쳐다볼 이유 (트리거) — 이게 있어야 attend 로
     contact   사람이 나를 쳐다보기 시작 (2 s 넘게 딴 데(|yaw|>35°) 보던 사람이 20° 안으로)
     glance    사람이 두리번 (1 s 안에 yaw 25° 넘게 바뀜) → 짧게 3 s 만 봄. ※ 기본 끔 (아래)
-    approach  다가옴 (1.5 s 안에 얼굴 1.4 배)
+    approach  다가옴 (최근 0.5 s 평균 얼굴이 1 s 전보다 1.3 배, 20 px 이상)
     arrive    새 사람 (10 s 동안 아무도 없다가) → 쳐다보고 끄덕 인사
   단순히 "있음" 은 트리거가 아님 → 사람이 컴퓨터만 보고 있으면 로봇은 딴짓하다 졸게 됨.
   이미 쳐다보는 중(attend)엔 contact·glance 가 시간을 늘리지 않음 → 10~30 s 지나면 꼭 딴짓 (다시 보려면 고개 돌렸다 다시 봐야 함)
@@ -31,7 +34,8 @@ SETTLE = 0.6                         # 빠른 고개 이동 뒤 기다림
 ATTEND_S = (10.0, 30.0)              # 한 번 쳐다보면 이만큼 (랜덤)
 GLANCE_S = 3.0
 IDLE_EVERY = (5.0, 12.0)             # 딴짓 시선 바꾸는 간격
-IDLE_OFF = (25.0, 45.0)              # 딴짓: 사람에서 이만큼 옆 (화각 ±60° 안 → 사람이 화면에 남아 계속 지켜봄)
+IDLE_OFF = (15.0, 30.0)              # 딴짓: 사람에서 이만큼 옆 (화각 ±60° 안. 11-12: 45° 면 어안 가장자리라 먼 얼굴 놓침)
+FINE, FINE_WAIT = 3.0, 1.2           # 눈맞춤 다듬기: 오차 3° 넘고, 마지막 이동 뒤 1.2 s
 SCAN_AFTER = 5.0
 SCAN_EVERY = (4.0, 7.0)
 SCAN_PANS = (-70.0, -35.0, 0.0, 35.0, 70.0)
@@ -44,7 +48,8 @@ GLANCE_YAW = 25.0
 GLANCE_ON = False
 YAW_MIN_PX = 20.0                    # 이보다 작은 얼굴은 yaw 안 믿음
 YAW_MED_S = 0.6
-APPROACH_RATIO, APPROACH_WIN = 1.4, 1.5
+APPROACH_RATIO, APPROACH_WIN = 1.3, 1.5    # 평균끼리 비교라 1.3 (1 s 전보다 30% 커짐)
+APPROACH_MIN_PX = 20.0               # 다가와서 이만큼은 커져야 (11-12: 먼 얼굴 15↔21 px 흔들림이 "다가옴" 으로 잡힘)
 ARRIVE_GAP = 10.0
 LED_AWAKE, LED_DOZE, LED_FLASH = 40, 8, 255
 SLOW = (150, 5)                      # 꾸벅용 느린 SPD, ACC (ST3215: SPD 걸음/s, 4096 걸음 = 한 바퀴 → 150 ≈ 13°/s)
@@ -64,6 +69,9 @@ class Brain:
         self.seen_t = -1e9                   # 마지막으로 누군가 보인 시각
         self.doze_t = 0.0
         self.out_n = 0                       # attend: 가운데 밖으로 연속 몇 번
+        self.errs = []                       # attend: 최근 오차 (눈맞춤 다듬기)
+        self.moved_t = 0.0
+        self.tpan, self.ttilt = 0.0, TILT_HOME   # 쳐다보던 사람을 마지막으로 본 방향
         self.mem = {}                        # 트랙별 {"yaw": deque[(t,yaw)], "px": deque[(t,px)], "contact": bool}
         self.started = False
         self.last_trig = None                # (시각, 이름, 트랙) 로그용
@@ -73,7 +81,7 @@ class Brain:
         pan = (pan + 180.0) % 360.0 - 180.0
         self.pan, self.tilt = pan, max(-30.0, min(90.0, tilt))
         out.append(("move", self.pan, self.tilt, spd, acc))
-        self.busy_until = now + settle
+        self.busy_until, self.moved_t, self.errs = now + settle, now, []
 
     def play(self, now, steps):
         """steps: [(몇 초 뒤, 동작)] 동작 = ("move", pan, tilt, spd, acc, settle) / ("led", v)"""
@@ -101,8 +109,9 @@ class Brain:
             m = self.mem.setdefault(p["id"], {"yaw": collections.deque(maxlen=30), "px": collections.deque(maxlen=30),
                                               "smooth": collections.deque(maxlen=30), "contact": None, "away_t": now})
             m["px"].append((now, p["px"]))
-            olds = [x for t, x in m["px"] if now - t <= APPROACH_WIN]
-            if len(olds) > 1 and p["px"] >= APPROACH_RATIO * min(olds):
+            cur = [x for t, x in m["px"] if now - t <= 0.5]          # 최근 0.5 s 평균 vs 1 s 전쯤 평균 (흔들림은 평균에서 상쇄)
+            old = [x for t, x in m["px"] if 0.8 <= now - t <= APPROACH_WIN]
+            if cur and old and sum(cur) / len(cur) >= max(APPROACH_MIN_PX, APPROACH_RATIO * sum(old) / len(old)):
                 found.append(("approach", p))
                 m["px"].clear()
             if p["px"] < YAW_MIN_PX:
@@ -204,11 +213,13 @@ class Brain:
             elif now - self.seen_t > SCAN_AFTER:
                 self.set_mode("scan", "nobody", now)
                 self.until = 0.0
+        if tgt and tgt["unseen"] <= 0.1:
+            self.tpan, self.ttilt = tgt["pan"], tgt["tilt"]
         if self.mode == "attend":
             if now > self.until:
                 self.set_mode("idle", "bored", now)
                 self.until = 0.0
-            elif tgt and tgt["unseen"] <= 0.5:
+            elif tgt and tgt["unseen"] <= 0.1:
                 dx, dy = tgt["pan"] - self.pan, tgt["tilt"] - self.tilt
                 if abs(dx) > ZONE_X or abs(dy) > ZONE_Y:
                     self.out_n += 1
@@ -217,11 +228,16 @@ class Brain:
                         self.move(out, now, tgt["pan"], tgt["tilt"])
                 else:
                     self.out_n = 0
+                    self.errs = (self.errs + [(dx, dy)])[-5:]
+                    if len(self.errs) >= 3 and now - self.moved_t >= FINE_WAIT:
+                        mx = sum(e[0] for e in self.errs) / len(self.errs)
+                        my = sum(e[1] for e in self.errs) / len(self.errs)
+                        if abs(mx) > FINE or abs(my) > FINE:
+                            self.move(out, now, self.pan + mx, self.tilt + my, settle=0.4)
         elif self.mode == "idle" and now > self.until:
             self.until = now + self.rng.uniform(*IDLE_EVERY)
-            base = tgt["pan"] if tgt else self.pan
             side = self.rng.choice((-1, 1)) * self.rng.uniform(*IDLE_OFF)
-            self.move(out, now, base + side, (tgt["tilt"] if tgt else TILT_HOME) + self.rng.uniform(-10, 10))
+            self.move(out, now, self.tpan + side, self.ttilt + self.rng.uniform(-10, 10))
         elif self.mode == "scan":
             if visible:
                 self.attend(out, now, "found", max(visible, key=lambda p: p["px"]))

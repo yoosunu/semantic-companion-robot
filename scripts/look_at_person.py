@@ -8,7 +8,8 @@
   출력  pantilt/cmd        [팬, 틸트, SPD, ACC] → 브리지 v8.5
         pantilt/led        LED 밝기 0~255 (깨어있음 40 / 꾸벅 8 / 잠 0 / 반짝 255)
         perception/enable  Bool — 잠들면 False (face_perception 이 영상 처리 멈춤)
-        look/state         String JSON {"mode", "reason", "target", "pan", "tilt", "people"} (1 s 로그도 같은 내용)
+        look/state         String JSON {"mode", "reason", "target", "err", "pan", "tilt", "people"} (1 s 로그도 같은 내용)
+                           err = 쳐다보는 사람 방향 − 고개 (°). attend 에서 0 근처면 눈맞춤 중
 
   판단은 전부 look_brain.Brain (ROS 없음, tests/look_brain_sim.py 로 시험):
     scan 두리번 / attend 쳐다봄 / idle 딴짓 / doze 꾸벅 / sleep 잠.  쳐다볼 "이유"(트리거)가 있을 때만 쳐다봄.
@@ -92,7 +93,9 @@ class Look(Node):
                 if a[1] is False:
                     self.motion = look_brain.Motion()                  # 잠들 때 LiDAR 기준 새로
         b = self.brain
-        st = {"mode": b.mode, "reason": b.reason, "target": b.target, "pan": round(b.pan, 1), "tilt": round(b.tilt, 1),
+        tgt = next((p for p in people if p["id"] == b.target and p["unseen"] <= 0.5), None)
+        err = [round(tgt["pan"] - b.pan, 1), round(tgt["tilt"] - b.tilt, 1)] if tgt else None   # 쳐다보는 사람과 고개 차이 (°)
+        st = {"mode": b.mode, "reason": b.reason, "target": b.target, "err": err, "pan": round(b.pan, 1), "tilt": round(b.tilt, 1),
               "people": [f"#{p['id']} yaw{p['yaw']:.0f} {p['px']:.0f}px" for p in people if p["unseen"] <= 0.5]}
         self.pub_state.publish(String(data=json.dumps(st, ensure_ascii=False)))
         if now - self.log_t > 1.0 or any(a[0] == "perceive" for a in acts):
