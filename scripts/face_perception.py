@@ -36,7 +36,7 @@ class FacePerception(Node):
     def __init__(self):
         super().__init__("face_perception")
         p = self.declare_parameter
-        self.det_w = p("det_w", 320).value                 # 검출 폭 (320 빠름 / 640 멀리)
+        self.det_w = p("det_w", 640).value                 # 검출 폭. 11-12 실측: 320 은 바닥에서 먼 얼굴 놓침, 640 은 잡음 (55 ms)
         self.lat = p("latency_s", 0.15).value              # 찍힘 → 받음
         self.settle = p("settle_s", 0.5).value             # 고개 명령 바뀐 뒤 이만큼은 영상 버림
         model = os.path.expanduser(p("face_model", "~/models/face_yunet.onnx").value)

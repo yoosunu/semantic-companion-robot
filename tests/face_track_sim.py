@@ -96,5 +96,19 @@ _, p2 = yaw_pitch(up)
 check("7 얼굴 방향 부호", abs(y0) < 5 and abs(p0) < 10 and y1 > 20 and p2 > 20,
       f"정면 {y0:.0f}/{p0:.0f} 왼쪽 {y1:.0f} 위 {p2:.0f}")
 
+# 8. 먼 얼굴이 띄엄띄엄 (0.8 s 마다) 잡히는데 그 사이 12° 씩 걸어감 → 같은 번호 (11-12 실측 #4→#5 끊김)
+tr = Tracker()
+t = 0.0
+for k in range(6):
+    tr.step([det(-8 - k * 12, 45, 18)], t); t += 0.1
+    tr.step([det(-8 - k * 12, 45, 18)], t); t += 0.7
+check("8 띄엄띄엄 + 걷기", ids(tr) == [1], ids(tr))
+
+# 9. 같은 크기 두 사람이 20° 떨어져 가만히 → 번호 둘 유지 (문턱을 넓혀도 안 합쳐짐)
+tr = Tracker()
+for k in range(30):
+    tr.step([det(0, 30, 25), det(20, 30, 25)], k * DT)
+check("9 나란히 두 사람", sorted(ids(tr)) == [1, 2], ids(tr))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
