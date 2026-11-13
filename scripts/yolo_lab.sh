@@ -8,4 +8,4 @@ if ! pgrep -f "camera_ros/camera_node" >/dev/null; then
 fi
 source /opt/ros/jazzy/setup.bash
 trap '[ $MINE = 1 ] && { tmux kill-session -t cam 2>/dev/null; pkill -f "camera_ros/camera_node"; }' EXIT
-~/yolo_venv/bin/python -u $R/scripts/yolo_lab.py --stream "$@" 2> >(grep -v "WARN" >&2)
+~/yolo_venv/bin/python -u $R/scripts/yolo_lab.py $([ "${STREAM:-1}" = 0 ] || echo --stream) "$@" 2> >(grep -v "WARN" >&2)

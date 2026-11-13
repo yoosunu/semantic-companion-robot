@@ -11,6 +11,7 @@
     yolo_lab.py --model ~/models/yolo26n.onnx   YOLO26 (11-13: 11 보다 CPU 31% 빠름, NMS 없음) — 출력 모양 보고 알아서 처리
     yolo_lab.py --model ~/models/yoloe-26s-seg.onnx --conf 0.05   YOLOE: 단어로 찾기 (doormat rug cable sock power strip bed chair shoe,
                                   단어는 내보낼 때 정함. 점수가 원래 낮게 나옴 → 낮은 기준으로)
+    yolo_lab.py --hz 2                초당 2 번만 (기본: 영상마다)
     yolo_lab.py --image 사진.png      카메라 없이 사진 한 장 (Mac/VM 시험용) → ~/yolo_lab/latest.jpg
   기록: ~/yolo_lab/log.csv (시각, 이름, 점수, 상자 크기 비율), 가구가 보이면 3 s 마다 그림 ~/yolo_lab/seen_XX.jpg
 """
@@ -95,9 +96,13 @@ def main():
     if csv.tell() == 0:
         csv.write("t,name,conf,area\n")
     src = [cv2.imread(image)] if image else frames()
-    t_log = t_save = 0.0
+    t_log = t_save = t_last = 0.0
     k = 0
+    hz = arg("--hz", 0.0)                        # 0 = 영상 올 때마다 / 2.0 = 초당 2 번만 (CPU 재기·실제 운용)
     for bgr in src:
+        if hz and time.time() - t_last < 1.0 / hz:
+            continue                              # 너무 이르면 이 영상은 건너뜀
+        t_last = time.time()
         t0 = time.time()
         dets = yolo.detect(bgr)
         ms = (time.time() - t0) * 1000

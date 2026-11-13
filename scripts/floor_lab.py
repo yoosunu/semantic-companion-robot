@@ -12,6 +12,7 @@
   쓰기 (Pi, 카메라 노드 필요 — floor_lab.sh 가 켜 줌)
     floor_lab.py --stream                 Mac 브라우저 http://<Pi IP>:8082
     floor_lab.py --stream --th 3.5        더 민감하게 (기본 4.0) / --horizon 0.5 (화면 위에서 이 비율 아래만, 기본 0.55)
+    floor_lab.py --hz 5                    초당 5 번만 (기본: 영상마다)
     floor_lab.py --image 사진.jpg          사진 한 장 → ~/floor_lab/latest.jpg
   로그 1 s 마다: 후보 수·넓이, 처리 ms. 후보가 있으면 3 s 마다 그림 ~/floor_lab/seen_XX.jpg
 """
@@ -94,9 +95,13 @@ def main():
     image = arg("--image", "")
     push = serve(8082) if "--stream" in a else None
     src = [cv2.imread(image)] if image else frames()
-    t_log = t_save = 0.0
+    t_log = t_save = t_last = 0.0
     k = 0
+    hz = arg("--hz", 0.0)                        # 0 = 영상 올 때마다 / 2.0 = 초당 2 번만 (CPU 재기·실제 운용)
     for bgr in src:
+        if hz and time.time() - t_last < 1.0 / hz:
+            continue                              # 너무 이르면 이 영상은 건너뜀
+        t_last = time.time()
         t0 = time.time()
         mask, blobs, odd = fl.step(bgr)
         ms = (time.time() - t0) * 1000
