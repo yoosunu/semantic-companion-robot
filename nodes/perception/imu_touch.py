@@ -15,7 +15,7 @@ ACC_G = 0.02
 GYRO_DPS = 4.0
 REFRACT_S = 1.0
 EMA = 0.05
-SIGN = 1.0        # 실물에서 방향이 반대로 나오면 −1
+SIGN = -1.0       # 11-14 실물: 톡 친 반대쪽을 봄 → −1
 
 
 class Touch:

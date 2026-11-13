@@ -67,7 +67,7 @@ ARRIVE_GAP = 10.0
 LED_AWAKE, LED_DOZE, LED_FLASH = 40, 8, 255
 SLOW = (150, 5)                      # 졸기 시작 느린 SPD, ACC (ST3215: SPD 걸음/s, 4096 걸음 = 한 바퀴 → 150 ≈ 13°/s)
 STEPS_PER_DEG = 4096 / 360.0         # ST3215 SPD 단위 (걸음/s)
-NOD_GAP = (10.0, 20.0)               # 꾸벅 사이 (그동안 아주 느리게 가라앉음)
+NOD_GAP = (1.0, 3.0)                 # 꾸벅 사이 (11-14 실물: 10~20 s 면 동작이 띄엄띄엄 → 조는 걸로 안 보임. 깨자마자 다시 스르르)
 CLIP_MIN_PX = 25.0                   # 행동 클립은 이만큼 큰 얼굴에서만 (yaw·pitch 믿을 크기)
 COOL = {"peekaboo": 10.0, "follow_gaze": 20.0, "flinch": 10.0, "nod": 8.0}
 PEEK_GAP = (0.5, 3.0)
@@ -375,7 +375,7 @@ class Brain:
     def nod_off(self, now, last=False):
         """꾸벅 한 번 (A·B 랜덤) 예약. last 면 깨지 않고 끝까지 숙여 잠들기 → 끝나는 데 걸리는 시간"""
         td, pn = self.base_tilt, self.pan
-        sink, sink_s = self.rng.uniform(8.0, 12.0), self.rng.uniform(3.0, 5.0)
+        sink, sink_s = self.rng.uniform(8.0, 12.0), self.rng.uniform(4.0, 7.0)   # 더 길고 느리게 = 이어지는 졸음
         drop = self.rng.uniform(6.0, 10.0)
         spd = max(5, int(sink / sink_s * STEPS_PER_DEG))
         steps, t = [], 0.0
@@ -408,7 +408,7 @@ class Brain:
     def doze(self, out, now, why, nods=3):
         self.set_mode("doze", why, now)
         self.nods_left, self.base_tilt = nods, TILT_DOZE
-        self.until = now + self.rng.uniform(4.0, 8.0)        # 졸린 자세로 간 뒤 첫 꾸벅까지
+        self.until = now + self.rng.uniform(1.5, 3.0)        # 졸린 자세로 간 뒤 첫 꾸벅까지
         self.move(out, now, self.pan, TILT_DOZE, *SLOW, settle=2.0)
         out.append(("led", LED_DOZE))
 

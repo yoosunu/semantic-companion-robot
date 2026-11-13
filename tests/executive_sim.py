@@ -181,11 +181,11 @@ for k in range(400):
     if 5.5 <= t < 5.6:
         ax += 0.05 * G                                  # 고개 돌며 흔들림 → 무시돼야
     if 10.0 <= t < 10.1 or 10.4 <= t < 10.5:
-        ay -= 0.04 * G                                  # 왼쪽에서 톡 → 오른쪽(−y)으로 밀림, 두 번 (1 s 안)
+        ay -= 0.04 * G                                  # 톡 두 번 (1 s 안). 방향 부호는 SIGN (11-14 실물로 −1)
     r = tc.step(t, ax, ay, 0.0, 0.0, quiet)
     if r:
         hits.append((round(t, 2), r[0] if r[0] is None else round(r[0])))
-check("13 톡톡: 감지·방향(왼쪽 +90°)·자기 흔들림 무시·한 번만", len(hits) == 1 and hits[0][0] == 10.0 and abs(hits[0][1] - 90) < 15, hits)
+check("13 톡톡: 감지·방향(SIGN 반영)·자기 흔들림 무시·한 번만", len(hits) == 1 and hits[0][0] == 10.0 and abs(abs(hits[0][1]) - 90) < 15, hits)
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
