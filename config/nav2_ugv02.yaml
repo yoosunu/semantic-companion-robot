@@ -54,7 +54,7 @@ local_costmap:
   local_costmap:
     ros__parameters:
       plugins: ["obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
-      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (scripts/whisker.py) — LiDAR 가 못 보는 것
+      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (nodes/navigation/whisker.py) — LiDAR 가 못 보는 것
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         footprint_clearing_enabled: false  # 몸 밑이라고 지우지 않음
@@ -91,7 +91,7 @@ global_costmap:
   global_costmap:
     ros__parameters:
       plugins: ["static_layer", "obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
-      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (scripts/whisker.py) — LiDAR 가 못 보는 것
+      whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (nodes/navigation/whisker.py) — LiDAR 가 못 보는 것
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         footprint_clearing_enabled: false  # 몸 밑이라고 지우지 않음

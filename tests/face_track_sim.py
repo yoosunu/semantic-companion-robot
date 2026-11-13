@@ -4,7 +4,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "nodes", "perception"))
 from face_track import Tracker, face_angles, yaw_pitch  # noqa: E402
 
 DT = 0.1   # 10 fps

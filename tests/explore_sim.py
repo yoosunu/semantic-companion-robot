@@ -64,7 +64,7 @@ for n, it in {"geometry_msgs.msg": ["Point", "PoseStamped", "PoseWithCovarianceS
 sys.modules["geometry_msgs.msg"].TwistStamped = TW
 for n in ("geometry_msgs", "nav_msgs", "sensor_msgs", "std_msgs", "visualization_msgs"): mod(n)
 sys.modules["visualization_msgs.msg"].MarkerArray = lambda: types.SimpleNamespace(markers=[])
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nodes", "navigation"))
 import scr_explore as E
 E.ntfy = lambda *a, **k: None
 

@@ -20,10 +20,20 @@ Ubuntu 24.04 · ROS 2 Jazzy · Gazebo Harmonic · SLAM · Nav2
 ## Repository layout
 
 ```text
-src/        ROS 2 packages written for this project
-scripts/    Dev helper scripts (start sim, SLAM, teleop, ...)
-docs/       Architecture notes and debugging records
-logs/       Local runtime logs (not committed)
+nodes/          Robot runtime code — the part worth reading (see nodes/README.md)
+  perception/     face detection + tracking -> /people
+  navigation/     frontier explorer, whisker (contact/escape)
+  behavior/       head (attention, doze/sleep), OLED status
+  system/         heartbeat log, run report, Nav2 param merge
+run/            Start/stop on the Pi (look_test.sh, run_explore.sh, stop_all.sh, ...)
+setup/          One-time setup (Pi, camera, YOLO venv, colcon workspace)
+src/            ROS 2 packages (C++ UGV02 bridge, messages, bringup launch, URDF, sim)
+config/         Nav2 / SLAM parameters, RViz
+tests/          Simulations of node logic (no ROS needed)
+tools/          Experiments and measurement: lab/ (vision labs), bench/ (CPU, power, odom), mac/, experiments/
+sim/            Gazebo playground from the simulation phase (kept for reference)
+docs/           Design notes, calibration and debugging records
+logs/           Local runtime logs (not committed)
 ```
 
 ## Roadmap

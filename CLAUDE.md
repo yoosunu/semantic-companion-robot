@@ -35,7 +35,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 
 ## 지금 (2026-11-06 새벽) — **RViz 실물 연결** + 탐색 모드(느슨한 도착) + 헛바퀴 위치 오류 원인·대책 + 방 지도. ← 새 대화는 여기부터
 - RViz: UTM 네트워크 **브리지됨(en0)** → VM 192.168.123.118 (DHCP, MAC 7A:0E:93:96:80:C4 — 바뀌면 공유기 예약). Mac `~/.ssh/config` scr-vm.
-  VM 창 터미널에서 `./scripts/rviz.sh` (`config/robot.rviz`: 지도·스캔·로봇·경로·로컬 비용·탐색 경계·충돌 상자·odom 자취). 대안 Foxglove(Mac 앱) 보류.
+  VM 창 터미널에서 `./tools/mac/rviz.sh` (`config/robot.rviz`: 지도·스캔·로봇·경로·로컬 비용·탐색 경계·충돌 상자·odom 자취). 대안 Foxglove(Mac 앱) 보류.
   RViz 닫을 때 저장 안 함 (설정 파일 덮어씀). 시계 차 +0.23 s = 라이다 지연(정상). GLSL ERROR = UTM 그래픽 한계, 무시.
 - 탐색·투어링 모드 (`config/nav2_explore.yaml`, nav.launch 가 마지막에 덮어씀): 도착 0.20 m, 방향 안 봄, GoalAngleCritic 뺌.
   근거: 목표에서 "위치+방향 동시 맞추기" = 0.13 rad/s 미만 회전 요구 → 4분 헤맴 (재현됨). 0.30 은 탐색기와 충돌(즉시 도착 → 같은 목표 283번).
@@ -47,7 +47,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   패키지 기본값(0.5 m/0.5 rad 마다 보정) → 못 가는 가구 턱 너머에 로봇이 있다고 판단. 대책: `config/slam_real.yaml` (0.15 m / 0.2 rad),
   nav.launch 가 넘김. 11-06 탐색: 5개 목표, 완료 + 집 복귀 50 s, 벽 선명. 남은 것: 브리지 헛바퀴 감지(회전 명령 중 자이로 ~0 → 거리 안 쌓기·PWM 그만),
   SLAM max_laser_range 20 → 12 (C1), 흰 통로는 LiDAR 가 턱 위로 본 것 (진짜 빈 높이) → 바닥 턱은 ToF 몫.
-- 탐색 끝 알림: `scripts/explore_watch.py --name room` (탐색기 실행 + 복귀하면 지도 자동 저장 + ntfy, 3분 안에 복귀 못 하면 경고).
+- 탐색 끝 알림: `sim/explore_watch.py --name room` (탐색기 실행 + 복귀하면 지도 자동 저장 + ntfy, 3분 안에 복귀 못 하면 경고).
 - 브리지 v5.3: TAP 은 직전 0.5 s 평균으로 결정 (MPPI 잡음 ± 은 쉼). 심박: Nav2 노드별 CPU (전부 7~17%씩, 원인 미상), 위치는 토픽 (SLAM /pose 는
   보정 때만 갱신 → 개선 필요). robot-pull 이 심박·지도도 가져옴.
 - 지도: `~/maps/room_1106_explore` (Pi), Mac `logs/maps/`.
@@ -57,7 +57,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   ax 표준편차 정지 ~25 / PWM 30 ~92 / 0.08 m/s 충돌 추정 ~2000+ (1 g ≈ 8500). ① 브리지 `/imu` 원본 발행 + 살살 부딪히기·밀기·카펫 기록 → 문턱값
   ② 브리지: 부딪힘(가속 튐 → 정지·방향·사건) / 막힘·헛바퀴(바퀴 돌고 IMU 조용 → 밀기 멈춤·거리 안 쌓음) / 건드림·들림(명령 0인데 IMU 움직임)
   ③ 부딪힌 자리를 장애물 지도에 찍기 (TurtleBot 범퍼 방식) ④ run_report 에 bump 사건. 그다음 go_home.py → AMCL 순회.
-  → 11-06 1차 측정 완료 (브리지 v6 `/imu`, `scripts/imu_lab.py`): 톡 0.04 g(정지 잡음 8배), 부딪힘 0.09 g(주행 잡음 4배), 카펫 gy 7 °/s,
+  → 11-06 1차 측정 완료 (브리지 v6 `/imu`, `tools/lab/imu_lab.py`): 톡 0.04 g(정지 잡음 8배), 부딪힘 0.09 g(주행 잡음 4배), 카펫 gy 7 °/s,
     출발 0.17 g 는 자기 동작 → 빼야 함. `docs/calibration/imu-touch-2026-11-06.md`. 다음 = 관찰 모드 감지기 v0 (기록만, 오탐 확인).
 
 ## 지금 (2026-11-05 저녁) — 부품 주문 완료 + "로봇의 하루" 목표 확정 + 도착 기준 0.10 (6/6). ← 새 대화는 여기부터
@@ -67,7 +67,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   SparkFun Qwiic + Adafruit 4397 + 점퍼선, 11-13 발송). 멀티미터 안 삼 → 서보 꽂기 전 사진 비교. Pico 안 삼 (직결 후 Pi I2C 3·5번 빔).
 - Nav2: 도착 기준 0.10 m (0.08 은 MPPI 가 목표 앞에서 x·z ± 깔짝, 톡톡 52회) → 왕복 6/6, 평균 21.8 s, 최대 36 s. PoseProgressChecker 효과 확인.
   Pi 부하 CPU ~45%, 메모리 0.8/7.8 GB, 47°C. 배터리: 완충해도 11.8 V 근처 (켠 채) → 새 셀로 충전 경로 vs 셀 문제 가르기.
-- 심박 로그: `scripts/heartbeat.py` (1분마다 v·위치·CPU·프로세스별 CPU·온도 → `~/scr_logs/<날짜>/heartbeat.jsonl`). 11-05 첫 시험.
+- 심박 로그: `nodes/system/heartbeat.py` (1분마다 v·위치·CPU·프로세스별 CPU·온도 → `~/scr_logs/<날짜>/heartbeat.jsonl`). 11-05 첫 시험.
 - 다음: 심박 시험 → 방 지도 저장 + AMCL (SLAM↔AMCL CPU 비교) → 충돌 감시 후진 → keepout → IMU 충격 → ToF 노드 → 팬틸트 명령.
 - 펌웨어 읽기 1·2장 함 (loop 구조, 우리 변경 3개 전후 비교: T:13 heartbeat / T:11 PID 끄기 / T:11 0 정지).
 
@@ -75,15 +75,15 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 원칙 (Jasper): **"조용하되 정확하게. 빠를 필요는 없다."** (집 안 로봇, 물류 로봇 아님)
 - 로그: `docs/design/logging.md` (3층: 사건·심박·블랙박스). nav.launch 종료 시 Pi 가 보고서(`~/scr_logs/reports`) + ntfy 알림,
   부팅 시 밀린 것(crontab). Mac `robot-pull` → 최신 보고서 열기 (VS Code ⌘⇧V). 비밀값 Pi `~/.scr.env` (NTFY_TOPIC).
-  `scripts/run_report.py` (Nav2 로그 → 시간표). 약점: 주행 중 위치 모름 → 2층 심박이 다음.
+  `nodes/system/run_report.py` (Nav2 로그 → 시간표). 약점: 주행 중 위치 모름 → 2층 심박이 다음.
 - 안전: 펌웨어 heartbeat 는 **T:1/T:11 만** 갱신 (T:13 은 안 됨 = 10-31 거실 사고 원인) → 브리지 v4 부터 T:1 + `T:136 500ms`.
-  crash/hang 0.5~0.8 s 정지. 회귀 시험 `scripts/failsafe_test.py crash|hang [pwm]` → `docs/debugging/004-...`
+  crash/hang 0.5~0.8 s 정지. 회귀 시험 `tools/bench/failsafe_test.py crash|hang [pwm]` → `docs/debugging/004-...`
 - 기어가기: 펌웨어 PID 는 저속에서 가다서다(덜컹 ~450). 일정 PWM 은 잔잔(PWM 30 = 0.08 m/s, 덜컹 92) → 한계는 하드웨어 아님.
   브리지 v5 `drive_mode:=pwm` (nav.launch 기본): 직진 표 + 회전(자이로 폐루프) + 부드러운 출발 + v5.2 톡톡 밀기(바닥선 0.05 m/s / 0.13 rad/s 미만).
-  측정 전부 `docs/calibration/lowspeed-2026-11-03.md`. 시험 `scripts/crawl_test.py [이름 일부]`.
+  측정 전부 `docs/calibration/lowspeed-2026-11-03.md`. 시험 `tools/bench/crawl_test.py [이름 일부]`.
 - Nav2 (`config/nav2_ugv02.yaml`): vx 0.08, wz 0.25, 도착 0.08 m. 왕복 0.6 m+180°: 4/4, 오차 0.06~0.08 m, 17~19 s (한 번 110 s:
   진척 확인 20 s/10 cm 가 톡톡 1 cm 와 충돌) → **PoseProgressChecker 3 cm / 11° 로 바꿈, 아직 미시험** ← 다음 첫 할 일
-  `python3 scripts/shuttle.py --laps 2 --a 0,0,0 --b 0.6,0,180`
+  `python3 sim/shuttle.py --laps 2 --a 0,0,0 --b 0.6,0,180`
 - 소음 1 m: 주행 45~55 dB (회전이 시끄러움 = 스키드 스티어 끌림).
 - 내일 계획 (Jasper 11-04): **Waveshare 펌웨어 코드 같이 열어보기** (github waveshareteam/ugv_base_ros ROS_Driver: uart_ctrl.h 명령 분기,
   movtion_module.h heartBeatCtrl·PID·getLeftSpeed — 오늘 원인 찾은 곳) + 배터리 계획 (UGV02 위키: 보호회로 **없는** 셀 권장, UPS 보드가 보호,
@@ -106,7 +106,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 - 다음 후보: 지도 저장 → 저장 지도에서 위치 찾기(AMCL/SLAM localization), task_manager v0(Python), 1-F VM RViz, IMU 덜컹 감지, 배터리 실사용 시간, 충전(UPS 보드 확인)
 
 ## 지금 (2026-10-31 새벽) — odom 보정 1차 완료: 회전은 자이로, 거리는 odl/odr(cm). track_width 0.40 으로 실물 지도 벽 겹침 해소(3분). ← 새 대화는 여기부터
-- 근거·숫자: `docs/calibration/odom-2026-10-31.md` (라이다 정답 측정 도구 `scripts/lidar_angle.py`, 단위 측정 `scripts/odom_probe.py`)
+- 근거·숫자: `docs/calibration/odom-2026-10-31.md` (라이다 정답 측정 도구 `tools/bench/lidar_angle.py`, 단위 측정 `tools/bench/odom_probe.py`)
 - 다음: ① 브리지 yaw 를 자이로로 (gz ÷ 16.4 °/s, 정지 시 바이어스 재측정, v ÷ 100, odl/odr cm) — Jasper 코드
   ② 완충(Pi 끄고 충전) 후 같은 자리·같은 시간 3종 지도 비교 (0.16 / 0.40 / 자이로) ③ 배터리 실사용 시간 측정 (자동 충전 기준)
 - 실물 실행(지금은 수동): `tmux new -d -s robot "bash -ic 'ros2 launch scr_bringup robot.launch.py ugv_port:=/dev/ttyAMA0 track_width:=0.40; exec bash'"`
@@ -134,7 +134,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
      라이다는 판 위, **16248(M2.5×8+3, 수나사 3mm) 스페이서 + 15685(KM2.5×8)** 로 고정 — C1 바닥 나사 깊이 ≤4mm(데이터시트). 19024(+6)·15685 직결은 초과.
      라이다 케이블은 판 날개 밑으로 묶어 바퀴에서 뗌, Pi USB2 아래 칸. 배터리 전원에서 `throttled=0x0`, `/scan` 10.0 Hz ✅ (800mA 기동 문제 없음).
   5) 체크리스트: `docs/ugv02-protocol.md` Day-1 1~8 (피드백 형식, 좌회전 부호, 3 s 정지, 충전, 포트, URDF 실측, 라이다 방향, 라이다 드라이버)
-- 10-29 05시 첫 실물 SLAM 맛보기: Pi 에서 `nohup` 으로 robot.launch.py + `slam_toolbox online_async_launch.py`, `scripts/wander.py --laser-yaw 3.1416` (혼자 헤매기, 1분마다 ~/maps 저장).
+- 10-29 05시 첫 실물 SLAM 맛보기: Pi 에서 `nohup` 으로 robot.launch.py + `slam_toolbox online_async_launch.py`, `sim/wander.py --laser-yaw 3.1416` (혼자 헤매기, 1분마다 ~/maps 저장).
   라이다 방향 실측(`wander.py --check`): 로봇 앞 = 라이다 180°, 좌우 정상 → URDF `laser_yaw=${pi}` (XML 주석에 `--` 쓰면 xacro 깨짐 — 겪음).
   1차: 사무용 의자 바닥 다리(라이다 높이 아래) 못 봄 → STOP 0.55 m. 2차: ~6.5분 돌다 SSH 끊김 → **10-31 확인: 배터리 방전으로 전원 차단** (journalctl -b -2 가 종료 과정 없이 05:35 에서 끊김, Wi-Fi 끊김·저전압 로그 없음). 10-28부터 충전 없이 사용 + Pi·라이다·모터 동시. → 주행 전 OLED V 확인, 충전은 깨어 있을 때.
   지도: Pi `~/maps/room_try1`, `~/maps/room_1029_0529` (.pgm/.yaml). 다음날 확인: `journalctl -b -1 | tail -50`, 전압(피드백 v), 지도 Mac 으로 scp.
@@ -147,7 +147,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
   화면 없음(micro-HDMI 케이블 없음, 랜선 어려움) → Pi 안 로그가 필요하면: Mac `sudo dd if=/dev/rdiskNs2 ... count=2048` + `debugfs -c` (002 참고).
 - 실물 관찰: UGV02 케이스에 확장 데크(2층 판) + 양옆 알루미늄 레일 → 1층 Pi, 2층 라이다 구조. 차체 위 40핀 단자에 `GND TX RX SCL SDA 5V` 인쇄
   (GPIO 연결 시 5V가 GPIO에 들어가지 않게 핀 배치 사진 확인 후 전원). 배터리: 18650×3 증정 + 12.6V 2A 충전기, 차체 DC 잭으로 장착 채 충전.
-- Pi 다음 시작: `cd ~/semantic-companion-robot && git pull && bash scripts/setup_pi.sh` (sllidar_ros2 submodule 받아 ~/scr_ws 빌드) → 확인 후 `rm -rf ~/test_ws`.
+- Pi 다음 시작: `cd ~/semantic-companion-robot && git pull && bash setup/setup_pi.sh` (sllidar_ros2 submodule 받아 ~/scr_ws 빌드) → 확인 후 `rm -rf ~/test_ws`.
 - 정리 대상: rosdep이 Pi에 `ros-jazzy-turtlebot3-gazebo` 설치(어느 package.xml 의존성인지 찾아 Pi에서 제외).
 - 남은 준비성 항목: 1-F Pi↔VM 통신(UTM VM 네트워크가 Mac 안쪽 망이면 Pi 토픽을 VM RViz 에서 못 봄 → 첫 확인: VM `ip -4 addr`, Mac `ipconfig getifaddr en0`)
   / odom 측정 도구(1 m 직진·360° 회전, 11/15 게이트) / 1-B 브리지 T:131 재전송.
@@ -159,9 +159,9 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
 
 ## 현재 상태 (2026-10-14) — 시뮬 v0.1 통과, 브리지 v0 통과. 전체 계획·일정·목표 Lv: `docs/roadmap.md`
 - 계층 상태: 센서 ✅ / SLAM 맵 ✅ / 위치 추정(AMCL 2.0cm) ✅ / Nav2 자율주행(SUCCEEDED, 7.2cm) ✅ → `docs/validation/sim-v0.1.md`
-- 실행: **`robot` 하나** (도움말 출력). `robot up` / `robot go` / `robot edit` → `robot reload` / `robot status` / `robot down`. 구현: `scripts/robot`, 사용법: `docs/sim-playbook.md`
-  맵 생성(옛 방식, robot 명령에 아직 없음): `scripts/robot_slam.sh` → `robot drive` → `./scripts/save_map.sh <name>`
-- 빌드: `./scripts/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `scripts/env.sh`.
+- 실행: **`robot` 하나** (도움말 출력). `robot up` / `robot go` / `robot edit` → `robot reload` / `robot status` / `robot down`. 구현: `sim/robot`, 사용법: `docs/sim-playbook.md`
+  맵 생성(옛 방식, robot 명령에 아직 없음): `sim/robot_slam.sh` → `robot drive` → `./run/save_map.sh <name>`
+- 빌드: `./setup/setup_workspace.sh` → ~/scr_ws (src는 repo/src 심볼릭 링크). 환경: `sim/env.sh`.
 - 결정: 시뮬레이션 튜닝은 여기서 멈춤. Burger 파라미터는 실물 UGV02로 옮겨가지 않으므로, 실물 bring-up하며 개념을 채운다.
   시뮬레이션은 회귀 테스트·실험용으로 유지.
 - 하드웨어 주문 완료(2026-10-12): 엘레파츠 품목(Pi 5 포함)은 합배송으로 10/26 발송 예정. microSD(쿠팡)만 먼저 도착.
@@ -176,7 +176,7 @@ Claude ⇄ 공유 폴더 ⇄ VM (개발/시뮬레이션) → git push → GitHub
      옛 alias(robot-start/ugv/stop/drive)와 ugv02_sim.sh·play.sh 삭제. 일반(비 UGV02) 시뮬 모드는 더 이상 안 씀.
      Nav2 controller = MPPI (10-22 결정, 대안 RPP): docs/decisions/001-nav2-controller.md. 다음: SLAM + Nav2 동시(L6).
      폭주 테스트는 teleop 대신 `ros2 topic pub -r 10 /cmd_vel ...` (teleop은 포커스 잃으면 스스로 정지)
-  3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(scripts/setup_pi.sh) 작성 → 도착 당일 바로 실행
+  3. Pi 준비: microSD에 Ubuntu 24.04 미리 굽기(Mac, Raspberry Pi Imager) + Pi 설치 스크립트(setup/setup_pi.sh) 작성 → 도착 당일 바로 실행
   4. bring-up 계층 순서: Pi 환경 → LiDAR /scan → UGV02 모터/odom/IMU → TF → SLAM → Nav2
 - iPhone: iPhone 16 (일반 모델, LiDAR 스캐너 없음) → 기하(갈 수 있는 공간)는 RPLIDAR + costmap, iPhone은 의미(YOLO) 담당.
 - 보류 실험: iPhone 높이별(20/30/40cm) YOLO 탐지율 비교 → 거치 높이 결정 근거. 공간 확보 후 진행.
@@ -219,6 +219,6 @@ UGV02(내장 ESP32: 엔코더/IMU/모터 제어, Pi와 UART/JSON) · Raspberry P
 ## 통합 원칙 (2026-10-07)
 - 한 번에 한 계층만 붙인다. 아래 계층이 합격 기준을 통과하고 증거가 남은 뒤에만 다음 계층을 올린다.
   예: 센서(/scan 값) → TF/odom → SLAM 맵 → 위치추정 → Nav2 → 인식 → semantic → 작업
-- 각 계층의 합격 기준은 수치로 정하고, 점검은 스크립트로 자동화해 회귀 테스트로 재사용한다 (예: scripts/slam_check.sh).
+- 각 계층의 합격 기준은 수치로 정하고, 점검은 스크립트로 자동화해 회귀 테스트로 재사용한다 (예: sim/slam_check.sh).
 - 문제가 생기면 이미 통과한 계층부터 재점검해서 범위를 좁힌다.
 

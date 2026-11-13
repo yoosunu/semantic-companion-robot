@@ -35,7 +35,7 @@ REPO = os.path.expanduser("~/semantic-companion-robot")   # 설정 파일이 rep
 def merged_params():
     """원본 → SLAM 모드 → 실물 순서로 덮어써서 한 파일로."""
     cfg = os.path.join(REPO, "config")
-    merge = os.path.join(REPO, "scripts", "merge_params.py")
+    merge = os.path.join(REPO, "nodes", "system", "merge_params.py")
     step1, out = "/tmp/nav2_ugv02_step1.yaml", "/tmp/nav2_ugv02_effective.yaml"
     subprocess.run(["python3", merge, os.path.join(cfg, "nav2_burger_sim.yaml"),
                     os.path.join(cfg, "nav2_slam_mode.yaml"), step1], check=True, capture_output=True)
@@ -54,7 +54,7 @@ def merged_slam_params():
     """slam_toolbox 패키지 기본값 → config/slam_real.yaml (실물용) 순서로 덮어써서 한 파일로."""
     base = os.path.join(get_package_share_directory("slam_toolbox"), "config", "mapper_params_online_async.yaml")
     out = "/tmp/slam_real_effective.yaml"
-    r = subprocess.run(["python3", os.path.join(REPO, "scripts", "merge_params.py"), base,
+    r = subprocess.run(["python3", os.path.join(REPO, "nodes", "system", "merge_params.py"), base,
                         os.path.join(REPO, "config", "slam_real.yaml"), out],
                        check=True, capture_output=True, text=True)
     print(r.stdout)
@@ -65,7 +65,7 @@ def report_after_shutdown(context, *args, **kwargs):
     """주행이 끝나면 보고서 + 알림. 노드들이 로그를 다 쓸 때까지 8초 기다린 뒤 실행.
     start_new_session: launch 가 끝나도, tmux 의 Ctrl+C 가 와도 이 작업은 따로 살아서 끝까지 돈다."""
     cmd = (f"mkdir -p ~/scr_logs/reports; sleep 8; "
-           f"python3 {REPO}/scripts/run_report.py ~/.ros/log --pending --notify --prune 7 "
+           f"python3 {REPO}/nodes/system/run_report.py ~/.ros/log --pending --notify --prune 7 "
            f"--out ~/scr_logs/reports >> ~/scr_logs/report_hook.log 2>&1")
     subprocess.Popen(["bash", "-c", cmd], start_new_session=True)
     return []
@@ -98,9 +98,9 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(nav2, "launch", "navigation_launch.py")),
                 launch_arguments={"use_sim_time": "false", "params_file": params, "autostart": "true"}.items()),
             # 11-06 Whisker: 촉각 (느끼기·멈춤·빼기·갇힘·구조 요청·지도 표시). 브리지 v8 은 /imu·/motor_out 만 주고 /whisker/cmd_vel 을 우선 따름
-            ExecuteProcess(cmd=["python3", os.path.join(REPO, "scripts", "whisker.py")], output="screen"),
+            ExecuteProcess(cmd=["python3", os.path.join(REPO, "nodes", "navigation", "whisker.py")], output="screen"),
             # 11-10 상태 표시: /robot/state·/whisker/state·전압 → /robot/display → 브리지가 UGV02 OLED 4줄에 씀
-            ExecuteProcess(cmd=["python3", os.path.join(REPO, "scripts", "status_display.py")], output="screen"),
+            ExecuteProcess(cmd=["python3", os.path.join(REPO, "nodes", "behavior", "status_display.py")], output="screen"),
         ]),
 
         RegisterEventHandler(OnShutdown(on_shutdown=[OpaqueFunction(function=report_after_shutdown)])),

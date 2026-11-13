@@ -32,7 +32,7 @@ for n, it in {"geometry_msgs.msg": ["PoseWithCovarianceStamped", "TwistStamped"]
     mod(n, **{i: Msg for i in it})
 for n in ("geometry_msgs", "nav_msgs", "sensor_msgs", "std_msgs"): mod(n)
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "scripts"))
+sys.path.insert(0, os.path.join(REPO, "nodes", "navigation"))
 import whisker
 np.random.seed(1)
 B, ROOM = 0.085, (-1.5, 2.5, -1.5, 1.5)
