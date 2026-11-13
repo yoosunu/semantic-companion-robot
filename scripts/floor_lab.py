@@ -23,6 +23,8 @@ import time
 import cv2
 import numpy as np
 
+cv2.setNumThreads(1)   # 11-13: 작은 계산이라 하나로 충분, 다른 노드와 안 뺏게
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_lab import frames, serve  # noqa: E402
 

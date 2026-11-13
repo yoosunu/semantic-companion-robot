@@ -24,6 +24,8 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+cv2.setNumThreads(1)
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_lab import frames, serve  # noqa: E402  (카메라 받기·MJPEG 스트림은 face_lab 것 그대로)
 
@@ -42,7 +44,10 @@ NAME = "YOLO"
 
 class Yolo:
     def __init__(self, model, size=320, conf=0.25):
-        self.sess = ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+        so = ort.SessionOptions()
+        so.intra_op_num_threads, so.inter_op_num_threads = 2, 1          # 11-13 cpu_bench: 기본은 4코어 + 대기 중에도 계속 돎(spin)
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")   # → 2 Hz 인데 코어 0.77 개. 쉴 땐 진짜 쉬게
+        self.sess = ort.InferenceSession(model, so, providers=["CPUExecutionProvider"])
         self.inp, self.size, self.conf = self.sess.get_inputs()[0].name, size, conf
         meta = self.sess.get_modelmeta().custom_metadata_map.get("names")      # 모델에 적힌 종류 이름 (YOLOE 는 우리가 준 단어들)
         self.names = [v for k, v in sorted(ast.literal_eval(meta).items())] if meta else list(NAMES)

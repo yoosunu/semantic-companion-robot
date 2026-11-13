@@ -32,6 +32,8 @@ from std_msgs.msg import Bool, Float32MultiArray
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_track import Tracker, face_angles, yaw_pitch  # noqa: E402
 
+cv2.setNumThreads(2)   # 11-13 cpu_bench: 기본(4코어 전부)이면 YuNet 640 하나가 코어 1.4개 → 다른 노드와 뺏음
+
 
 class FacePerception(Node):
     def __init__(self):
@@ -40,6 +42,8 @@ class FacePerception(Node):
         self.det_w = p("det_w", 640).value                 # 검출 폭. 11-12 실측: 320 은 바닥에서 먼 얼굴 놓침, 640 은 잡음 (55 ms)
         self.lat = p("latency_s", 0.15).value              # 찍힘 → 받음
         self.settle = p("settle_s", 0.5).value             # 고개 명령 바뀐 뒤 이만큼은 영상 버림
+        self.rate = p("rate_hz", 5.0).value                 # 검출 주기 (11-13: 영상마다 10 Hz → 5 Hz, 도약+응시엔 충분)
+        self.last_run = 0.0
         model = os.path.expanduser(p("face_model", "~/models/face_yunet.onnx").value)
         self.det = cv2.FaceDetectorYN.create(model, "", (self.det_w, self.det_w), 0.6)
         self.tracker = Tracker()
@@ -75,6 +79,9 @@ class FacePerception(Node):
     def on_img(self, m):
         if not self.enabled:
             return
+        if time.time() - self.last_run < 1.0 / self.rate:
+            return                                          # 주기 전 영상은 건너뜀
+        self.last_run = time.time()
         now = time.time()
         shot = now - self.lat
         if shot < self.moved_t + self.settle:
