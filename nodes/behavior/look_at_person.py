@@ -15,8 +15,7 @@
   판단은 전부 look_brain.Brain (ROS 없음, tests/look_brain_sim.py 로 시험):
     scan 두리번 / attend 쳐다봄 / idle 딴짓 / doze 꾸벅 / sleep 잠.  쳐다볼 "이유"(트리거)가 있을 때만 쳐다봄.
     **언제** 졸고 자고 깨는지는 executive 가 정함 (11-14). 여기는 모양만. executive 가 없으면 졸지 않음.
-  파라미터  led (false — 11-12 실측: 8 도 눈부신 조명이라 표현에 안 씀),
-            doze_style ("soft" 스르르→툭→번쩍 / "hard" 실험: 끝까지 툭 → 화들짝 → 도리도리)
+  파라미터  led (false — 11-12 실측: 8 도 눈부신 조명이라 표현에 안 씀)
   로그      LOOK {...} 1 s 마다 + TRIG 트리거가 생길 때마다 (다가옴·눈맞춤이 실제로 잡혔는지 확인용)
 """
 import json
@@ -39,7 +38,6 @@ class Look(Node):
         super().__init__("look_at_person")
         p = self.declare_parameter
         self.led = p("led", False).value
-        look_brain.DOZE_STYLE = p("doze_style", look_brain.DOZE_STYLE).value
         self.brain = look_brain.Brain()
         self.head = "free"                                        # executive 설정표의 head 칸
         self.prof = {}                                            # 설정표 전체 (nods·wake·stir)
