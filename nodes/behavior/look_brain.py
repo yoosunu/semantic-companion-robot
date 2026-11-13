@@ -9,10 +9,13 @@
             11-12 Jasper: "끄덕일 때·가까울 때 눈을 살짝 비껴 봄 → 눈맞춤 느낌이 안 남". 계속 따라가는 게 아니라 한 번씩 → 덜덜 없음
     idle    딴짓: 사람은 곁눈(화면 안)에 두고 15~30° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
             사람을 놓쳐도 마지막 본 곳 기준 (11-12: 놓친 뒤 지금 고개 기준으로 또 옆을 봐서 −58° → −96° 로 멀어짐)
-    doze    꾸벅: 1 분 동안 아무 일(트리거) 없으면. 고개 천천히 내려가고 LED 어둡게, 가끔 꾸벅. 트리거 → 번쩍 깸
+    doze    꾸벅 (executive 가 head=doze 로 시킬 때). 고개 천천히 내려가고 가끔 꾸벅
             꾸벅 한 번 = 아주 천천히 스르르 (3 s, 8°) → 툭 떨어짐 (빠르게 10°) → 0.3 s → 번쩍 제자리 (빠르게)
             (11-12 Jasper: 예전 것은 "그냥 밑에 봤다 올라오는 것" 같음. 사람 조는 건 천천히 기울다 툭 → 화들짝)
-    sleep   잠: 꾸벅 3 분 더. 고개 끝까지 숙이고 LED 끔, 얼굴 처리도 멈춤 (보안·절약). LiDAR 로 가까운 움직임 → 깸
+    sleep   잠 (executive 가 head=sleep). 고개 끝까지 숙임. head=free 로 돌아오면 번쩍
+  11-14 사령관 v1: **언제** 졸고 자고 깨는지는 executive (nodes/behavior/executive_brain.py) 가 정함.
+    여기는 **모양**만 (set_head). 트리거는 바로 반응하고 events 에 쌓아서 executive 에 알림 (/neri/event).
+    졸 때도 트리거를 보면 알리기만 함 → executive 가 COMPANION 으로 → head=free → 번쩍.
 
   다시 쳐다볼 이유 (트리거) — 이게 있어야 attend 로
     contact   사람이 나를 쳐다보기 시작 (2 s 넘게 딴 데(|yaw|>35°) 보던 사람이 20° 안으로)
@@ -27,7 +30,7 @@
     얼굴 YAW_MIN_PX 이상일 때만, 최근 0.6 s 중앙값으로. glance 는 그래도 불안해서 기본 끔 (GLANCE_ON)
   LED (11-12 실측: 8 도 눈부신 조명) → 노드 파라미터 led (기본 false) 로 안 보냄. 나중에 밤 조명 등으로
 
-  출력 동작: ("move", 팬, 틸트, SPD, ACC)  SPD/ACC 0 = 서보 최고 속도 / ("led", 0~255) / ("perceive", bool)
+  출력 동작: ("move", 팬, 틸트, SPD, ACC)  SPD/ACC 0 = 서보 최고 속도 / ("led", 0~255)
 """
 import collections
 import random
@@ -43,9 +46,6 @@ SCAN_AFTER = 5.0
 SCAN_EVERY = (6.0, 14.0)            # 11-12 Jasper: 4~7 s 는 너무 두리번거림
 SCAN_PANS = (-70.0, -35.0, 0.0, 35.0, 70.0)
 LOST_S = 2.0
-LIDAR_LOOK = 10.0                    # LiDAR 로 깼는데 이만큼 둘러봐도 얼굴 없으면 다시 꾸벅 (바로 1 분 기다리지 않음)
-DOZE_AFTER = 60.0                    # 11-12 Jasper: 꾸벅 1 분
-SLEEP_AFTER = 180.0                  # 꾸벅 뒤 3 분 (짧으면 5 분)
 CONTACT_IN, CONTACT_OUT = 20.0, 35.0
 CONTACT_AWAY_S = 2.0                 # 이만큼 딴 데 봐야 다음 contact 인정
 GLANCE_YAW = 25.0
@@ -71,9 +71,9 @@ class Brain:
         self.clip = []                       # 예약 동작 [(시각, 동작)]
         self.target = None                   # 쳐다보는 트랙 id
         self.until = 0.0                     # attend/idle/scan 다음 바꿀 시각
-        self.event_t = 0.0                   # 마지막 트리거 (꾸벅 타이머)
+        self.head = "free"                   # executive 가 정한 고개 상태 (free / doze / sleep)
+        self.events = []                     # executive 에 알릴 트리거 [(이름, 트랙)] — 노드가 꺼내 감
         self.seen_t = -1e9                   # 마지막으로 누군가 보인 시각
-        self.doze_t = 0.0
         self.out_n = 0                       # attend: 가운데 밖으로 연속 몇 번
         self.errs = []                       # attend: 최근 오차 (눈맞춤 다듬기)
         self.moved_t = 0.0
@@ -149,11 +149,28 @@ class Brain:
         return found
 
     # ---------- 한 번 (0.1 s 마다) ----------
-    def tick(self, now, people, motion=False, moving=False):
-        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), motion: LiDAR 가까운 움직임, moving: 로봇 바퀴가 움직이는 중"""
+    def set_head(self, head, now):
+        """executive 의 설정표 head 칸. 바뀔 때만 동작 → 이번에 보낼 동작 목록"""
+        out = []
+        if head == self.head:
+            return out
+        prev, self.head = self.head, head
+        if head == "doze":
+            self.doze(out, now, "executive")
+        elif head == "sleep":
+            self.set_mode("sleep", "executive", now)
+            self.clip = []
+            self.move(out, now, self.pan, TILT_SLEEP, *SLOW, settle=4.0)
+            out.append(("led", 0))
+        elif prev in ("doze", "sleep"):
+            self.wake(out, now, "executive")
+        return out
+
+    def tick(self, now, people, moving=False):
+        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), moving: 로봇 바퀴가 움직이는 중"""
         out = []
         if not self.started:
-            self.started, self.event_t = True, now
+            self.started = True
             out.append(("led", LED_AWAKE))
             self.move(out, now, 0.0, TILT_HOME)
         while self.clip and now >= self.clip[0][0]:
@@ -163,9 +180,7 @@ class Brain:
             else:
                 out.append(a)
 
-        if self.mode == "sleep":                            # 잠: LiDAR 만 봄
-            if motion:
-                self.wake(out, now, "lidar")
+        if self.mode == "sleep":                            # 잠: 아무것도 안 봄 (깨우는 건 executive)
             return out
 
         visible = [p for p in people if p["unseen"] <= 0.5]
@@ -179,15 +194,10 @@ class Brain:
         else:
             trig = []
 
+        if trig:
+            self.events += [(name, p["id"]) for name, p in trig]   # executive 에 알림 (꾸벅 중이어도)
         if self.mode == "doze":
-            if trig:
-                self.wake(out, now, trig[0][0], trig[0][1])
-            elif now - self.doze_t > SLEEP_AFTER:
-                self.set_mode("sleep", "no event", now)
-                self.clip = []
-                self.move(out, now, self.pan, TILT_SLEEP, *SLOW, settle=4.0)
-                out += [("led", 0), ("perceive", False)]
-            elif not self.clip and now > self.until:        # 가끔 꾸벅
+            if not self.clip and now > self.until:          # 가끔 꾸벅
                 self.until = now + self.rng.uniform(8.0, 15.0)
                 pn, td = self.pan, TILT_DOZE
                 if DOZE_STYLE == "hard":                     # 진짜 졸았다 깬 것처럼 (11-12 실험)
@@ -205,7 +215,6 @@ class Brain:
             return out
 
         if trig:
-            self.event_t = now                               # 무슨 일이든 있으면 졸지 않음
             name, p = trig[0]
             self.last_trig = (round(now, 1), name, p["id"])
             if self.clip and name != "arrive":
@@ -214,13 +223,6 @@ class Brain:
                 pass                                         # 이미 쳐다보는 중: 시간 안 늘림
             else:
                 self.attend(out, now, name, p)
-        elif now - self.event_t > DOZE_AFTER and not self.clip and now >= self.busy_until:
-            self.doze(out, now, "no event")
-            return out
-        elif self.reason == "wake:lidar" and self.mode == "scan" and not visible and now - self.event_t > LIDAR_LOOK \
-                and not self.clip and now >= self.busy_until:
-            self.doze(out, now, "lidar: nobody")             # 누가 왔나 둘러봤는데 얼굴 없음 → 다시 꾸벅
-            return out
 
         if self.clip or now < self.busy_until:
             return out
@@ -268,7 +270,7 @@ class Brain:
         return out
 
     def attend(self, out, now, why, p):
-        self.target, self.out_n, self.event_t = p["id"], 0, now
+        self.target, self.out_n = p["id"], 0
         dur = GLANCE_S if why == "glance" else self.rng.uniform(*ATTEND_S)
         self.until = now + dur
         self.set_mode("attend", why, now)
@@ -284,9 +286,8 @@ class Brain:
 
     def wake(self, out, now, why, p=None):
         """번쩍: 빠르게 고개 들기 + LED 반짝"""
-        self.event_t, self.clip = now, []
-        self.last_trig = (round(now, 1), "wake:" + why, p["id"] if p else None)
-        out += [("perceive", True), ("led", LED_FLASH)]
+        self.clip = []
+        out.append(("led", LED_FLASH))
         self.play(now, [(0.5, ("led", LED_AWAKE))])
         if p is not None:
             self.attend(out, now, why, p)
@@ -295,38 +296,3 @@ class Brain:
             self.until = now + 1.5
             self.move(out, now, self.pan, TILT_HOME + 5.0)
             self.seen_t = min(self.seen_t, now - SCAN_AFTER)    # 깨자마자 두리번
-
-
-class Motion:
-    """LiDAR 로 "누가 새로 가까이 옴" 감지 (잠잘 때 깨우기). 로봇이 서 있다는 가정.
-
-       11-12 실측: 잠들자마자 2 s 만에 깸 반복 (꾸벅 30 s → 잠 → 곧 깸 → 두리번 20 s → … 52 s 주기).
-       원인: Jasper 가 로봇 바로 옆(1.5 m 안)에 앉아 있음 → 몸을 조금만 움직여도 "가까운 움직임" 으로 깸.
-       Jasper 가 지루해서 잠든 건데 Jasper 가 있다고 깨면 안 됨 → 규칙을 "움직임" 에서 "새로 들어옴" 으로:
-         1. 잠든 뒤 learn_s (3 s) 동안 빔마다 최소·최대 거리를 배움 (이미 있는 사람·물체, 원래 흔들리는 폭)
-         2. 그때 near_m 밖(비어 있던 곳)이던 빔에 near_m 안쪽으로 무언가 들어오면 "들어옴"
-            (이미 안에 있던 사람이 꼼지락거리는 건 안 셈)
-         3. 0.3 m 안쪽 빔은 무시 (로봇 몸)
-         4. 들어온 빔 n 개 이상이 3 스캔 연속이면 깸
-       last = 마지막 스캔에서 들어온 빔 수 (로그용)"""
-
-    def __init__(self, near_m=1.5, n=6, learn_s=3.0):
-        self.near, self.n, self.learn = near_m, n, learn_s
-        self.t0, self.lo, self.hi = None, None, None
-        self.hits, self.last = 0, 0
-
-    def step(self, now, ranges):
-        r = [x if (x == x and 0.3 < x < 12.0) else None for x in ranges]   # nan·inf·0·몸 → 무시
-        if self.t0 is None or self.lo is None or len(self.lo) != len(r):
-            self.t0 = now
-            self.lo, self.hi = [99.0] * len(r), [-1.0] * len(r)
-        if now - self.t0 < self.learn:                        # 지금 있는 것들 배우기
-            for i, x in enumerate(r):
-                if x is not None:
-                    self.lo[i], self.hi[i] = min(self.lo[i], x), max(self.hi[i], x)
-            return False
-        came = sum(1 for i, x in enumerate(r)
-                   if x is not None and x < self.near and self.lo[i] > self.near + 0.2)   # 비어 있던 곳에 들어옴
-        self.last = came
-        self.hits = self.hits + 1 if came >= self.n else 0
-        return self.hits >= 3

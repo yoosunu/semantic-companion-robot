@@ -3,7 +3,7 @@
 
   입력  camera/image_raw     영상 (640x480·10fps 권장. 검출은 det_w 폭으로 줄여서)
         pantilt/cmd          고개 명령 [팬, 틸트, …] — 영상 찍힐 때 고개가 어디였는지 기록용 (look 이 보냄)
-        perception/enable    Bool — False 면 영상 처리 멈춤 (look 이 잠들 때. 보안·절약)
+        neri/profile         executive 설정표 — face_hz 칸 (0 = 영상 처리 멈춤: 잠. 보안·절약) (11-14 사령관 v1)
   출력  people               scr_interfaces/People: 확인된 트랙 전부 (얼굴 큰 순)
 
   한 장 처리 순서
@@ -15,6 +15,7 @@
   로그  1 s 마다 PEOPLE [...]
 """
 import collections
+import json
 import os
 import sys
 import time
@@ -27,7 +28,7 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from scr_interfaces.msg import People, Person
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool, Float32MultiArray
+from std_msgs.msg import Float32MultiArray, String
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_track import Tracker, face_angles, yaw_pitch  # noqa: E402
@@ -52,15 +53,21 @@ class FacePerception(Node):
         self.log_t, self.n_frames, self.n_skip, self.det_ms = 0.0, 0, 0, 0.0
         self.create_subscription(Image, "camera/image_raw", self.on_img, qos_profile_sensor_data)
         self.create_subscription(Float32MultiArray, "pantilt/cmd", self.on_head, 10)
-        self.create_subscription(Bool, "perception/enable", self.on_enable, 10)
+        self.create_subscription(String, "neri/profile", self.on_profile, 10)
         self.enabled = True
         self.pub = self.create_publisher(People, "people", 10)
         self.get_logger().info(f"PEOPLE 준비: YuNet 검출 폭 {self.det_w}, 추적 (인식은 아직)")
 
-    def on_enable(self, m):
-        if m.data != self.enabled:
-            self.enabled = m.data
-            self.get_logger().info(f"PEOPLE 영상 처리 {'켬' if m.data else '멈춤 (잠)'}")
+    def on_profile(self, m):
+        try:
+            hz = float(json.loads(m.data).get("face_hz", self.rate))
+        except ValueError:
+            return
+        if (hz > 0) != self.enabled or (hz > 0 and hz != self.rate):
+            self.get_logger().info(f"PEOPLE 설정표: 얼굴 {'%.0f Hz' % hz if hz > 0 else '끔'}")
+        self.enabled = hz > 0
+        if hz > 0:
+            self.rate = hz
 
     # ---------- 고개 기록 ----------
     def on_head(self, m):

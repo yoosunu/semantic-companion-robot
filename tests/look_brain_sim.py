@@ -21,13 +21,13 @@ def person(pan=0.0, tilt=30.0, px=25.0, yaw=60.0, pid=1, unseen=0.0):
     return {"id": pid, "pan": pan, "tilt": tilt, "px": px, "yaw": yaw, "pitch": 0.0, "unseen": unseen}
 
 
-def run(world, secs, b=None, motion=lambda t: False, t0=0.0, moving=lambda t: False):
-    """world(t) → people 목록. 기록: [(t, 모드, 이유, 동작들)]"""
+def run(world, secs, b=None, head=lambda t: "free", t0=0.0, moving=lambda t: False):
+    """world(t) → people 목록, head(t) → executive 가 시킨 고개 상태. 기록: [(t, 모드, 이유, 동작들)]"""
     b = b or lb.Brain(random.Random(1))
     log = []
     t = t0
     while t < t0 + secs:
-        acts = b.tick(t, world(t), motion(t), moving(t))
+        acts = b.set_head(head(t), t) + b.tick(t, world(t), moving(t))
         log.append((round(t, 1), b.mode, b.reason, acts))
         t += DT
     return b, log
@@ -45,12 +45,17 @@ def first(log, mode):
     return next((t for t, m, _, _ in log if m == mode), None)
 
 
-# 1. 아무도 없음 → 두리번 → 1 분 뒤 꾸벅 → 3 분 뒤 잠 (얼굴 처리 끔, LED 끔)
-b, log = run(lambda t: [], 260)
-moves = sum(1 for *_, a in log for x in a if x[0] == "move" and _ != 0)
-d, s = first(log, "doze"), first(log, "sleep")
-off = any(x == ("perceive", False) for *_, a in log for x in a)
-check("1 아무도 없음: 두리번→꾸벅→잠", d and 59 <= d <= 61 and s and 239 <= s <= 242 and off, f"꾸벅 {d}s 잠 {s}s 처리끔 {off}")
+# 1. 고개 상태는 executive 가 정함: doze → 꾸벅 자세 / sleep → 끝까지 숙임 / free → 번쩍 (11-14 사령관 v1)
+H = lambda t: "doze" if 10 <= t < 30 else ("sleep" if 30 <= t < 40 else "free")
+b, log = run(lambda t: [], 45, head=H)
+seq = [m for _, m in modes(log)]
+tilts = {round(t): round(x[2]) for t, m, _, a in log for x in a if x[0] == "move"}
+check("1 head 따라: 두리번→꾸벅→잠→번쩍", seq[:4] == ["scan", "doze", "sleep", "scan"] and tilts.get(30) == -30
+      and any(x == ("led", 255) for t, m, _, a in log if t >= 40 for x in a), f"{modes(log)}")
+
+# 1b. executive 가 없으면(head 계속 free) 스스로 졸지 않음 — 타이머는 이사 갔음
+b, log = run(lambda t: [person(yaw=60)], 300)
+check("1b 혼자서는 안 졸음", first(log, "doze") is None and first(log, "sleep") is None, modes(log)[-3:])
 
 # 2. 새 사람 → 쳐다보고 끄덕 + LED 반짝
 b, log = run(lambda t: [person(pan=20)] if t > 1 else [], 4)
@@ -58,12 +63,11 @@ tilts = [x[2] for *_, a in log for x in a if x[0] == "move"]
 leds = [x[1] for *_, a in log for x in a if x[0] == "led"]
 check("2 새 사람: 끄덕 인사", b.reason == "arrive" and min(tilts) <= 22.5 and 255 in leds, f"틸트들 {sorted(set(round(x) for x in tilts))} LED {leds}")
 
-# 3. 사람이 컴퓨터만 봄 (yaw 60 고정) → 10~30 s 쳐다보다 딴짓 → 1 분 뒤 꾸벅 → 잠
-b, log = run(lambda t: [person(yaw=60)], 300)
-i, d, s = first(log, "idle"), first(log, "doze"), first(log, "sleep")
+# 3. 사람이 컴퓨터만 봄 (yaw 60 고정) → 10~30 s 쳐다보다 딴짓 (꾸벅·잠은 executive 몫)
+b, log = run(lambda t: [person(yaw=60)], 60)
+i = first(log, "idle")
 idle_pans = [x[1] for t, m, _, a in log if m == "idle" for x in a if x[0] == "move"]
-check("3 무시하는 사람: 응시→딴짓→꾸벅→잠", i and 10 <= i <= 31 and d and 59 <= d <= 62 and s,
-      f"딴짓 {i}s 꾸벅 {d}s 잠 {s}s")
+check("3 무시하는 사람: 응시→딴짓", i and 10 <= i <= 31, f"딴짓 {i}s")
 check("3b 딴짓은 사람 곁(15~30°, 화면 안)", idle_pans and all(15 <= abs(p) <= 30 for p in idle_pans), [round(p) for p in idle_pans])
 
 # 4. 딴짓 중 사람이 나를 쳐다봄 (yaw 60 → 5) → 바로 쳐다봄 (contact)
@@ -87,17 +91,18 @@ w = lambda t: [person(yaw=60, px=20 if t < 40 else min(30, 20 + (t - 40) * 10))]
 b, log = run(w, 42)
 check("6 다가오면 쳐다봄", any(rr == "approach" for t, m, rr, _ in log if t >= 40))
 
-# 7. 잠 → LiDAR 움직임 → 깸 (얼굴 처리 켬, LED 반짝, 두리번)
-b, log = run(lambda t: [], 245)
-b, log = run(lambda t: [], 3, b, motion=lambda t: t > 246, t0=245)
-acts = [x for *_, a in log for x in a]
-check("7 잠 → LiDAR 로 깸", ("perceive", True) in acts and ("led", 255) in acts and b.mode == "scan", modes(log))
+# 7. 트리거는 executive 에 알림 (events) — 인사·눈맞춤·다가옴
+w = lambda t: [person(pan=10, yaw=60 if t < 40 else 5)] if t > 1 else []
+b, log = run(w, 42)
+names = [e[0] for e in b.events]
+check("7 트리거 → events 로 알림", "arrive" in names and "contact" in names, b.events)
 
-# 8. 꾸벅 중 사람이 나를 쳐다봄 → 번쩍 깨서 쳐다봄
+# 8. 꾸벅 중 눈맞춤 → 스스로 안 깨고 알리기만 (깨우는 건 executive → head=free)
 w = lambda t: [person(yaw=60 if t < 100 else 5)]
-b, log = run(w, 102)
-r = [(t, m, rr) for t, m, rr, _ in log if t >= 99]
-check("8 꾸벅 중 눈 맞춤 → 깸", r[0][1] == "doze" and r[-1][1] == "attend" and r[-1][2] == "contact", (r[0], r[-1]))
+b, log = run(w, 102, head=lambda t: "doze" if t >= 60 else "free")
+check("8 꾸벅 중 눈맞춤 → 알림만, 계속 꾸벅", b.mode == "doze" and ("contact", 1) in b.events, (b.mode, b.events[-2:]))
+b, log = run(w, 3, b, head=lambda t: "free", t0=102)
+check("8b executive 가 free 로 → 번쩍 깨서 쳐다봄", b.mode == "attend", modes(log))
 
 # 9. 쳐다보는 중 사람이 20° 이동 → 두 번 확인 후 한 번에 확 / 5° 이동은 가만히
 w = lambda t: [person(pan=0 if t < 3 else 20, yaw=5)]
@@ -108,40 +113,6 @@ w = lambda t: [person(pan=0 if t < 3 else 5, yaw=5)]
 b, log = run(w, 5)
 mv = [(t, round(x[1], 1)) for t, m, _, a in log if t >= 3 for x in a if x[0] == "move" and x[2] > 20]
 check("9b 조금(5°) 움직이면 도약 없이 다듬기 한 번", len(mv) == 1 and 4 <= mv[0][1] <= 5.5, mv)
-
-# 10. LiDAR "새로 들어옴" (11-12 실측: 옆에 앉은 Jasper 가 꼼지락 → 잠들자마자 깸 반복)
-rng = random.Random(3)
-
-
-def scan(t, fidget=True, enter=False, far=False):
-    r = [3.0 + rng.uniform(-0.05, 0.05) for _ in range(360)]
-    r[100] = 1.0 if int(t * 10) % 2 else 3.0          # 물체 모서리 빔: 원래 들쭉날쭉
-    r[200:205] = [0.2] * 5                              # 로봇 몸 (0.3 m 안)
-    if fidget:
-        r[50:62] = [rng.uniform(0.6, 1.1) for _ in range(12)]   # 옆에 앉아 꼼지락거리는 Jasper
-    if enter:
-        r[120:132] = [1.0] * 12                         # 새로 걸어 들어온 사람
-    if far:
-        r[150:162] = [2.5] * 12                         # 먼 곳 변화
-    return r
-
-
-m = lb.Motion()
-t, fired = 0.0, []
-while t < 20:
-    fired.append(m.step(t, scan(t)))
-    t += 0.1
-quiet = any(fired)
-far_hit = [m.step(t + k * 0.1, scan(t, far=True)) for k in range(5)]
-near_hit = [m.step(t + 1 + k * 0.1, scan(t, enter=True)) for k in range(4)]
-check("10 LiDAR: 옆사람 꼼지락·모서리·먼 변화 무시, 새로 들어온 사람만", not quiet and not any(far_hit) and near_hit[-1],
-      f"꼼지락 {quiet} 먼것 {any(far_hit)} 들어옴 {near_hit} 빔 {m.last}")
-
-# 10b. LiDAR 로 깼는데 얼굴 없음 → 10 s 둘러보고 다시 꾸벅 (1 분 기다리지 않음)
-b, log = run(lambda t: [], 245)
-b, log = run(lambda t: [], 15, b, motion=lambda t: 246 < t < 246.2, t0=245)
-back = first([x for x in log if x[0] > 246.5], "doze")
-check("10b LiDAR 로 깼는데 아무도 없음 → 10 s 뒤 다시 꾸벅", back and back - 246 <= 12, f"다시 꾸벅 {back}s")
 
 # 11. 실측 재현: yaw 가 1 s 마다 -8 ↔ -52 ↔ -90 으로 튐 (얼굴 22 px) → 쳐다보는 시간이 안 늘어남, 30 s 안에 딴짓
 seq = [-8, -52, -90, -20, -90, -8, -54]
@@ -193,7 +164,7 @@ b, log = run(w, 33, moving=lambda t: t >= 29)
 check("17 로봇이 움직이면 다가옴 아님", not any(rr == "approach" for t, m, rr, _ in log))
 
 # 18. 꾸벅 모양: 느리게 스르르 → 빠르게 툭 → 빠르게 제자리
-b, log = run(lambda t: [person(yaw=60)], 90)
+b, log = run(lambda t: [person(yaw=60)], 40, head=lambda t: "doze" if t >= 10 else "free")
 dz = [(t, x) for t, m, _, a in log if m == "doze" for x in a if x[0] == "move"][1:4]
 shape = [(round(x[2]), x[3]) for t, x in dz]
 check("18 꾸벅: 스르르(느림)→툭(빠름)→번쩍(빠름)", len(shape) == 3 and shape[0][1] > 0 and shape[1][1] == 0 and shape[2][1] == 0
