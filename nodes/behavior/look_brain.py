@@ -101,6 +101,7 @@ class Brain:
         self.cool = {}                       # 클립별 마지막 시각
         self.peek = None                     # 까꿍: (마지막으로 본 시각, 팬, 틸트)
         self.peek_back = None                # 까꿍: 사라졌다 다시 나타남 (시각, 사람)
+        self.peek_hidden = False             # 까꿍: 정말 가려졌었나
         self.approach0 = None                # 움찔: (다가옴 시각, 다가오기 전 얼굴 px, 트랙)
         self.follow_done = None              # 시선 따라가기: 이번 고개 돌림에 이미 했나 (away_t)
 
@@ -251,13 +252,15 @@ class Brain:
                 self.attend(out, now, name, p)
 
         if self.mode == "attend" and self.peek:             # ① 까꿍 추적은 클립·이동 중에도 계속 (시간 간격이 정확하게)
-            near = [p for p in people if p["unseen"] <= 0.1
-                    and abs(p["pan"] - self.peek[1]) < 10 and abs(p["tilt"] - self.peek[2]) < 10]
-            if near:
-                p = min(near, key=lambda q: abs(q["pan"] - self.peek[1]))
-                if PEEK_GAP[0] <= now - self.peek[0] <= PEEK_GAP[1]:
+            near = [p for p in people if abs(p["pan"] - self.peek[1]) < 10 and abs(p["tilt"] - self.peek[2]) < 10]
+            fresh = [p for p in near if p["unseen"] <= 0.1]
+            if not any(p["unseen"] <= 0.6 for p in near):
+                self.peek_hidden = True                      # 진짜로 안 보임 (11-14: 얼굴 2 Hz 면 검출 사이 0.5 s 가 "가림" 으로 잡혀 가짜 까꿍)
+            if fresh:
+                p = min(fresh, key=lambda q: abs(q["pan"] - self.peek[1]))
+                if self.peek_hidden and PEEK_GAP[0] <= now - self.peek[0] <= PEEK_GAP[1]:
                     self.peek_back = (now, p)                # 사라졌다 다시 나타남 → clips() 에서
-                self.peek = (now, p["pan"], p["tilt"])
+                self.peek, self.peek_hidden = (now, p["pan"], p["tilt"]), False
         if self.clip or now < self.busy_until:
             return out
         tgt = next((p for p in people if p["id"] == self.target), None)
@@ -311,7 +314,7 @@ class Brain:
         dur = GLANCE_S if why == "glance" else self.rng.uniform(*ATTEND_S)
         self.until = now + dur
         self.set_mode("attend", why, now)
-        self.peek = (now, p["pan"], p["tilt"])
+        self.peek, self.peek_hidden = (now, p["pan"], p["tilt"]), False
         if why == "approach" and p.get("base"):             # ④ 움찔 판단용: 다가오기 전 얼굴 크기 (1.2 s 안에 1.6배면 움찔)
             self.approach0 = (now, p["base"], p["id"])
         self.move(out, now, p["pan"], p["tilt"])

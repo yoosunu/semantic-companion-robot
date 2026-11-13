@@ -6,7 +6,8 @@
   입력  neri/event     String JSON {"type": contact|approach|arrive|glance, "id": 트랙}  ← look 이 트리거 때
         people         scr_interfaces/People ← face_perception (얼굴이 보이나만 씀)
         scan           LiDAR — SLEEP·DOZE 일 때 "비어 있던 곳에 새로 들어옴" (lidar_motion) → 자극 (빔 20 개↑ 중, 아니면 약)
-        imu            IMU — SLEEP·DOZE 일 때 톡톡 (imu_touch) → 강한 자극. 고개 명령 뒤 1 s·바퀴 움직임 중엔 안 셈
+        imu            IMU — SLEEP 일 때만 톡톡 (imu_touch) → 강한 자극. 고개 명령 뒤 1 s·바퀴 움직임 중엔 안 셈
+                       (11-14: 꾸벅 중엔 자기 흔들림을 톡으로 셈 → 꾸벅 중엔 안 봄)
         pantilt/cmd, odom   자기가 만든 흔들림 빼기용 (efference copy)
         neri/request   String "sleep" | "wake" | "task:이름" | "done:이름"   (사람이 시험할 때:
                        ros2 topic pub --once /neri/request std_msgs/msg/String "{data: sleep}")
@@ -94,11 +95,11 @@ class ExecutiveNode(Node):
         quiet = now - self.head_t > 1.0 and now - self.wheel_t > 1.0
         a, g = m.linear_acceleration, m.angular_velocity
         r = self.touch.step(now, a.x, a.y, g.x, g.y, quiet)
-        if r and self.ex.mode in ("SLEEP", "DOZE"):
+        if r and self.ex.mode == "SLEEP":                  # 꾸벅 중엔 안 봄 (11-14: 자기 꾸벅 흔들림 0.022 g 를 톡으로 셈)
             d, size = r
             pan = None if d is None else round(-d, 1)
             self.stimuli.append(("touch", 3, pan))
-            self.get_logger().info(f"STIM 톡톡: {size:.3f} g, 팬 {pan}° 쪽")
+            self.get_logger().info(f"STIM 톡톡: {size:.3f} g, 팬 {pan}° 쪽 (dx, dy = {self.touch.raw} g)")
 
     def tick(self):
         now = time.time()

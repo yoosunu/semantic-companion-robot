@@ -185,7 +185,10 @@ for k in range(400):
     r = tc.step(t, ax, ay, 0.0, 0.0, quiet)
     if r:
         hits.append((round(t, 2), r[0] if r[0] is None else round(r[0])))
-check("13 톡톡: 감지·방향(SIGN 반영)·자기 흔들림 무시·한 번만", len(hits) == 1 and hits[0][0] == 10.0 and abs(abs(hits[0][1]) - 90) < 15, hits)
+import imu_touch  # noqa: E402
+ok_dir = hits and hits[0][1] is None                    # 축 확인 전엔 방향 안 씀 (DIR_OK False)
+check("13 톡톡: 감지·자기 흔들림 무시·한 번만 (방향은 축 확인 전 끔)", len(hits) == 1 and hits[0][0] == 10.0 and
+      (ok_dir if not imu_touch.DIR_OK else abs(abs(hits[0][1]) - 90) < 15), hits)
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

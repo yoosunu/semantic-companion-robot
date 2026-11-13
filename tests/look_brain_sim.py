@@ -219,6 +219,11 @@ w = lambda t: [] if 6.0 <= t < 7.5 else [person(pan=5, tilt=30, px=30, yaw=5)]
 b, log = run(w, 9)
 check("21 까꿍", ("peekaboo", 1) in b.events or any(e[0] == "peekaboo" for e in b.events), b.events)
 
+# 21b. 얼굴 2 Hz (검출 사이 unseen 0~0.5 s) 는 까꿍 아님 (11-14 실물: 깨자마자 가짜 까꿍 두 번)
+w = lambda t: [person(pan=5, tilt=30, px=30, yaw=5, unseen=round((t % 0.5), 2))]
+b, log = run(w, 12)
+check("21b 2 Hz 검출 사이는 까꿍 아님", not any(e[0] == "peekaboo" for e in b.events), b.events)
+
 # 22. 클립 ② 시선 따라가기: 눈맞춤(yaw 5) → 고개 돌려(yaw 50) 1 s 유지 → 사람+30° 쪽 힐끗
 w = lambda t: [person(pan=0, px=30, yaw=5 if t < 6 else 50)]
 b, log = run(w, 9)

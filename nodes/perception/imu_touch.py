@@ -15,7 +15,8 @@ ACC_G = 0.02
 GYRO_DPS = 4.0
 REFRACT_S = 1.0
 EMA = 0.05
-SIGN = -1.0       # 11-14 실물: 톡 친 반대쪽을 봄 → −1
+SIGN = 1.0
+DIR_OK = False    # 11-14 실물: 왼쪽 톡 → ±180° 로 나옴 = 보드 축이 우리 가정(x 앞)과 다름. 네 방향 톡톡으로 축 확인 전까진 방향 안 씀
 
 
 class Touch:
@@ -45,5 +46,8 @@ class Touch:
             return None
         self.last_t = now
         d = math.degrees(math.atan2(-dy * SIGN, -dx * SIGN)) if acc > ACC_G / 2 else None
+        self.raw = (round(dx, 3), round(dy, 3))              # 축 확인용 로그 (어느 쪽을 쳤을 때 dx·dy 가 어떻게 나오나)
+        if not DIR_OK:
+            d = None
         self.last = (round(acc, 3), None if d is None else round(d))
         return (d, acc)
