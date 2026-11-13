@@ -9,9 +9,12 @@
     yolo_lab.py --stream              Mac 브라우저 http://scr-pi.local:8081 (집 Wi-Fi 안에서만, 시험할 때만)
     yolo_lab.py --stream --conf 0.15  약한 것도 보기 (기본 0.25)
     yolo_lab.py --model ~/models/yolo26n.onnx   YOLO26 (11-13: 11 보다 CPU 31% 빠름, NMS 없음) — 출력 모양 보고 알아서 처리
+    yolo_lab.py --model ~/models/yoloe-26s-seg.onnx --conf 0.05   YOLOE: 단어로 찾기 (doormat rug cable sock power strip bed chair shoe,
+                                  단어는 내보낼 때 정함. 점수가 원래 낮게 나옴 → 낮은 기준으로)
     yolo_lab.py --image 사진.png      카메라 없이 사진 한 장 (Mac/VM 시험용) → ~/yolo_lab/latest.jpg
   기록: ~/yolo_lab/log.csv (시각, 이름, 점수, 상자 크기 비율), 가구가 보이면 3 s 마다 그림 ~/yolo_lab/seen_XX.jpg
 """
+import ast
 import os
 import sys
 import time
@@ -30,7 +33,8 @@ NAMES = ("person bicycle car motorcycle airplane bus train truck boat traffic_li
          "hot_dog pizza donut cake chair couch potted_plant bed dining_table toilet tv laptop mouse remote keyboard "
          "cell_phone microwave oven toaster sink refrigerator book clock vase scissors teddy_bear hair_drier "
          "toothbrush").split()
-FURNITURE = {"bed", "chair", "couch", "dining_table", "toilet", "tv", "refrigerator", "bench", "sink", "oven"}
+FURNITURE = {"bed", "chair", "couch", "dining_table", "toilet", "tv", "refrigerator", "bench", "sink", "oven",
+             "doormat", "rug", "cable", "sock", "power strip", "shoe"}      # 굵게 표시 (YOLOE 단어 포함)
 OUT = os.path.expanduser("~/yolo_lab")
 NAME = "YOLO"
 
@@ -39,6 +43,8 @@ class Yolo:
     def __init__(self, model, size=320, conf=0.25):
         self.sess = ort.InferenceSession(model, providers=["CPUExecutionProvider"])
         self.inp, self.size, self.conf = self.sess.get_inputs()[0].name, size, conf
+        meta = self.sess.get_modelmeta().custom_metadata_map.get("names")      # 모델에 적힌 종류 이름 (YOLOE 는 우리가 준 단어들)
+        self.names = [v for k, v in sorted(ast.literal_eval(meta).items())] if meta else list(NAMES)
 
     def detect(self, bgr):
         """→ [(이름, 점수, x, y, w, h)] 원본 좌표 (x,y = 왼쪽 위)"""
@@ -51,16 +57,17 @@ class Yolo:
         x = pad[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0      # BGR → RGB, HWC → NCHW
         out = self.sess.run(None, {self.inp: x})[0][0]
         if out.shape[-1] == 6:                                                       # YOLO26 (nms=False): (300, 6) x1 y1 x2 y2 점수 종류, NMS 필요 없음
-            return [(NAMES[int(c)], float(sc), (x1 - px) / s, (y1 - py) / s, (x2 - x1) / s, (y2 - y1) / s)
+            return [(self.names[int(c)], float(sc), (x1 - px) / s, (y1 - py) / s, (x2 - x1) / s, (y2 - y1) / s)
                     for x1, y1, x2, y2, sc, c in out if sc >= self.conf]
-        out = out.T                                                                  # YOLO11: (2100, 84) cx cy w h + 80 점수 → NMS
-        cls = out[:, 4:].argmax(1)
+        out = out.T                                                    # YOLO11 (2100, 84) / YOLOE (2100, 4+종류+32 마스크): cx cy w h + 점수 → NMS
+        nc = len(self.names)
+        cls = out[:, 4:4 + nc].argmax(1)
         sc = out[np.arange(len(out)), 4 + cls]
         keep = sc >= self.conf
         out, cls, sc = out[keep], cls[keep], sc[keep]
         boxes = [[(cx - bw / 2 - px) / s, (cy - bh / 2 - py) / s, bw / s, bh / s] for cx, cy, bw, bh in out[:, :4]]
         idx = cv2.dnn.NMSBoxes(boxes, sc.tolist(), self.conf, 0.45)
-        return [(NAMES[cls[i]], float(sc[i]), *boxes[i]) for i in np.array(idx).flatten()]
+        return [(self.names[cls[i]], float(sc[i]), *boxes[i]) for i in np.array(idx).flatten()]
 
 
 def draw(bgr, dets, ms):
