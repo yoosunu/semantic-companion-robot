@@ -67,7 +67,7 @@ check("2 새 사람: 끄덕 인사", b.reason == "arrive" and min(tilts) <= 22.5
 b, log = run(lambda t: [person(yaw=60)], 60)
 i = first(log, "idle")
 idle_pans = [x[1] for t, m, _, a in log if m == "idle" for x in a if x[0] == "move"]
-check("3 무시하는 사람: 응시→딴짓", i and 10 <= i <= 31, f"딴짓 {i}s")
+check("3 무시하는 사람: 응시(5~30 s)→딴짓", i and 5 <= i <= 31, f"딴짓 {i}s")
 check("3b 딴짓은 사람 곁(15~30°, 화면 안)", idle_pans and all(15 <= abs(p) <= 30 for p in idle_pans), [round(p) for p in idle_pans])
 
 # 4. 딴짓 중 사람이 나를 쳐다봄 (yaw 60 → 5) → 바로 쳐다봄 (contact)
@@ -163,12 +163,78 @@ w = lambda t: [person(px=15 if t < 30 else min(30, 15 + (t - 30) * 15), yaw=60)]
 b, log = run(w, 33, moving=lambda t: t >= 29)
 check("17 로봇이 움직이면 다가옴 아님", not any(rr == "approach" for t, m, rr, _ in log))
 
-# 18. 꾸벅 모양: 느리게 스르르 → 빠르게 툭 → 빠르게 제자리
-b, log = run(lambda t: [person(yaw=60)], 40, head=lambda t: "doze" if t >= 10 else "free")
-dz = [(t, x) for t, m, _, a in log if m == "doze" for x in a if x[0] == "move"][1:4]
-shape = [(round(x[2]), x[3]) for t, x in dz]
-check("18 꾸벅: 스르르(느림)→툭(빠름)→번쩍(빠름)", len(shape) == 3 and shape[0][1] > 0 and shape[1][1] == 0 and shape[2][1] == 0
-      and shape[1][0] < shape[0][0] < shape[2][0], shape)
+# 18. 꾸벅 모양 (11-14): 스르르륵(느림) → 툭(빠름, 더 아래) → 깸(빠름, 졸린 자세보다 위) / 꾸벅 사이 아주 느리게 가라앉음
+shapes = []
+for seed in range(6):
+    b = lb.Brain(random.Random(seed))
+    log = []
+    t = 0.0
+    while t < 30:
+        acts = b.set_head("doze" if t >= 1 else "free", t, nods=3) + b.tick(t, [])
+        log += [(round(t, 1), x) for x in acts if x[0] == "move"]
+        t += DT
+    mv = [x for t, x in log if t > 2.5]
+    slow = next((i for i, x in enumerate(mv) if 0 < x[3] < 60), None)       # 스르르륵 (느림)
+    ok = slow is not None and slow + 2 < len(mv)
+    if ok:
+        s1, drop, up = mv[slow], mv[slow + 1], mv[slow + 2]
+        ok = drop[3] == 0 and drop[2] < s1[2] and up[3] == 0 and up[2] > lb.TILT_DOZE
+    drift = any(x[3] == 10 for x in mv)                                    # 사이 가라앉음
+    shapes.append(ok and drift)
+check("18 꾸벅: 스르르륵→툭→깸(위로)→느린 가라앉음, A·B 섞여도", all(shapes), shapes)
+
+# 18b. 꾸벅 3번째는 안 깨고 끝까지 숙임 → asleep 알림
+b = lb.Brain(random.Random(2))
+t, ev_t = 0.0, None
+while t < 120 and ev_t is None:
+    b.set_head("doze" if t >= 1 else "free", t, nods=3)
+    b.tick(t, [])
+    if any(e[0] == "asleep" for e in b.events):
+        ev_t = round(t, 1)
+    t += DT
+check("18b 꾸벅 3번 → 끝까지 숙이고 asleep", ev_t and b.tilt == lb.TILT_SLEEP and b.nods_left == 0, f"{ev_t}s 틸트 {b.tilt}")
+
+# 19. 깨는 모양: strong = 빠르게 자극 쪽(팬 −60) / weak = 천천히
+b = lb.Brain(random.Random(1))
+b.set_head("sleep", 0)
+acts = b.set_head("free", 5, wake={"id": 1, "strength": "strong", "dir": -60.0})
+mv = [x for x in acts if x[0] == "move"]
+b2 = lb.Brain(random.Random(1))
+b2.set_head("sleep", 0)
+mv2 = [x for x in b2.set_head("free", 5, wake={"id": 1, "strength": "weak", "dir": None}) if x[0] == "move"]
+check("19 깨기: 번쩍 자극 쪽 / 천천히", mv and round(mv[0][1]) == -60 and mv[0][3] == 0 and mv2 and mv2[0][3] > 0, (mv, mv2))
+
+# 20. 뒤척임: 잠 중 stir 가 바뀌면 살짝 움직였다 다시 잠 자세
+b = lb.Brain(random.Random(1))
+b.set_head("sleep", 0)
+log = []
+t = 0.0
+while t < 8:
+    log += [x for x in b.set_head("sleep", t, stir=1 if t >= 3 else 0) + b.tick(t, []) if x[0] == "move"]
+    t += DT
+check("20 뒤척임: 움직였다 잠 자세로, 계속 잠", len(log) >= 2 and log[-1][2] == lb.TILT_SLEEP and b.mode == "sleep", log)
+
+# 21. 클립 ① 까꿍: 쳐다보던 얼굴이 1.5 s 사라졌다 같은 자리 → 놀람 + 끄덕 + 알림
+w = lambda t: [] if 6.0 <= t < 7.5 else [person(pan=5, tilt=30, px=30, yaw=5)]
+b, log = run(w, 9)
+check("21 까꿍", ("peekaboo", 1) in b.events or any(e[0] == "peekaboo" for e in b.events), b.events)
+
+# 22. 클립 ② 시선 따라가기: 눈맞춤(yaw 5) → 고개 돌려(yaw 50) 1 s 유지 → 사람+30° 쪽 힐끗
+w = lambda t: [person(pan=0, px=30, yaw=5 if t < 6 else 50)]
+b, log = run(w, 9)
+pans = [round(x[1]) for t, m, _, a in log if t >= 6 for x in a if x[0] == "move"]
+check("22 시선 따라가기", any(e[0] == "follow_gaze" for e in b.events) and 30 in pans, (pans, b.events))
+
+# 22b. 두리번(금방 돌아옴)은 따라가지 않음
+w = lambda t: [person(pan=0, px=30, yaw=5 if (t < 6 or t > 6.6) else 50)]
+b, log = run(w, 9)
+check("22b 잠깐 돌린 건 안 따라감", not any(e[0] == "follow_gaze" for e in b.events), b.events)
+
+# 23. 클립 ④ 움찔: 아주 빠른 다가옴 (25→50 px) → 뒤로 젖힘(틸트 +5) 뒤 올려다봄
+w = lambda t: [person(px=25 if t < 20 else min(50, 25 + (t - 20) * 50), yaw=60)]
+b, log = run(w, 22)
+mv = [(t, round(x[2])) for t, m, _, a in log if t >= 20 for x in a if x[0] == "move"]
+check("23 움찔: 젖힘(+5) → 올려다봄", any(e[0] == "flinch" for e in b.events) and any(t2 > t1 and a2 - a1 == 5 for (t1, a1), (t2, a2) in zip(mv, mv[1:])), mv[:4])
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

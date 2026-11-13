@@ -1,7 +1,7 @@
 #!/bin/bash
 # [Pi] 고개 시험 (11-14 사령관 v1): 브리지(+LiDAR) → 카메라 → face_perception(보기) → look(고개) + executive(모드) + OLED. 주행 안 함.
 #   bash ~/semantic-companion-robot/run/look_test.sh      끄기: bash ~/semantic-companion-robot/run/stop_all.sh
-#   옵션: CAM="320 240 10" (카메라), DET_W=320 (검출 폭), EXEC_ARGS="-p doze_after:=20.0 -p sleep_after:=30.0 -p companion_keep:=30.0" (빨리 시험)
+#   옵션: CAM="320 240 10" (카메라), DET_W=320 (검출 폭), EXEC_ARGS="-p doze_after:=[10.0,15.0]" (빨리 졸기 시험. 시간은 [최소,최대], 띄어쓰기 없이)
 #   모드 수동: ros2 topic pub --once /neri/request std_msgs/msg/String "{data: sleep}"   (wake 도)
 R=~/semantic-companion-robot
 bash $R/run/stop_all.sh quiet; pkill -f "camera_ros/camera_node" 2>/dev/null   # 남은 카메라 노드 (카메라는 한 번에 하나만)

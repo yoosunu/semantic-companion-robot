@@ -2,6 +2,8 @@
    11-12 look_brain 에서 떼어 냄 (11-14 사령관 v1: 잠·깨우기는 executive 담당).
 """
 
+import math
+
 
 class Motion:
     """LiDAR 로 "누가 새로 가까이 옴" 감지 (잠잘 때 깨우기). 로봇이 서 있다는 가정.
@@ -20,6 +22,7 @@ class Motion:
         self.near, self.n, self.learn = near_m, n, learn_s
         self.t0, self.lo, self.hi = None, None, None
         self.hits, self.last = 0, 0
+        self.last_idx = None                                 # 마지막으로 들어온 빔들의 가운데 번호
 
     def step(self, now, ranges):
         r = [x if (x == x and 0.3 < x < 12.0) else None for x in ranges]   # nan·inf·0·몸 → 무시
@@ -31,8 +34,14 @@ class Motion:
                 if x is not None:
                     self.lo[i], self.hi[i] = min(self.lo[i], x), max(self.hi[i], x)
             return False
-        came = sum(1 for i, x in enumerate(r)
-                   if x is not None and x < self.near and self.lo[i] > self.near + 0.2)   # 비어 있던 곳에 들어옴
+        idx = [i for i, x in enumerate(r)
+               if x is not None and x < self.near and self.lo[i] > self.near + 0.2]   # 비어 있던 곳에 들어옴
+        came = len(idx)
         self.last = came
+        if idx:                                              # 들어온 쪽 (빔 번호 평균, 원형) — 노드가 각도로 바꿈
+            n = len(r)
+            sx = sum(math.cos(2 * math.pi * i / n) for i in idx)
+            sy = sum(math.sin(2 * math.pi * i / n) for i in idx)
+            self.last_idx = (math.atan2(sy, sx) / (2 * math.pi) * n) % n
         self.hits = self.hits + 1 if came >= self.n else 0
         return self.hits >= 3

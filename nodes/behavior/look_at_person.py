@@ -42,6 +42,7 @@ class Look(Node):
         look_brain.DOZE_STYLE = p("doze_style", look_brain.DOZE_STYLE).value
         self.brain = look_brain.Brain()
         self.head = "free"                                        # executive 설정표의 head 칸
+        self.prof = {}                                            # 설정표 전체 (nods·wake·stir)
         self.people, self.people_t = [], 0.0
         self.log_t = 0.0
         self.create_subscription(People, "people", self.on_people, 10)
@@ -73,16 +74,19 @@ class Look(Node):
 
     def on_profile(self, m):
         try:
-            self.head = json.loads(m.data).get("head", "free")
+            self.prof = json.loads(m.data)
+            self.head = self.prof.get("head", "free")
         except ValueError:
             pass
 
     def tick(self):
         now = time.time()
         people = self.people if now - self.people_t < 1.0 else []     # face_perception 이 멈췄으면 아무도 없음
-        acts = self.brain.set_head(self.head, now) + self.brain.tick(now, people, now - self.moving_t < 1.0)
+        pr = self.prof
+        acts = self.brain.set_head(self.head, now, pr.get("nods", 3), pr.get("wake"), pr.get("stir", 0)) \
+            + self.brain.tick(now, people, now - self.moving_t < 1.0)
         for name, pid in self.brain.events:                       # 트리거 → executive 에 알림
-            self.pub_event.publish(String(data=json.dumps({"type": name, "id": pid})))
+            self.pub_event.publish(String(data=json.dumps({"type": name, "id": -1 if pid is None else pid})))
             self.get_logger().info(f"EVENT {name} #{pid} → executive")
         self.brain.events = []
         if self.brain.last_trig and self.brain.last_trig != getattr(self, "logged_trig", None):
