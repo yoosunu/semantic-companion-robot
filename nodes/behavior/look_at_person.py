@@ -82,7 +82,7 @@ class Look(Node):
         people = self.people if now - self.people_t < 1.0 else []     # face_perception 이 멈췄으면 아무도 없음
         pr = self.prof
         acts = self.brain.set_head(self.head, now, pr.get("nods", 3), pr.get("wake"), pr.get("stir", 0)) \
-            + self.brain.tick(now, people, now - self.moving_t < 1.0)
+            + self.brain.tick(now, people, now - self.moving_t < 1.0, now - self.people_t)
         for name, pid in self.brain.events:                       # 트리거 → executive 에 알림
             self.pub_event.publish(String(data=json.dumps({"type": name, "id": -1 if pid is None else pid})))
             self.get_logger().info(f"EVENT {name} #{pid} → executive")

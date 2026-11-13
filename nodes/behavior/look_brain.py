@@ -102,6 +102,7 @@ class Brain:
         self.peek = None                     # 까꿍: (마지막으로 본 시각, 팬, 틸트)
         self.peek_back = None                # 까꿍: 사라졌다 다시 나타남 (시각, 사람)
         self.peek_hidden = False             # 까꿍: 정말 가려졌었나
+        self.attend_t = -1e9                 # attend 시작 (막 쳐다보기 시작한 3 s 는 까꿍 안 함 — 깨자마자 가짜 까꿍)
         self.approach0 = None                # 움찔: (다가옴 시각, 다가오기 전 얼굴 px, 트랙)
         self.follow_done = None              # 시선 따라가기: 이번 고개 돌림에 이미 했나 (away_t)
 
@@ -201,8 +202,9 @@ class Brain:
             self.wake(out, now, "executive", strength=w.get("strength", "strong"), direction=w.get("dir"))
         return out
 
-    def tick(self, now, people, moving=False):
-        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), moving: 로봇 바퀴가 움직이는 중"""
+    def tick(self, now, people, moving=False, age=0.0):
+        """people: [{"id","pan","tilt","px","yaw","pitch","unseen"}] (/people 최신), moving: 로봇 바퀴가 움직이는 중,
+           age: /people 이 마지막으로 온 지 몇 초 (보기가 멈춰 있으면 "안 보임" 을 믿지 않음)"""
         out = []
         if not self.started:
             self.started = True
@@ -254,11 +256,11 @@ class Brain:
         if self.mode == "attend" and self.peek:             # ① 까꿍 추적은 클립·이동 중에도 계속 (시간 간격이 정확하게)
             near = [p for p in people if abs(p["pan"] - self.peek[1]) < 10 and abs(p["tilt"] - self.peek[2]) < 10]
             fresh = [p for p in near if p["unseen"] <= 0.1]
-            if not any(p["unseen"] <= 0.6 for p in near):
-                self.peek_hidden = True                      # 진짜로 안 보임 (11-14: 얼굴 2 Hz 면 검출 사이 0.5 s 가 "가림" 으로 잡혀 가짜 까꿍)
+            if age <= 0.6 and not any(p["unseen"] <= 0.6 for p in near):
+                self.peek_hidden = True                      # 보기가 지금 돌고 있는데 그 자리에 없음 = 진짜 가림                      # 진짜로 안 보임 (11-14: 얼굴 2 Hz 면 검출 사이 0.5 s 가 "가림" 으로 잡혀 가짜 까꿍)
             if fresh:
                 p = min(fresh, key=lambda q: abs(q["pan"] - self.peek[1]))
-                if self.peek_hidden and PEEK_GAP[0] <= now - self.peek[0] <= PEEK_GAP[1]:
+                if self.peek_hidden and PEEK_GAP[0] <= now - self.peek[0] <= PEEK_GAP[1] and now - self.attend_t > 3.0:
                     self.peek_back = (now, p)                # 사라졌다 다시 나타남 → clips() 에서
                 self.peek, self.peek_hidden = (now, p["pan"], p["tilt"]), False
         if self.clip or now < self.busy_until:
@@ -314,7 +316,7 @@ class Brain:
         dur = GLANCE_S if why == "glance" else self.rng.uniform(*ATTEND_S)
         self.until = now + dur
         self.set_mode("attend", why, now)
-        self.peek, self.peek_hidden = (now, p["pan"], p["tilt"]), False
+        self.peek, self.peek_hidden, self.attend_t = (now, p["pan"], p["tilt"]), False, now
         if why == "approach" and p.get("base"):             # ④ 움찔 판단용: 다가오기 전 얼굴 크기 (1.2 s 안에 1.6배면 움찔)
             self.approach0 = (now, p["base"], p["id"])
         self.move(out, now, p["pan"], p["tilt"])

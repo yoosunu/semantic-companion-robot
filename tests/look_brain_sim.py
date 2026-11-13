@@ -224,6 +224,16 @@ w = lambda t: [person(pan=5, tilt=30, px=30, yaw=5, unseen=round((t % 0.5), 2))]
 b, log = run(w, 12)
 check("21b 2 Hz 검출 사이는 까꿍 아님", not any(e[0] == "peekaboo" for e in b.events), b.events)
 
+# 21c. 보기가 멈춘 동안(고개 도는 중·2 Hz) 목록이 비어도 까꿍 아님 — 깨자마자 (11-14 실물)
+b = lb.Brain(random.Random(1))
+t = 0.0
+while t < 12:
+    ppl = [] if 6.0 <= t < 7.5 else [person(pan=5, tilt=30, px=30, yaw=5)]
+    b.set_head("free", t)
+    b.tick(t, ppl, False, 1.2 if 6.0 <= t < 7.5 else 0.0)     # 그동안 /people 이 안 옴
+    t += DT
+check("21c 보기가 멈춘 빈 목록은 까꿍 아님", not any(e[0] == "peekaboo" for e in b.events), b.events)
+
 # 22. 클립 ② 시선 따라가기: 눈맞춤(yaw 5) → 고개 돌려(yaw 50) 1 s 유지 → 사람+30° 쪽 힐끗
 w = lambda t: [person(pan=0, px=30, yaw=5 if t < 6 else 50)]
 b, log = run(w, 9)
