@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """yolo_lab — YOLO 사물 실험실 (11-13). "바닥에서 본 내 침대를 YOLO 가 알아보나?" 확인용.
 
-  YOLO11n (COCO 80 종류) 를 카메라 영상에 돌려서, 상자·이름·점수를 그린 실시간 영상을 브라우저로.
+  YOLO (COCO 80 종류) 를 카메라 영상에 돌려서, 상자·이름·점수를 그린 실시간 영상을 브라우저로.
   COCO 에 있는 가구: bed(침대), chair(의자), couch(소파), dining table(식탁·책상), toilet, tv …
   가구는 굵은 주황 상자, 나머지는 얇은 회색. 1 s 마다 로그: 무엇이 몇 점으로 보였나.
 
   쓰기 (Pi, 카메라 노드가 켜져 있어야 함 — yolo_lab.sh 가 켜 줌)
     yolo_lab.py --stream              Mac 브라우저 http://scr-pi.local:8081 (집 Wi-Fi 안에서만, 시험할 때만)
     yolo_lab.py --stream --conf 0.15  약한 것도 보기 (기본 0.25)
+    yolo_lab.py --model ~/models/yolo26n.onnx   YOLO26 (11-13: 11 보다 CPU 31% 빠름, NMS 없음) — 출력 모양 보고 알아서 처리
     yolo_lab.py --image 사진.png      카메라 없이 사진 한 장 (Mac/VM 시험용) → ~/yolo_lab/latest.jpg
   기록: ~/yolo_lab/log.csv (시각, 이름, 점수, 상자 크기 비율), 가구가 보이면 3 s 마다 그림 ~/yolo_lab/seen_XX.jpg
 """
@@ -31,6 +32,7 @@ NAMES = ("person bicycle car motorcycle airplane bus train truck boat traffic_li
          "toothbrush").split()
 FURNITURE = {"bed", "chair", "couch", "dining_table", "toilet", "tv", "refrigerator", "bench", "sink", "oven"}
 OUT = os.path.expanduser("~/yolo_lab")
+NAME = "YOLO"
 
 
 class Yolo:
@@ -47,7 +49,11 @@ class Yolo:
         px, py = (self.size - nw) // 2, (self.size - nh) // 2
         pad[py:py + nh, px:px + nw] = cv2.resize(bgr, (nw, nh))
         x = pad[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0      # BGR → RGB, HWC → NCHW
-        out = self.sess.run(None, {self.inp: x})[0][0].T                             # (2100, 84): cx cy w h + 80 점수
+        out = self.sess.run(None, {self.inp: x})[0][0]
+        if out.shape[-1] == 6:                                                       # YOLO26 (nms=False): (300, 6) x1 y1 x2 y2 점수 종류, NMS 필요 없음
+            return [(NAMES[int(c)], float(sc), (x1 - px) / s, (y1 - py) / s, (x2 - x1) / s, (y2 - y1) / s)
+                    for x1, y1, x2, y2, sc, c in out if sc >= self.conf]
+        out = out.T                                                                  # YOLO11: (2100, 84) cx cy w h + 80 점수 → NMS
         cls = out[:, 4:].argmax(1)
         sc = out[np.arange(len(out)), 4 + cls]
         keep = sc >= self.conf
@@ -64,14 +70,17 @@ def draw(bgr, dets, ms):
         col, th = ((0, 140, 255), 3) if f else ((170, 170, 170), 1)
         cv2.rectangle(img, (int(x), int(y)), (int(x + bw), int(y + bh)), col, th)
         cv2.putText(img, f"{name} {c:.2f}", (int(x) + 3, max(14, int(y) + 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 2 if f else 1)
-    cv2.putText(img, f"YOLO11n {ms:.0f} ms", (6, img.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(img, f"{NAME} {ms:.0f} ms", (6, img.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     return img
 
 
 def main():
     a = sys.argv[1:]
     arg = lambda k, d: type(d)(a[a.index(k) + 1]) if k in a else d
-    yolo = Yolo(os.path.expanduser(arg("--model", "~/models/yolo11n.onnx")), conf=arg("--conf", 0.25))
+    global NAME
+    model = os.path.expanduser(arg("--model", "~/models/yolo11n.onnx"))
+    NAME = os.path.basename(model).replace(".onnx", "")
+    yolo = Yolo(model, conf=arg("--conf", 0.25))
     os.makedirs(OUT, exist_ok=True)
     image = arg("--image", "")
     push = serve(8081) if "--stream" in a else None
