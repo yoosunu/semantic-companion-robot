@@ -6,7 +6,8 @@
   쓰기
     ground_lab.py                      고개 (0, −20) 로 돌리고 격자 (8084)
     ground_lab.py --pan 0 --tilt -30   다른 자세 — 자세가 바뀌어도 격자가 바닥 같은 자리에 붙어 있어야 맞음
-    ground_lab.py --no-move            고개 안 움직임 (명령한 각이 지금 각이라고 믿고)
+    ground_lab.py --no-move --tilt 0   고개 안 움직임 (지금 명령 각을 알려줌. 틸트 0점 보정 +7° 는 ground.py 가 더함)
+  11-18: 고개 (0,0) + 보정 +7° → 50 cm 건전지가 50 선에 맞음
   그림: 앞 10 cm 마다 가로선 (30·50·100 cm 굵게, 숫자), 좌우 10 cm 마다 세로선. 노랑 = 화면 아래 가운데 픽셀의 바닥 거리
 """
 import argparse
@@ -31,7 +32,12 @@ def head(pan, tilt):
         rclpy.init()
     n = rclpy.create_node("ground_lab_head")
     pub = n.create_publisher(Float32MultiArray, "pantilt/cmd", 10)
-    for _ in range(5):
+    t0 = time.time()
+    while pub.get_subscription_count() == 0 and time.time() - t0 < 5.0:     # 11-18: 연결 전에 쏘면 버려짐 (고개 안 움직임)
+        rclpy.spin_once(n, timeout_sec=0.1)
+    if pub.get_subscription_count() == 0:
+        print("주의: pantilt/cmd 를 듣는 노드 없음 (브리지 꺼짐?) → 고개 안 움직임", flush=True)
+    for _ in range(10):
         pub.publish(Float32MultiArray(data=[float(pan), float(tilt), 300.0, 10.0]))
         rclpy.spin_once(n, timeout_sec=0.1)
     time.sleep(2.0)
@@ -59,7 +65,7 @@ def draw(img, K, D, pan, tilt):
         if len(pts) > 1:
             cv2.polylines(img, [np.array(pts)], False, (255, 120, 0) if yv == 0 else (0, 120, 0), 1)
     b = ground.pixels_to_floor([[W / 2, H - 5]], K, D, pan, tilt)[0]
-    cv2.putText(img, f"pan {pan:+.0f} tilt {tilt:+.0f} | bottom-center pixel -> floor {b[0] * 100:.0f} cm", (8, 20),
+    cv2.putText(img, f"cmd pan {pan:+.0f} tilt {tilt:+.0f} (+{ground.TILT_OFFSET:.0f} offset) | bottom-center pixel -> floor {b[0] * 100:.0f} cm", (8, 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     return img
 

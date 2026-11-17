@@ -11,6 +11,9 @@
     TILT_H  바닥 → 틸트 축 24.5 cm
     LENS_FWD, LENS_UP  틸트 축 → 렌즈 (고개 0,0 일 때) 앞 6.5 cm, 위 0.5 cm
     PAN_X, PAN_Y  LiDAR 중심 → 팬 축: 뒤 7 cm, 좌우 0 (틸트 축은 팬 축 바로 위라고 가정)
+    TILT_OFFSET  틸트 명령 0° 일 때 카메라 실제 시선 +7° (위). 11-18 실측: 고개 (0,0) 에서 50 cm 건전지가 격자 37 cm 에
+                 보임 → 격자를 +7° 로 그리니 50 선에 정확히 붙음. 서보 0점은 손 보정 (handoff_pantilt 11-11) → 0점 재저장
+                 대신 여기서만 보정 (눈맞춤 등 다른 동작은 지금 0점으로 맞춰져 있어서)
 """
 import json
 import math
@@ -21,6 +24,7 @@ import numpy as np
 TILT_H = 0.245
 LENS_FWD, LENS_UP = 0.065, 0.005
 PAN_X, PAN_Y = -0.07, 0.0
+TILT_OFFSET = 7.0
 CALIB = os.path.expanduser("~/calib/fisheye_640x480.json")
 
 
@@ -30,8 +34,8 @@ def load_calib(path=CALIB):
 
 
 def cam_pose(pan_deg, tilt_deg):
-    """→ (R, t): 카메라 좌표(OpenCV) 의 벡터를 로봇 좌표로 R @ v, 렌즈 위치 t (m)"""
-    p, q = math.radians(-pan_deg), math.radians(tilt_deg)        # 팬 + = 오른쪽 → 로봇 z 축 기준 음의 회전
+    """pan_deg, tilt_deg = /pantilt/cmd 명령값 → (R, t): 카메라 좌표(OpenCV) 의 벡터를 로봇 좌표로 R @ v, 렌즈 위치 t (m)"""
+    p, q = math.radians(-pan_deg), math.radians(tilt_deg + TILT_OFFSET)   # 팬 + = 오른쪽 → z 축 음의 회전. 틸트 = 명령 + 0점 보정
     Rz = np.array([[math.cos(p), -math.sin(p), 0], [math.sin(p), math.cos(p), 0], [0, 0, 1]])
     Ry = np.array([[math.cos(q), 0, -math.sin(q)], [0, 1, 0], [math.sin(q), 0, math.cos(q)]])   # 틸트 + = 앞이 위로
     C = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], float)     # 카메라(x 오른, y 아래, z 앞) → 머리(x 앞, y 왼, z 위)
