@@ -36,6 +36,7 @@ def head(pan, tilt):
         rclpy.spin_once(n, timeout_sec=0.1)
     time.sleep(2.0)
     n.destroy_node()
+    rclpy.shutdown()                                   # frames() 가 다시 rclpy.init() 함 (두 번 init 은 에러)
 
 
 def draw(img, K, D, pan, tilt):
