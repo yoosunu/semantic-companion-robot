@@ -23,9 +23,15 @@ def check(name, ok, info=""):
     print(f"{'OK ' if ok else 'XX '} {name} {info}")
 
 
-def frame(objs, seed=0):
+def frame(objs, seed=0, glare=False):
     rng = np.random.default_rng(seed)
     img = np.full((480, 640, 3), (170, 190, 205), np.uint8)               # 바닥 (BGR 베이지)
+    if glare:                                                              # 11-18 실물: 먼 바닥이 밝고 색 바램 (55 cm~)
+        ys, xs = np.mgrid[0:480, 0:640]
+        fl = ground.pixels_to_floor(np.column_stack([xs.ravel(), ys.ravel()]), K, D, PAN, TILT)
+        d = np.nan_to_num(np.hypot(fl[:, 0], fl[:, 1]), nan=9).reshape(480, 640)
+        k = np.clip((d - 0.5) / 0.6, 0, 1)[..., None]
+        img = (img * (1 - k) + np.array([225, 228, 232]) * k).astype(np.uint8)
     img = np.clip(img + rng.normal(0, 4, img.shape), 0, 255).astype(np.uint8)
     for x0, x1, y0, y1 in objs:                                            # 바닥 위 사각형 물건 (m)
         xs, ys = np.linspace(x0, x1, 12), np.linspace(y0, y1, 12)
@@ -54,6 +60,20 @@ check("4 2 m 물건: 1.5 m 밖 무시", not b, [round(x["near"], 2) for x in b])
 b, _, _ = fd.step(frame([(0.45, 0.55, -0.20, -0.10), (0.9, 1.0, 0.05, 0.15)]), PAN, TILT)
 check("5 두 개: 가까운 순", len(b) == 2 and b[0]["near"] < b[1]["near"] and b[0]["pts"][:, 1].mean() < 0,
       [round(x["near"], 3) for x in b])
+
+# 6. 먼 바닥 반사 (11-18 실물): 거리대별 기준이면 띠 없음, 물건은 잡음 / 한 기준만 (bands 하나) 이면 띠가 생김 (비교)
+fd = floor_detect.FloorDetect(K, D, (640, 480))
+for k in range(8):
+    fd.step(frame([], k, glare=True), PAN, TILT)
+b, _, _ = fd.step(frame([], 9, glare=True), PAN, TILT)
+check("6a 먼 바닥 반사: 거리대별 기준 → 띠 없음", not b, [(round(x["near"], 2), x["area"]) for x in b])
+b, _, _ = fd.step(frame([(0.90, 1.00, -0.05, 0.05)], 10, glare=True), PAN, TILT)
+check("6b 반사 바닥 위 0.9 m 물건은 잡음", len(b) == 1 and abs(b[0]["near"] - 0.90) < 0.05, [round(x["near"], 3) for x in b])
+one = floor_detect.FloorDetect(K, D, (640, 480), bands=(0.0, 1.5))
+for k in range(8):
+    one.step(frame([], k, glare=True), PAN, TILT)
+b, _, _ = one.step(frame([], 9, glare=True), PAN, TILT)
+check("6c (비교) 기준 하나면 먼 바닥이 띠로 잡힘", len(b) >= 1, [(round(x["near"], 2), x["area"]) for x in b])
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

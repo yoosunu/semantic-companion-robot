@@ -4,6 +4,9 @@
     - 지평선을 화면 비율(0.55) 로 자르지 않고 **기하로**: ground.py 로 픽셀마다 바닥 거리 → max_range (1.5 m) 안 바닥만 봄
       (고개를 숙이든 들든 "바닥이 찍히는 곳" 이 자동으로 정해짐. 벽·가구 윗부분은 처음부터 안 봄)
     - 덩어리마다 **바닥에 닿은 아래 끝** (열마다 가장 아래 픽셀) → 바닥 (x, y) m = 장애물이 시작하는 곳
+    - (11-18 실물) 먼 바닥(55 cm~) 이 통째로 "다름": 비스듬히 보여 반사로 밝기·색이 바램 (밝기 비중을 낮춰도, 거리를 0.8 m 로
+      줄여도 바닥 거리 55~60 cm 부터 띠) → **거리대별 기준 바닥** (bands): 거리대마다 자기 바닥을 배움.
+      배울 땐 그 거리대에서 기준에 가까운 trim (60%) 픽셀만 → 물건이 섞여도 기준이 안 흔들림 (거리대 전체를 덮는 깔개는 바닥으로 배움)
   방법 (고전, Ulrich & Nourbakhsh 2000 류 외관 기반 장애물 감지)
     1. 기준 바닥 = 로봇 바로 앞 칸의 Lab 색 평균·공분산 (EMA 로 천천히 따라감, 그 칸이 이상하면 안 배움)
     2. 픽셀마다 마할라노비스 거리 > th → "평소 바닥과 다름"
@@ -18,8 +21,11 @@ W = 320                                   # 계산 폭
 
 
 class FloorDetect:
-    def __init__(self, K, D, size, th=4.0, min_area=60, learn=0.05, max_range=1.5, l_weight=1.0):
+    def __init__(self, K, D, size, th=4.0, min_area=60, learn=0.05, max_range=1.5, l_weight=1.0,
+                 bands=(0.0, 0.4, 0.6, 0.8, 1.05, 1.5), trim=0.6):
         self.th, self.min_area, self.learn, self.max_range = th, min_area, learn, max_range
+        self.bands, self.trim = [b for b in bands if b < max_range] + [max_range], trim
+        self.band_mu, self.band_cov = {}, {}       # 거리대 번호 → 기준 (0 번은 로봇 바로 앞 칸에서 시작)
         self.l_weight = l_weight                  # 밝기(L) 비중. 11-18 실물: 먼 바닥이 비스듬히 비쳐 더 밝음 → 통째로 "다름" → 낮추면 색(a,b) 위주
         self.K, self.D, (self.W0, self.H0) = K, D, size
         self.mu = self.cov = None
@@ -69,8 +75,28 @@ class FloorDetect:
                     self.cov = (1 - self.learn) * self.cov + self.learn * cov
         if self.mu is None:
             return [], odd, np.zeros((h, w), np.uint8)
-        d = lab.reshape(-1, 3) - self.mu
-        dist = np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(self.cov), d)).reshape(h, w)
+        dist = np.full((h, w), np.inf, np.float32)
+        prev_mu, prev_cov = self.mu, self.cov                         # 안쪽 거리대부터: 처음엔 바로 안쪽 기준으로 시작
+        for i in range(len(self.bands) - 1):
+            sel = self.valid & (self.dist >= self.bands[i]) & (self.dist < self.bands[i + 1])
+            if sel.sum() < 30:
+                continue
+            px = lab[sel]
+            mu, cov = (self.mu, self.cov) if i == 0 else (self.band_mu.get(i, prev_mu), self.band_cov.get(i, prev_cov))
+            d = px - mu
+            md = np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(cov), d))
+            if i > 0:                                                  # 이 거리대 기준 배우기 (평소에 가까운 trim 만)
+                keep = px[md <= np.quantile(md, self.trim)]
+                if len(keep) > 20:
+                    m2, c2 = keep.mean(0), np.cov(keep.T) + np.eye(3) * 4.0
+                    a = 1.0 if i not in self.band_mu else self.learn * 2
+                    self.band_mu[i] = (1 - a) * mu + a * m2
+                    self.band_cov[i] = (1 - a) * cov + a * c2
+                    mu, cov = self.band_mu[i], self.band_cov[i]
+                    d = px - mu
+                    md = np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(cov), d))
+            dist[sel] = md
+            prev_mu, prev_cov = mu, cov
         mask = ((dist > self.th) & self.valid).astype(np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         n, lbl, stats, _ = cv2.connectedComponentsWithStats(mask)
