@@ -8,7 +8,8 @@
   사용: python3 tools/bench/lidar_occlusion.py                     팬 −180~180 (15° 간격, 틸트 10) + 틸트 −30~90 (팬 0)  ≈ 2분
         python3 tools/bench/lidar_occlusion.py --step 30           빨리 (30° 간격)
         python3 tools/bench/lidar_occlusion.py --topic scan --step 45   거른 /scan 확인 (상자 필터 뒤 가까운 빔 0)
-  판정: 빔 거리 NEAR (0.40 m) 안 = 가까움
+  판정: 빔 거리 NEAR (0.40 m) 안 = 가까움. 스캔의 range_min 보다 가까운 값은 안 셈 (SLAM·costmap·whisker 도 무시하는 값,
+        상자 필터도 이 값은 점으로 안 만들어서 못 지움 — 11-18 처음엔 이걸 세서 "안 걸러진 것" 처럼 보였음)
         모든 자세에서 가까움 = 차체·판 (고개와 무관) / 어떤 자세에서만 = 머리가 가림
   각도: 로봇 기준 (0 = 앞, + = 왼쪽, ±180 = 뒤). LiDAR 0° 는 로봇 뒤 (URDF laser_yaw = pi) → 로봇각 = LiDAR각 + 180
         팬은 /pantilt/cmd 기준 (+ = 오른쪽)
@@ -81,7 +82,7 @@ class Probe(Node):
         n = min(len(s.ranges) for s in self.scans)
         near = []
         for i in range(n):
-            r = [s.ranges[i] for s in self.scans if math.isfinite(s.ranges[i]) and s.ranges[i] > 0.02]
+            r = [s.ranges[i] for s in self.scans if math.isfinite(s.ranges[i]) and s.ranges[i] >= max(m.range_min, 0.02)]
             if len(r) >= 3 and st.median(r) < NEAR:
                 ang = wrap(math.degrees(m.angle_min + i * m.angle_increment) + 180.0)
                 near.append((round(ang, 1), round(st.median(r), 3)))
@@ -95,9 +96,10 @@ def main():
     o = a.parse_args()
     rclpy.init()
     p = Probe(o.topic)
-    print("스캔 기다리는 중...", flush=True)
+    print(f"/{o.topic} 기다리는 중...", flush=True)
     while not p.scans:
         rclpy.spin_once(p, timeout_sec=0.5)
+    print(f"range_min {p.scans[0].range_min:.3f} m (이보다 가까운 값은 안 셈)", flush=True)
     poses = [(pan, TILT_HOME) for pan in [-180.0 + k * o.step for k in range(int(360 / o.step) + 1)]]
     poses += [(0.0, t) for t in (-30.0, -5.0, 45.0, 90.0)]
     res, prev = [], None
