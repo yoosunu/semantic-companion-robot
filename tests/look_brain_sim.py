@@ -68,7 +68,15 @@ b, log = run(lambda t: [person(yaw=60)], 60)
 i = first(log, "idle")
 idle_pans = [x[1] for t, m, _, a in log if m == "idle" for x in a if x[0] == "move"]
 check("3 무시하는 사람: 응시(5~30 s)→딴짓", i and 5 <= i <= 31, f"딴짓 {i}s")
-check("3b 딴짓은 사람 곁(15~30°, 화면 안)", idle_pans and all(15 <= abs(p) <= 30 for p in idle_pans), [round(p) for p in idle_pans])
+check("3b 딴짓은 사람 곁(10~20°, 화면 안)", idle_pans and all(10 <= abs(p) <= 20 for p in idle_pans), [round(p) for p in idle_pans])
+
+# 3c. 딴짓·두리번은 천천히 (11-17 소리), 눈맞춤은 그대로 최고 속도 (SPD 0)
+idle_spd = [x[3] for t, m, _, a in log if m == "idle" for x in a if x[0] == "move"]
+att_spd = [x[3] for t, m, _, a in log if m == "attend" and t > 0 for x in a if x[0] == "move"]   # t=0 은 시작 정면 이동 (천천히)
+b2, log2 = run(lambda t: [], 60)
+scan_spd = [x[3] for t, m, _, a in log2 if m == "scan" for x in a if x[0] == "move" and x[1] in lb.SCAN_PANS]   # 번쩍(깸)은 빼고
+check("3c 딴짓·두리번 느리게 / 눈맞춤 빠르게", idle_spd and scan_spd and att_spd and min(idle_spd + scan_spd) > 0 and set(att_spd) == {0},
+      f"딴짓 {set(idle_spd)} 두리번 {set(scan_spd)} 눈맞춤 {set(att_spd)}")
 
 # 4. 딴짓 중 사람이 나를 쳐다봄 (yaw 60 → 5) → 바로 쳐다봄 (contact)
 w = lambda t: [person(pan=10, yaw=60 if t < 40 else 5)]

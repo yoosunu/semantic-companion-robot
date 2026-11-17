@@ -3,11 +3,12 @@
   원칙 (11-12 Jasper): 사람이 있다고 계속 쳐다보면 감시 카메라. **쳐다볼 이유가 있을 때만** 쳐다본다.
 
   모드
-    scan    아무도 없음 → 4~7 s 마다 좌우 한 곳 두리번
+    scan    아무도 없음 → 6~14 s 마다 좌우 한 곳 두리번 (천천히 SCAN_DPS)
     attend  사람을 쳐다봄 (가운데 ±10°/±8° 밖이면 한 번에 확). 5~30 s (매번 랜덤, 11-14 Jasper) 지나면 → idle + "bored" 알림
             눈맞춤 다듬기: 안쪽이어도 1.2 s 가만히 있은 뒤 평균 오차가 3° 넘으면 작게 한 번 더 (사람 눈의 "보정 도약").
             11-12 Jasper: "끄덕일 때·가까울 때 눈을 살짝 비껴 봄 → 눈맞춤 느낌이 안 남". 계속 따라가는 게 아니라 한 번씩 → 덜덜 없음
-    idle    딴짓: 사람은 곁눈(화면 안)에 두고 15~30° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
+    idle    딴짓: 사람은 곁눈(화면 안)에 두고 10~20° 옆을 봄, 5~12 s 마다 바꿈. 트리거가 오면 → attend
+            딴짓·두리번은 천천히 (11-17 Jasper: 최고 속도로 확확 돌면 서보 소리가 큼). 눈맞춤(attend)은 그대로 빠르게
             사람을 놓쳐도 마지막 본 곳 기준 (11-12: 놓친 뒤 지금 고개 기준으로 또 옆을 봐서 −58° → −96° 로 멀어짐)
     doze    꾸벅 (executive 가 head=doze, nods=3). 꾸벅 사이에도 아주 느리게 가라앉음 (멈춰서 아래 보는 것과 구별)
             꾸벅 한 번 (11-14 Jasper: "툭, 스르르륵....툭 깸" / "스르르륵....툭...깸") — 매번 A·B, 각도·시간 랜덤
@@ -49,11 +50,12 @@ SETTLE = 0.6                         # 빠른 고개 이동 뒤 기다림
 ATTEND_S = (5.0, 30.0)               # 한 번 쳐다보면 이만큼 (랜덤, 11-14 Jasper: 5~30)
 GLANCE_S = 3.0
 IDLE_EVERY = (5.0, 12.0)             # 딴짓 시선 바꾸는 간격
-IDLE_OFF = (15.0, 30.0)              # 딴짓: 사람에서 이만큼 옆 (화각 ±60° 안. 11-12: 45° 면 어안 가장자리라 먼 얼굴 놓침)
+IDLE_OFF = (10.0, 20.0)              # 딴짓: 사람에서 이만큼 옆 (11-12: 45° 면 어안 가장자리라 먼 얼굴 놓침 / 11-17: 15~30 → 10~20, 소리)
+CALM_DPS, SCAN_DPS, CALM_ACC = 60.0, 45.0, 10   # 딴짓·두리번 속도 (°/s) 와 가속. 눈맞춤은 SPD 0 (최고)
 FINE, FINE_WAIT = 3.0, 1.2           # 눈맞춤 다듬기: 오차 3° 넘고, 마지막 이동 뒤 1.2 s
 SCAN_AFTER = 5.0
 SCAN_EVERY = (6.0, 14.0)            # 11-12 Jasper: 4~7 s 는 너무 두리번거림
-SCAN_PANS = (-70.0, -35.0, 0.0, 35.0, 70.0)
+SCAN_PANS = (-60.0, -30.0, 0.0, 30.0, 60.0)   # 11-17: ±70 → ±60 (소리·이동 시간)
 LOST_S = 2.0
 CONTACT_IN, CONTACT_OUT = 20.0, 35.0
 CONTACT_AWAY_S = 2.0                 # 이만큼 딴 데 봐야 다음 contact 인정
@@ -112,6 +114,11 @@ class Brain:
         self.pan, self.tilt = pan, max(-30.0, min(90.0, tilt))
         out.append(("move", self.pan, self.tilt, spd, acc))
         self.busy_until, self.moved_t, self.errs = now + settle, now, []
+
+    def calm(self, out, now, pan, tilt, dps, settle=0.6):
+        """천천히 이동: 거리 / 속도 만큼 걸린다고 보고 그동안은 안 움직임"""
+        d = max(abs((pan - self.pan + 180.0) % 360.0 - 180.0), abs(tilt - self.tilt))
+        self.move(out, now, pan, tilt, max(5, int(dps * STEPS_PER_DEG)), CALM_ACC, settle=d / dps + settle)
 
     def play(self, now, steps):
         """steps: [(몇 초 뒤, 동작)] 동작 = ("move", pan, tilt, spd, acc, settle) / ("led", v)"""
@@ -210,7 +217,7 @@ class Brain:
             self.started = True
             if self.head == "free":                          # 시작부터 졸거나 자라고 하면 고개 안 듦
                 out.append(("led", LED_AWAKE))
-                self.move(out, now, 0.0, TILT_HOME)
+                self.move(out, now, 0.0, TILT_HOME, int(SCAN_DPS * STEPS_PER_DEG), CALM_ACC, settle=3.0)   # 시작 위치 모름 → 넉넉히
         while self.clip and now >= self.clip[0][0]:
             a = self.clip.pop(0)[1]
             if a[0] == "move":
@@ -301,14 +308,14 @@ class Brain:
         elif self.mode == "idle" and now > self.until:
             self.until = now + self.rng.uniform(*IDLE_EVERY)
             side = self.rng.choice((-1, 1)) * self.rng.uniform(*IDLE_OFF)
-            self.move(out, now, self.tpan + side, self.ttilt + self.rng.uniform(-10, 10))
+            self.calm(out, now, self.tpan + side, self.ttilt + self.rng.uniform(-10, 10), CALM_DPS)
         elif self.mode == "scan":
             if visible:
                 self.attend(out, now, "found", max(visible, key=lambda p: p["px"]))
             elif now - self.seen_t > SCAN_AFTER and now > self.until:
                 self.until = now + self.rng.uniform(*SCAN_EVERY)
                 choices = [x for x in SCAN_PANS if abs(x - self.pan) > 20.0]
-                self.move(out, now, self.rng.choice(choices), self.rng.uniform(5.0, 25.0), settle=1.0)
+                self.calm(out, now, self.rng.choice(choices), self.rng.uniform(5.0, 25.0), SCAN_DPS, settle=1.0)
         return out
 
     def attend(self, out, now, why, p):
