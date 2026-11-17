@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """[Pi] 팬틸트 머리가 LiDAR 를 얼마나 가리나 (11-17). 고개를 돌려 가며 "가까운 빔" 을 기록.
 
+  11-17 결과: 고정대가 뒤 +160~−157° 를 2~4 cm, 서보선이 3~17 cm → robot.launch 에서 0.18 m 안쪽 거름 (/scan).
+        그래서 이 도구는 거르기 전 /scan_raw 를 봄
   준비: 로봇만 켜기 (브리지 + LiDAR: ros2 launch scr_bringup robot.launch.py). look·executive 는 끄기 (고개를 이 도구가 씀)
         주변 0.5 m 안에 물건 없게 (가까운 빔 = 로봇 자신이어야 함)
   사용: python3 tools/bench/lidar_occlusion.py                     팬 −180~180 (15° 간격, 틸트 10) + 틸트 −30~90 (팬 0)  ≈ 2분
         python3 tools/bench/lidar_occlusion.py --step 30           빨리 (30° 간격)
+        python3 tools/bench/lidar_occlusion.py --topic scan --step 45   거른 /scan 확인 (상자 필터 뒤 가까운 빔 0)
   판정: 빔 거리 NEAR (0.40 m) 안 = 가까움
         모든 자세에서 가까움 = 차체·판 (고개와 무관) / 어떤 자세에서만 = 머리가 가림
   각도: 로봇 기준 (0 = 앞, + = 왼쪽, ±180 = 뒤). LiDAR 0° 는 로봇 뒤 (URDF laser_yaw = pi) → 로봇각 = LiDAR각 + 180
@@ -55,10 +58,10 @@ def fmt(segs):
 
 
 class Probe(Node):
-    def __init__(self):
+    def __init__(self, topic):
         super().__init__("lidar_occlusion")
         self.scans = []
-        self.create_subscription(LaserScan, "scan", lambda m: self.scans.append(m), qos_profile_sensor_data)
+        self.create_subscription(LaserScan, topic, lambda m: self.scans.append(m), qos_profile_sensor_data)
         self.pub = self.create_publisher(Float32MultiArray, "pantilt/cmd", 10)
 
     def wait(self, secs):
@@ -88,9 +91,10 @@ class Probe(Node):
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--step", type=float, default=15.0)
+    a.add_argument("--topic", default="scan_raw", help="scan = 거른 뒤 확인 (가까운 빔이 0 이어야)")
     o = a.parse_args()
     rclpy.init()
-    p = Probe()
+    p = Probe(o.topic)
     print("스캔 기다리는 중...", flush=True)
     while not p.scans:
         rclpy.spin_once(p, timeout_sec=0.5)
