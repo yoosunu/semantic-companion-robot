@@ -44,7 +44,8 @@ class FloorPerception(Node):
         port = p("stream_port", 0).value
         self.head0 = (p("pan0", 0.0).value, p("tilt0", 10.0).value)   # 고개 명령을 아직 못 받았을 때 지금 자세 (look 시작 자세 0,10)
         K, D, size = ground.load_calib(os.path.expanduser(p("calib", ground.CALIB).value))
-        self.fd = floor_detect.FloorDetect(K, D, size, th=p("th", 4.0).value, max_range=p("max_range", 1.5).value)
+        self.fd = floor_detect.FloorDetect(K, D, size, th=p("th", 4.0).value,
+                                             max_range=p("max_range", 1.5).value, l_weight=p("l_weight", 1.0).value)
         self.size = size
         self.enabled = True
         self.head = collections.deque(maxlen=100)

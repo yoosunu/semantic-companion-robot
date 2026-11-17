@@ -18,8 +18,9 @@ W = 320                                   # 계산 폭
 
 
 class FloorDetect:
-    def __init__(self, K, D, size, th=4.0, min_area=60, learn=0.05, max_range=1.5):
+    def __init__(self, K, D, size, th=4.0, min_area=60, learn=0.05, max_range=1.5, l_weight=1.0):
         self.th, self.min_area, self.learn, self.max_range = th, min_area, learn, max_range
+        self.l_weight = l_weight                  # 밝기(L) 비중. 11-18 실물: 먼 바닥이 비스듬히 비쳐 더 밝음 → 통째로 "다름" → 낮추면 색(a,b) 위주
         self.K, self.D, (self.W0, self.H0) = K, D, size
         self.mu = self.cov = None
         self.pose = None
@@ -52,6 +53,7 @@ class FloorDetect:
         h, w = small.shape[:2]
         self.set_pose(pan, tilt, h, w)
         lab = cv2.cvtColor(cv2.GaussianBlur(small, (5, 5), 0), cv2.COLOR_BGR2Lab).astype(np.float32)
+        lab[:, :, 0] *= self.l_weight
         y0, y1, x0, x1 = self.ref_box(h, w)
         odd = False
         if self.valid[y0:y1, x0:x1].mean() > 0.9:                      # 기준 칸이 정말 바닥일 때만 배움
