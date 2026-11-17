@@ -22,7 +22,7 @@
   <xacro:property name="body_height"   value="${height - wheel_radius}"/>
 
   <!-- 라이다 (RPLIDAR C1): 차체 중심(base_link 원점) 기준 위치 -->
-  <xacro:property name="laser_x"   value="0.0"/>   <!-- ★ 앞(+)/뒤(-) -->
+  <xacro:property name="laser_x"   value="0.078"/> <!-- 실측 11-18: 차체 앞 끝 → 라이다 중심 4.8 cm → 0.126 − 0.048 (이전 0 = 중심 가정, 틀림. 카메라 바닥 격자 검증에서 발견) -->
   <xacro:property name="laser_y"   value="0.0"/>   <!-- ★ 왼(+)/오른(-) -->
   <xacro:property name="laser_scan_height" value="0.175"/> <!-- 실측 11-17: 바닥 ~ 라이다 창 가운데 17.5 cm (판 낮춤, 이전 10-31 19.5). 이 높이 아래 물체(의자 다리 등)는 라이다가 못 봄 -->
   <xacro:property name="laser_z"   value="${laser_scan_height - wheel_radius}"/> <!-- base_link 원점(바퀴 축 높이) 기준. wheel_radius 가 ★ 라 이 값도 바퀴 실측 후 확정 -->

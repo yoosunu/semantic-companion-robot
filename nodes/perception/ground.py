@@ -4,16 +4,20 @@
     ① 렌즈 (calib_lab 으로 보정한 OpenCV fisheye K·D): 픽셀 → 카메라 기준 광선 방향
     ② 카메라 자세 (실측 + 팬·틸트 각): 카메라 광선 → 로봇(base_footprint) 기준 광선
     ③ 바닥 평면 z = 0 과 만나는 점 → (x 앞, y 왼쪽) m
-  좌표: 로봇 = base_footprint (LiDAR 중심 바로 아래 바닥, x 앞, y 왼, z 위). 카메라 = OpenCV (x 오른쪽, y 아래, z 앞)
+  좌표: 로봇 = base_footprint (차체 중심 바로 아래 바닥, x 앞, y 왼, z 위 — URDF 와 같음). 카메라 = OpenCV (x 오른쪽, y 아래, z 앞)
   팬 + = 오른쪽, 틸트 + = 위 (/pantilt/cmd 와 같음)
 
   실측 (11-18 Jasper, 줄자 ±0.5 cm)
     TILT_H  바닥 → 틸트 축 24.5 cm
     LENS_FWD, LENS_UP  틸트 축 → 렌즈 (고개 0,0 일 때) 앞 6.5 cm, 위 0.5 cm
-    PAN_X, PAN_Y  LiDAR 중심 → 팬 축: 뒤 7 cm, 좌우 0 (틸트 축은 팬 축 바로 위라고 가정)
-    TILT_OFFSET  틸트 명령 0° 일 때 카메라 실제 시선 +7° (위). 11-18 실측: 고개 (0,0) 에서 50 cm 건전지가 격자 37 cm 에
-                 보임 → 격자를 +7° 로 그리니 50 선에 정확히 붙음. 서보 0점은 손 보정 (handoff_pantilt 11-11) → 0점 재저장
+    LASER_X  차체 중심 → LiDAR 중심 앞 7.8 cm (차체 앞 끝 → LiDAR 4.8 cm, 차체 길이 25.2). URDF laser_x 와 같음
+    PAN_X, PAN_Y  팬 축 = LiDAR 중심에서 뒤 7 cm → 차체 중심 기준 +0.8 cm, 좌우 0 (틸트 축은 팬 축 바로 위라고 가정)
+    TILT_OFFSET  틸트 명령 0° 일 때 카메라 실제 시선 +2.3° (위). 서보 0점은 손 보정 (handoff_pantilt 11-11) → 0점 재저장
                  대신 여기서만 보정 (눈맞춤 등 다른 동작은 지금 0점으로 맞춰져 있어서)
+  검증 (11-18, 건전지 3개 = 앞 끝에서 17·37·87 cm, 고개 −20 + 0 에서 바닥 닿은 점):
+    차체 중심 기준 정답 29.6 / 49.6 / 99.6 / 49.6 → 모델 30.0 / 49.9 / 99.2 / 51.2 (최대 1.6 cm, 캡처에서 읽은 픽셀)
+    처음엔 "LiDAR = 차체 중심 (앞 끝에서 13 cm)" 가정 → 0점 7° 로 50 cm 한 점만 맞고 30·100 은 −4·+39 cm.
+    LiDAR 위치를 미지수로 풀어 4.8~6 cm 예측 → 줄자 4.8 cm 로 확인 → URDF laser_x 도 고침
 """
 import json
 import math
@@ -23,8 +27,9 @@ import numpy as np
 
 TILT_H = 0.245
 LENS_FWD, LENS_UP = 0.065, 0.005
-PAN_X, PAN_Y = -0.07, 0.0
-TILT_OFFSET = 7.0
+LASER_X = 0.078
+PAN_X, PAN_Y = LASER_X - 0.07, 0.0
+TILT_OFFSET = 2.3
 CALIB = os.path.expanduser("~/calib/fisheye_640x480.json")
 
 

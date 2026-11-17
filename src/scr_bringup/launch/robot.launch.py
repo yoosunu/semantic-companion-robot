@@ -10,7 +10,8 @@
   laser_filters (활용)          /scan = /scan_raw 에서 "로봇 뒤쪽 절반 상자" 안의 점을 버림 (11-17)
                                실측 (tools/bench/lidar_occlusion.py): 팬틸트 고정대가 뒤쪽 +160~−157° 를 2~4 cm 로,
                                서보선이 고개 돌릴 때 옆 뒤(−108~−149°, +142~+156°)를 3~17 cm 로 가림 — 전부 뒤쪽 절반.
-                               상자 base_link x −0.20~0.00, y ±0.18 m (차체 반길이 0.13·반폭 0.12 + 여유). 앞쪽은 그대로
+                               상자 base_link x −0.14~+0.078 (= LiDAR 기준 뒤 0~22 cm; LiDAR 는 차체 중심 앞 7.8 cm,
+                               11-18 실측), y ±0.18 m. 차체 뒤 끝 −0.126 + 여유. 앞쪽은 그대로
                                (거리 18 cm 로 다 자르면 앞 범퍼 앞 5 cm 가 안 보임 → 기각). scan_filter:=false 면 예전처럼
 
 ugv_port 는 일부러 기본값이 없다: UGV02 가 USB 로 붙는지(/dev/ttyUSB* 또는 /dev/ttyACM*) GPIO UART(/dev/ttyAMA0) 로
@@ -73,7 +74,7 @@ def generate_launch_description():
                                                      LaunchConfiguration("scan_filter"), "' == 'true'"])),
              parameters=[{"filter1": {"name": "self_box", "type": "laser_filters/LaserScanBoxFilter",
                                       "params": {"box_frame": "base_link", "invert": False,
-                                                 "min_x": -0.20, "max_x": 0.0, "min_y": -0.18, "max_y": 0.18,
+                                                 "min_x": -0.14, "max_x": 0.078, "min_y": -0.18, "max_y": 0.18,
                                                  "min_z": -1.0, "max_z": 1.0}}}],
              remappings=[("scan", "scan_raw"), ("scan_filtered", "scan")]),
     ])

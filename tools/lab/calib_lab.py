@@ -5,7 +5,8 @@
       구하는 것: K (fx, fy, cx, cy) + D (k1~k4). 바닥 감지·카메라 거리 (픽셀 → 바닥 좌표) 의 ① 단계.
   체커보드: tools/lab/checkerboard_9x6.png 를 아이패드에 꽉 차게 (안쪽 모서리 9×6). 칸 크기(mm)는 렌즈 값엔 필요 없음
   쓰기 (카메라 노드 필요: bash run/cam_run.sh 640 480 10 — **실제로 쓸 해상도로 보정**. 해상도 바꾸면 다시)
-    calib_lab.py capture                 Mac 브라우저 http://<Pi IP>:8083 — 판이 보이면 초록, 자세가 충분히 다르면 자동 저장 (25 장)
+    calib_lab.py capture                 Mac 브라우저 http://<Pi IP>:8083 — 판이 보이면 초록, 자세가 충분히 다르면 자동 저장
+    calib_lab.py capture 8               이번에 새로 8 장만 (기본 25). 이미 찍은 건 남음 → 빈 곳만 보충 (11-18: 전체 수로 세서 보충이 안 됐음)
     calib_lab.py solve                   저장한 사진으로 보정 → ~/calib/fisheye_<W>x<H>.json (+ 화면에 결과, 다시 찍기 오차 RMS px)
     calib_lab.py check                   펴진 영상 스트림 (8083): 직선(문틀·책장)이 곧게 보이면 OK
   확인 (11-18): 시뮬 판 20 장 (f 230, 잡음 0.2 px) → OpenCV 4.10 RMS 0.28 px, f 229.9 (맞음) / OpenCV 5.0 은 틀림
@@ -41,7 +42,9 @@ def capture():
     push = serve(8083)
     saved = []                           # (가운데 x, y, 크기) — 비슷한 자세는 또 안 찍음
     n = len([f for f in os.listdir(os.path.join(OUT, "imgs")) if f.endswith(".png")])
-    print(f"찍기 시작 (이미 {n} 장). 판을 움직이며 모서리까지. Ctrl+C 로 끝", flush=True)
+    want = int(sys.argv[2]) if len(sys.argv) > 2 else N_WANT
+    n0 = n
+    print(f"찍기 시작 (이미 {n} 장, 이번에 {want} 장). 판을 움직이며 모서리까지. Ctrl+C 로 끝", flush=True)
     last = 0.0
     for bgr in frames():
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
@@ -62,10 +65,10 @@ def capture():
                 cv2.imwrite(os.path.join(OUT, "imgs", f"{n:02d}.png"), bgr)
                 saved.append((cx, cy, size))
                 print(f"저장 {n:02d}: 가운데 ({cx:.0f},{cy:.0f}) 크기 {size:.0f}px", flush=True)
-        cv2.putText(img, f"{'BOARD' if ok else 'no board'}  saved {n}/{N_WANT}  {W}x{H}", (8, 20),
+        cv2.putText(img, f"{'BOARD' if ok else 'no board'}  new {n - n0}/{want}  total {n}  {W}x{H}", (8, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0) if ok else (0, 0, 255), 2)
         push(img)
-        if n >= N_WANT:
+        if n - n0 >= want:
             print("충분함 → calib_lab.py solve", flush=True)
             break
 

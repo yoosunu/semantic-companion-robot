@@ -41,7 +41,7 @@ def stamp(t): return types.SimpleNamespace(sec=int(t), nanosec=int((t % 1) * 1e9
 
 class Sim:
     def __init__(s):
-        s.W = W = whisker.Whisker(); W.laser_yaw = 0.0
+        s.W = W = whisker.Whisker(); W.laser_yaw = 0.0; W.laser_x = 0.0   # 시뮬 거리는 몸 중심 기준
         W.publish_cloud = lambda: None
         W.map_pose = lambda: ("map", W.odom[0], W.odom[1], W.odom[2]) if W.odom else None
         s.ev, s.states, s.trace = [], [], []

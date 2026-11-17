@@ -150,6 +150,7 @@ class Whisker(Node):
         self.lift_deg = p("lift_deg", LIFT_DEG).value   # 시험용으로 끌 때: -p lift_deg:=99.0
         self.slope_deg = p("slope_deg", SLOPE_DEG).value
         self.laser_yaw = math.radians(p("laser_yaw_deg", 180.0).value)   # URDF laser_yaw (10-29 실측: 라이다 0° = 로봇 뒤)
+        self.laser_x = p("laser_x", 0.078).value       # URDF laser_x (11-18 실측: 라이다는 차체 중심 앞 7.8 cm. 전엔 0 → 뒤 여유를 8 cm 넓게 봄)
 
         # 감각
         self.base = None                     # [ax, ay, gx, gy] 평소 값
@@ -348,7 +349,7 @@ class Whisker(Node):
         r = np.asarray(m.ranges, dtype=float)
         a = m.angle_min + np.arange(len(r)) * m.angle_increment + self.laser_yaw   # 몸 기준 (앞 = +x)
         ok = np.isfinite(r) & (r > max(m.range_min, 0.05)) & (r < NOMO_RANGE)
-        pts = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
+        pts = np.stack([r[ok] * np.cos(a[ok]) + self.laser_x, r[ok] * np.sin(a[ok])], axis=1)   # 몸 중심 기준
         if len(pts) > NOMO_PTS:
             pts = pts[:: int(math.ceil(len(pts) / NOMO_PTS))]
         self.scans.append((now, pts))
