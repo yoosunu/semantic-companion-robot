@@ -6,7 +6,10 @@
   쓰기
     ~/tof-venv/bin/python tools/lab/tof_lab.py                    1 s 마다 8×8 표 (cm, 회전 반영) + 속도
     ~/tof-venv/bin/python tools/lab/tof_lab.py --raw              회전 안 한 원래 배열 (방향 확인용)
-    ~/tof-venv/bin/python tools/lab/tof_lab.py --rot 3            90° 회전 횟수 (기본 1 = 반시계 90°). 방향 확인 뒤 고정
+    ~/tof-venv/bin/python tools/lab/tof_lab.py --rot 1            np.rot90 횟수 (기본 3 = 시계 90°, 11-17 실물 확인)
+  방향 (11-17 실물, 손 가리기): raw 아래 줄 = 로봇 왼쪽, raw 오른쪽 열 = 아래(바닥), raw 위 줄 = 로봇 오른쪽
+    → rot90 3번(시계 90°) 이면 위 = 위, 왼 = 로봇 왼쪽. 거울 뒤집기 없음
+  11-17 첫 결과: 아래 3줄이 바닥 23·31·40 cm (예상 20~24 cm 부터 맞음), 늘 가까운 칸 없음 (가림 없음), I2C 100 kHz 에서 7.6 Hz
     ~/tof-venv/bin/python tools/lab/tof_lab.py --secs 10 --label wall50   10 s 기록 → 요약 (가운데 4칸 중앙값·흔들림, 칸별 최소)
   검증 순서 (handoff_hw_2026-11-17 2·3절)
     1. 방향: 센서 왼쪽 절반만 손으로 가림 → 표의 왼쪽이 가까워지면 회전 맞음 (위·아래도 같은 식)
@@ -19,6 +22,7 @@
 import argparse
 import csv
 import os
+import signal
 import statistics as st
 import time
 
@@ -36,14 +40,14 @@ def grid(vals, status, rot, raw):
 
 
 def show(d, hz):
-    print(f"--- {hz:.1f} Hz  (cm, 위 = 위쪽, 왼 = 로봇 왼쪽 — 방향 확인 전엔 가정)")
+    print(f"--- {hz:.1f} Hz  (cm, 로봇 뒤에서 앞을 본 그림: 위 = 위, 왼 = 로봇 왼쪽, 아래 줄 = 바닥)")
     for row in d:
         print(" ".join("  --" if np.isnan(v) else f"{v / 10:4.0f}" for v in row))
 
 
 def main():
     a = argparse.ArgumentParser()
-    a.add_argument("--rot", type=int, default=1)
+    a.add_argument("--rot", type=int, default=3)
     a.add_argument("--raw", action="store_true")
     a.add_argument("--hz", type=int, default=15)
     a.add_argument("--secs", type=float, default=0.0)
@@ -59,8 +63,10 @@ def main():
     s.start_ranging()
     print(f"시작 {time.time() - t0:.1f} s", flush=True)
 
+    stop = []                                            # Ctrl+C: 라이브러리 콜백 안에서 걸리면 예외가 삼켜져 안 꺼짐 → 표시만 하고 루프에서 끝냄
+    signal.signal(signal.SIGINT, lambda *_: stop.append(1))
     rec, n, t_show, t_start = [], 0, 0.0, time.time()
-    while True:
+    while not stop:
         if not s.data_ready():
             time.sleep(0.005)
             continue
@@ -87,17 +93,20 @@ def main():
         w.writerow(["t"] + [f"d{i}" for i in range(64)] + [f"s{i}" for i in range(64)])
         for t, dd, ss in rec:
             w.writerow([round(t, 3)] + dd + ss)
+    if not rec:
+        return
+    secs = rec[-1][0] - rec[0][0]
     stack = np.array([grid(dd, ss, o.rot, o.raw) for _, dd, ss in rec])
     mid = stack[:, 3:5, 3:5].reshape(len(stack), -1)
     mid = [float(np.nanmedian(r)) for r in mid if not np.all(np.isnan(r))]
     near = np.nanmedian(stack, axis=0) < NEAR_MM
     valid = np.mean(~np.isnan(stack), axis=0)
-    print(f"\n요약 {o.label}: {len(rec)} 장, {len(rec) / max(o.secs, 1e-6):.1f} Hz")
+    print(f"\n요약 {o.label}: {len(rec)} 장, {len(rec) / max(secs, 1e-6):.1f} Hz")
     if mid:
         print(f"  가운데 4칸 중앙값 {st.median(mid) / 10:.1f} cm, 흔들림(std) {st.pstdev(mid) / 10:.2f} cm")
     print(f"  유효 비율 평균 {valid.mean() * 100:.0f}%, 늘 가까움(<{NEAR_MM / 10:.0f} cm) 칸: {[tuple(map(int, x)) for x in np.argwhere(near)]}")
     print("  칸별 중앙값 (cm):")
-    show(np.nanmedian(stack, axis=0), len(rec) / max(o.secs, 1e-6))
+    show(np.nanmedian(stack, axis=0), len(rec) / max(secs, 1e-6))
     print(f"  기록: {path}")
 
 
