@@ -15,13 +15,17 @@
     - v5 (11-19): YOLO26 도 seg (yolo26n-seg) → COCO 도 마스크로 이름 (#4 책상 밑 쓰레기통을 큰 chair 상자가 가져감).
       **자기 몸 거르기**: ground.body_mask (차체·LiDAR 상자를 고개 자세로 화면에 그림) 에 마스크가 body_frac (0.5) 이상 걸치면 버림
       (몸통 suitcase 0.33 → 96 %, LiDAR chair 0.26 → 100 %, 진짜 물건 0 %). **원본 프레임 저장** ~/glance_log/raw/ (+ json) → 오프라인 시뮬용
+    - 11-19 의자 시험 (ground_snap chair_1m·60cm, 9 조합): n 은 의자가 다 보여도 0.15~0.66 들쭉날쭉, **s-seg 320 은 0.68~0.93**
+      (480·640 은 오히려 나쁨) → 기본 **yolo26s-seg** (Pi: YOLO26 단계 2 장 ~0.6 s, n-seg ~0.25 s). Jasper: 핸드폰 아님, 눈이 잘 봐야
+    - **덤 보기** (11-19): 십자 = '바닥 감지가 찍은 그 점의 정체' 장부 (그대로). 같은 화면의 다른 물건도 extra_on (0.5) 이상 + 두 장 모두면
+      각자 마스크 발자국 위치로 semantic/seen 의 extras 에. 잘리지 않은 건 그 자리도 '봤음' 으로 기억 (바닥 후보로 또 안 봄)
     - 이름 맞추기: 후보 점 (화면) 이 상자 **아래쪽 35%** 안 (여유 margin px), 같은 이름이면 작은 상자 — 바닥 좌표 비교는 1 m 넘으면
       오차가 커서 (7 번 발닦개) 바꿈, 상자 전체로 하면 큰 침대가 앞 빈 바닥까지 가져감 (v2 9 번)
     - 본 곳은 켜져 있는 동안 계속 기억 (Jasper: 30 분일 이유 없음). 물건이 옮겨진 건 나중에 지도 이름표 층에서
     - 상자 투표·다듬기: 같은 이름이 2 장에서 → 평균 점수·평균 상자. 한 장에서만 튄 건 버림
     - 가운데에서 본 상자 아래 끝 → 위치를 다시 계산해 기억 (가장자리에 걸쳤던 후보도 여기서 정확해짐)
   입력  floor/blobs, neri/profile, pantilt/cmd, camera/image_raw, odom
-  출력  neri/request "glance:{id,pan,tilt}", neri/event glanced, semantic/seen {"id","name","conf","model","wx","wy","ms"}
+  출력  neri/request "glance:{id,pan,tilt}", neri/event glanced, semantic/seen {"id","name","conf","model","wx","wy","footprint","extras","ms"}
   확인용: -p stream_port:=8086 → 마지막 힐끗 장면 (상자·후보 십자·투표·시간). 사진 ~/glance_log/ (집 안 → repo 에 안 올림)
   파이썬: onnxruntime → ~/yolo_venv/bin/python
 """
@@ -50,6 +54,7 @@ from yolo_onnx import NAMES as COCO, Yolo  # noqa: E402
 cv2.setNumThreads(1)
 OUT = os.path.expanduser("~/glance_log")
 COCO_SET = {n.replace("_", " ") for n in COCO}
+MOVERS = {"person", "cat", "dog", "bird"}             # 덤 보기에서 자리 기억 안 함 (움직이는 것)
 
 
 def to_bgr(m):
@@ -75,7 +80,8 @@ class GlanceNode(Node):
         self.mask_px = p("mask_px", 15).value               # 후보 점이 마스크에서 이만큼 안이면 그 물건 (마스크 있을 때)
         self.body_frac = p("body_frac", 0.5).value          # 마스크 (없으면 상자) 가 로봇 몸 자리에 이 비율 이상이면 자기 몸 → 버림
         self.body_cache = {}
-        self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26n-seg.onnx").value), size=320, conf=0.2)
+        self.extra_on, self.extra_dist = p("extra_on", 0.5).value, p("extra_dist", 2.0).value   # 덤 보기 (11-19)
+        self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26s-seg.onnx").value), size=320, conf=0.2)
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
         self.K, self.D, self.size = ground.load_calib()
@@ -260,6 +266,29 @@ class GlanceNode(Node):
                 best = (name, sc, box, v[-1][2])                        # 마스크는 마지막 장 것
         return best, alldet
 
+    def extras(self, j, dets_all, chosen):
+        """덤 보기 (11-19 Jasper: 십자 물건이 아니어도 확실히 보인 건 기록). 십자 규칙은 '그 바닥 점의 정체' 장부로 그대로 두고,
+           같은 화면의 다른 물건 중 extra_on (0.5, Jasper: 0.5 못 넘으면 못 본 것) 이상 + 모든 장에서 같은 이름 → 각자 마스크 발자국의
+           가장 가까운 점 (extra_dist 2 m 안). 화면 아래 끝에 잘린 마스크는 cut (바닥 닿은 점이 안 보여 위치를 덜 믿음 → 기억은 안 함)"""
+        out = []
+        prev = [{d[0] for d in ds if d[1] >= self.extra_on} for ds in dets_all[:-1]]
+        for d in dets_all[-1]:
+            if d[1] < self.extra_on or len(d) <= 6 or (chosen is not None and d[6] is chosen):
+                continue
+            if any(d[0] not in s for s in prev):
+                continue                                                # 한 장에서만 → 버림
+            fp = self.footprint(d[6], j["pan"], j["tilt"])
+            if not len(fp):
+                continue
+            k = int(np.argmin(np.hypot(fp[:, 0], fp[:, 1])))
+            x, y = float(fp[k, 0]), float(fp[k, 1])
+            if math.hypot(x, y) > self.extra_dist:
+                continue
+            wx, wy = gl.to_world(self.pose, x, y)
+            out.append({"name": d[0], "conf": round(float(d[1]), 3), "x": round(x, 3), "y": round(y, 3),
+                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]]})
+        return out
+
     def footprint(self, mask, pan, tilt):
         """마스크 아래 윤곽 (열마다 가장 아래 픽셀) → 바닥 (x, y) 로봇 좌표 m. 위에서 본 물건이 바닥에 닿은 모양"""
         cols = np.nonzero(mask.any(0))[0]
@@ -313,10 +342,16 @@ class GlanceNode(Node):
                 wx, wy = gl.to_world(self.pose, fl[0], fl[1])
         self.cands.remember(j["cand"]["wx"], j["cand"]["wy"], now, name, conf, pose=self.pose)
         self.cands.remember(wx, wy, now, name, conf, pose=self.pose)
+        ext = self.extras(j, dets26, best[3] if best and model == "yolo26" else None)
+        if detsE:
+            ext += self.extras(j, detsE, best[3] if best and model == "yoloe" else None)
+        for e in ext:
+            if not e["cut"] and e["name"] not in MOVERS:               # 사람·동물은 움직임 → 자리를 '봤음' 으로 묶지 않음
+                self.cands.remember(e["wx"], e["wy"], now, e["name"], e["conf"], pose=self.pose)   # 이름 아는 자리 → 바닥 후보로 또 안 봄
         r = t["req"]
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
-                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "ms": ms})))
+                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "extras": ext, "ms": ms})))
         self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(
@@ -324,7 +359,8 @@ class GlanceNode(Node):
             f"영상 {ms.get('frames')} (대기 {j['settle']:.2f} s, 받은 {len(j['pool'])} 장 중 {len(j['frames'])}) YOLO26 {ms.get('yolo26')}"
             + (f" YOLOE {ms['yoloe']}" if "yoloe" in ms else "")
             + (f" | 발자국 {len(foot)} 점, 폭 {self.width(foot) * 100:.0f} cm" if foot else "") + f" | 화면: {top(dets26[-1])}"
-            + (f" / E: {top(detsE[-1])}" if detsE else ""))
+            + (f" / E: {top(detsE[-1])}" if detsE else "")
+            + (" | 덤: " + ", ".join(f"{e['name']} {e['conf']:.2f} ({e['x']:+.2f}, {e['y']:+.2f}){' 잘림' if e['cut'] else ''}" for e in ext) if ext else ""))
         img = j["frames"][-1][0].copy()
         ov = img.copy()
         for ds, col in ((dets26[-1], (200, 200, 0)), (detsE[-1] if detsE else [], (200, 0, 200))):
@@ -336,6 +372,9 @@ class GlanceNode(Node):
                 cv2.putText(img, f"{n} {sc:.2f}", (int(bx), max(12, int(by) - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1)
         if best and best[3] is not None:
             ov[best[3]] = (0, 220, 0)
+        for e in ext:
+            bx, by, bw, bh = e["box"]
+            cv2.putText(img, "+" + e["name"], (bx, min(img.shape[0] - 24, by + bh + 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1)
         cs, _ = cv2.findContours(body.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(img, cs, -1, (160, 160, 160), 1)                # 로봇 몸 자리 (회색 선)
         img = cv2.addWeighted(ov, 0.4, img, 0.6, 0)

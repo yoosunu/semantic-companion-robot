@@ -9,6 +9,9 @@
         python3 tools/mac/export_yoloe.py "trash can" sock …   단어 직접
   Pi 로: scp models/yoloe-26s-seg-home.onnx jasper@<Pi>:~/models/
         → glance_node 에서 쓰기: INSPECT_ARGS="-p yoloe_model:=~/models/yoloe-26s-seg-home.onnx"
+  YOLO26 (COCO) 도 같은 형식으로 (11-19 기본 = s-seg 320):
+        cd models && python3 -c "from ultralytics import YOLO; YOLO('yolo26s-seg.pt').export(format='onnx', imgsz=320, nms=False)"
+        → 출력 (1,300,38) + (1,32,80,80) 인지 확인. (1,116,2100) 이면 nms=False 빠진 것
 """
 import os
 import shutil
@@ -34,7 +37,7 @@ def main():
         model.set_classes(words, model.get_text_pe(words))
     except (AttributeError, TypeError):
         model.set_classes(words)
-    out = model.export(format="onnx", imgsz=320)
+    out = model.export(format="onnx", imgsz=320, nms=False)   # 11-19: 새 ultralytics 는 기본이 (1,84,N) + NMS 필요 형식 → nms=False 로 Pi 형식 (1,300,38)
     dst = os.path.join(models, "yoloe-26s-seg-home.onnx")
     shutil.move(out, dst)
     print(f"단어 {len(words)}개 → {os.path.realpath(dst)}")
