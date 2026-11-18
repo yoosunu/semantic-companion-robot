@@ -5,7 +5,8 @@
   판단은 glance.py (순수, tests/glance_sim.py). v2 (11-18 실물 16 장 보고 Jasper 와):
     - 쿨다운 없음 → **새로운 것만** (Candidates 기억 켜져 있는 동안, 거리 비례 반경). 같은 쓰레기통 5 번 보던 문제
     - 멈춤 대기 = settle_base + 각도 × settle_per_deg (90° 면 ~0.8 s). 큰 각도에서 흐린 사진 (1·2·9·13) 문제
-    - **흐린 프레임 버림** (라플라시안 분산 < 평소의 sharp_ratio) + 멈춘 뒤 첫 장 버림 (자동 노출) → 선명한 frames (2) 장
+    - **흐린 프레임 버림** + 멈춘 뒤 첫 장 버림 (자동 노출) → 선명한 frames (2) 장. 11-19: 기준을 '평소' → **같은 장면에서 가장 선명한 것의
+      sharp_ratio (0.6)** 로 (glance.pick_sharp). 흰 벽 쪽은 원래 밋밋해서 전부 흐림 → 4 초 포기 7 번. 같은 자리 2 번 포기면 '?' 로 기억
     - **YOLO26 (COCO) 먼저** — chair·bed·cell phone·teddy bear 등은 COCO 가 더 잘 봄. 후보 자리에 coco_on 넘으면 끝.
       아니면 **YOLOE (COCO 에 없는 단어만)** — yoloe_on (0.25) 넘으면 이름, maybe (0.15) 넘으면 "이름?"
       (11-18 v4: 빈 바닥을 toy 0.18 로 = 오탐 → 0.15 → 0.25)
@@ -66,7 +67,8 @@ class GlanceNode(Node):
         super().__init__("glance")
         p = self.declare_parameter
         self.settle_base, self.settle_deg = p("settle_base", 0.35).value, p("settle_per_deg", 0.005).value
-        self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.5).value
+        self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.6).value
+        self.extra, self.max_fail = p("frames_extra", 3).value, p("max_fail", 2).value
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
         self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건 (마스크 없을 때)
@@ -81,7 +83,6 @@ class GlanceNode(Node):
         self.mode, self.prof_glance = "IDLE", None
         self.pose = (0.0, 0.0, 0.0)
         self.head_cmd, self.head_t = (0.0, 10.0), 0.0
-        self.sharp_hist = collections.deque(maxlen=40)       # 고개 멈춘 지 오래된 영상들의 선명도 (평소 값)
         self.job, self.next_id, self.end_t = None, 1, 0.0
         self.push = None
         port = p("stream_port", 0).value
@@ -146,7 +147,7 @@ class GlanceNode(Node):
         gid, self.next_id = self.next_id, self.next_id + 1
         turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
         self.job = {"id": gid, "cand": cand, "pan": round(pan, 1), "tilt": round(tilt, 1), "turn": turn,
-                    "settle": self.settle_base + self.settle_deg * turn, "t": {"req": now}, "frames": [], "skipped": 0}
+                    "settle": self.settle_base + self.settle_deg * turn, "t": {"req": now}, "frames": [], "pool": [], "skipped": 0}
         self.pub_req.publish(String(data="glance:" + json.dumps({"id": gid, "pan": round(pan, 1), "tilt": round(tilt, 1)})))
         self.get_logger().info(f"GLANCE #{gid} 요청: 후보 {cand['dist'] * 100:.0f} cm ({x:+.2f}, {y:+.2f}) {cand['hits']} 번 봄"
                                f"{' (가장자리)' if cand['edge'] else ''} → 고개 ({pan:+.0f}, {tilt:+.0f}), 돌 각도 {turn:.0f}°")
@@ -155,8 +156,6 @@ class GlanceNode(Node):
         now = time.time()
         j = self.job
         if not j:
-            if now - self.head_t > 1.5:                                 # 고개 오래 멈춤 → 평소 선명도 배우기
-                self.sharp_hist.append(sharpness(to_bgr(m)))
             return
         t = j["t"]
         if "mode" not in t:
@@ -176,19 +175,18 @@ class GlanceNode(Node):
         if self.mode != "GLANCE":
             self.give_up("힐끗 끝남 (사람·시간)")
             return
-        bgr = to_bgr(m)
-        sh = sharpness(bgr)
-        base = float(np.median(self.sharp_hist)) if len(self.sharp_hist) >= 5 else 0.0
         if "first" not in t:                                            # 멈춘 뒤 첫 장 버림 (자동 노출 바뀌는 중)
             t["first"] = now
             return
-        if base and sh < self.sharp_ratio * base:
-            j["skipped"] += 1                                           # 흐림 → 버리고 다음 장
-            return
-        j["frames"].append((bgr, sh))
-        if len(j["frames"]) >= self.n_frames:
-            t["frames"] = now
-            self.decide(j, base)
+        bgr = to_bgr(m)
+        j["pool"].append((bgr, sharpness(bgr)))
+        idx = gl.pick_sharp([s for _, s in j["pool"]], self.n_frames, self.sharp_ratio, self.extra)
+        if idx is None:
+            return                                                      # 이 장면에서 선명한 장이 모자람 → 다음 장
+        j["frames"] = [j["pool"][i] for i in idx]
+        j["skipped"] = len(j["pool"]) - len(idx)
+        t["frames"] = now
+        self.decide(j, max(s for _, s in j["pool"]))
 
     @staticmethod
     def width(foot):
@@ -197,7 +195,10 @@ class GlanceNode(Node):
         return float(max(np.hypot(*(a - b)) for a in f for b in f)) if len(f) > 1 else 0.0
 
     def give_up(self, why):
-        self.get_logger().warn(f"GLANCE #{self.job['id']} 포기: {why}")
+        j = self.job
+        gone = self.cands.fail(j["cand"]["wx"], j["cand"]["wy"], time.time(), pose=self.pose, limit=self.max_fail)
+        self.get_logger().warn(f"GLANCE #{j['id']} 포기: {why} (받은 장 {len(j['pool'])})"
+                               + (f" → 같은 자리 {self.max_fail} 번째: '?' 로 기억, 다시 안 봄" if gone else ""))
         self.job, self.end_t = None, time.time()
 
     # ---------- 이름 정하기 ----------
@@ -320,7 +321,7 @@ class GlanceNode(Node):
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(
             f"GLANCE #{j['id']} → {name} {conf:.2f} ({model}) | ms 사령관 {ms.get('mode')} 고개 {ms.get('head')} "
-            f"영상 {ms.get('frames')} (대기 {j['settle']:.2f} s, 흐림 버림 {j['skipped']}) YOLO26 {ms.get('yolo26')}"
+            f"영상 {ms.get('frames')} (대기 {j['settle']:.2f} s, 받은 {len(j['pool'])} 장 중 {len(j['frames'])}) YOLO26 {ms.get('yolo26')}"
             + (f" YOLOE {ms['yoloe']}" if "yoloe" in ms else "")
             + (f" | 발자국 {len(foot)} 점, 폭 {self.width(foot) * 100:.0f} cm" if foot else "") + f" | 화면: {top(dets26[-1])}"
             + (f" / E: {top(detsE[-1])}" if detsE else ""))

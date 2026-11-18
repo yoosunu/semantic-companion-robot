@@ -27,6 +27,21 @@ def to_robot(pose, wx, wy):
     return dx * c + dy * s, -dx * s + dy * c
 
 
+def pick_sharp(shs, n=2, ratio=0.6, extra=3):
+    """같은 고개 자세에서 받은 프레임 선명도들 (시간 순) → 쓸 프레임 번호 n 개 (시간 순) 또는 None (더 기다림).
+       기준 = **이 장면에서** 가장 선명한 것의 ratio 이상. 11-19: '평소 선명도' (다른 장면) 와 비교하니 흰 벽 쪽은
+       원래 밋밋해서 전부 흐림 판정 → 4 초 포기 7 번. 판단 전에 n+1 장은 받음 (둘 다 흔들린 장면이면 셋째가 드러냄).
+       n + extra 장 받았는데도 모자라면 가장 선명한 n 장"""
+    if len(shs) < n + 1:
+        return None
+    top = max(shs)
+    ok = [i for i, s in enumerate(shs) if s >= ratio * top]
+    if len(ok) < n and len(shs) < n + extra:
+        return None
+    pool = ok if len(ok) >= n else range(len(shs))
+    return sorted(sorted(pool, key=lambda i: -shs[i])[:n])
+
+
 def head_for(x, y, tilt_min=-30.0, tilt_max=30.0):
     """로봇 좌표 바닥 점 (m) → (팬°, 틸트°) 명령. 팬 + = 오른쪽 (/pantilt/cmd)"""
     dx = x - ground.PAN_X
@@ -50,6 +65,7 @@ class Candidates:
         self.memory_s, self.max_dist = memory_s, max_dist
         self.tracks = []                     # {"x","y","hits","miss","last","area","edge"} 세상 좌표
         self.seen = []                       # (x, y, t, 이름, 점수)
+        self.fails = []                      # [x, y, 실패 수] 힐끗 갔는데 영상 못 얻은 자리 (11-19)
 
     def radius(self, pose, wx, wy):
         x, y = to_robot(pose, wx, wy)
@@ -59,6 +75,21 @@ class Candidates:
         self.seen.append((wx, wy, now, name, conf))
         r = self.radius(pose, wx, wy) if pose else self.match
         self.tracks = [t for t in self.tracks if math.hypot(t["x"] - wx, t["y"] - wy) >= r]
+
+    def fail(self, wx, wy, now, pose=None, limit=2):
+        """힐끗 실패 (고개는 갔는데 영상을 못 얻고 포기) — 같은 자리 limit 번째면 '?' 로 기억하고 True.
+           11-19 실물: 흰 벽 쪽 후보를 4 초 포기 → 1 초 뒤 또 요청, 7 번 반복. Jasper: 2 번 봤는데 모르면 모르는 게 맞음"""
+        r = self.radius(pose, wx, wy) if pose else self.match
+        f = next((f for f in self.fails if math.hypot(f[0] - wx, f[1] - wy) < r), None)
+        if f is None:
+            f = [wx, wy, 0]
+            self.fails.append(f)
+        f[2] += 1
+        if f[2] < limit:
+            return False
+        self.fails.remove(f)
+        self.remember(wx, wy, now, "?", 0.0, pose)
+        return True
 
     def known(self, wx, wy, now, pose=None):
         self.seen = [s for s in self.seen if now - s[2] < self.memory_s]

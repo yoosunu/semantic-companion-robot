@@ -99,5 +99,23 @@ check("7 몸 자리: −30 에서 LiDAR 아래 가운데 (위 끝 y 320~380), �
       len(col) and 320 <= col.min() <= 380 and not b[:240].any() and b0.mean() < 0.03,
       (int(col.min()) if len(col) else None, round(float(b0.mean()), 3)))
 
+# 8. 흐림: 같은 장면 안에서 비교 (11-19 흰 벽: 선명도가 원래 1200 대 → 예전엔 '평소 2471' 의 절반 못 넘어 전부 버림)
+wall = gl.pick_sharp([1250, 1266, 1240], 2, 0.6, 3)
+shake = [gl.pick_sharp([300, 1300], 2, 0.6, 3), gl.pick_sharp([300, 1300, 1280], 2, 0.6, 3)]
+def stream(shs):                                                         # 한 장씩 들어올 때 처음 정해지는 순간
+    return next((r for k in range(1, len(shs) + 1) if (r := gl.pick_sharp(shs[:k], 2, 0.6, 3)) is not None), None)
+dull = stream([400, 2000, 450, 420, 430])
+check("8 흐림: 밋밋한 장면도 통과 / 흔들린 첫 장은 기다렸다 버림 / 하나만 튀면 5 장째에 가장 선명한 2 장",
+      wall == [0, 1] and shake == [None, [1, 2]] and dull == [1, 2], (wall, shake, dull))
+
+# 9. 같은 자리 2 번 포기 → '?' 로 기억 → 다시 후보 안 됨 (11-19: 같은 곳 7 번 요청)
+c = gl.Candidates()
+first = c.fail(0.5, 0.7, 1.0, pose=(0, 0, 0))
+second = c.fail(0.52, 0.71, 6.0, pose=(0, 0, 0))
+again = [c.step(10 + k * 0.5, (0, 0, 0), [(0.5, 0.7, 300)]) for k in range(3)]
+other = c.fail(-0.5, 0.2, 7.0, pose=(0, 0, 0))
+check("9 포기 2 번 → '?' 기억, 다시 안 봄 (다른 자리는 따로 셈)", not first and second and all(a is None for a in again) and not other
+      and c.known(0.5, 0.7, 11, pose=(0, 0, 0))[3] == "?", (first, second))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
