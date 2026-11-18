@@ -38,6 +38,7 @@ class Look(Node):
         super().__init__("look_at_person")
         p = self.declare_parameter
         self.led = p("led", False).value
+        look_brain.SCAN_ON = p("scan", True).value               # 11-18: false = 아무도 없을 때 두리번 안 함 (힐끗만 보이게 시험할 때)
         self.brain = look_brain.Brain()
         self.head = "free"                                        # executive 설정표의 head 칸
         self.prof = {}                                            # 설정표 전체 (nods·wake·stir)

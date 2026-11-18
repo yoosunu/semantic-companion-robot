@@ -279,5 +279,12 @@ check("24b 힐끗 중 사람 트리거는 알림 (contact)", any(20 <= tt < 22 a
 check("24c 끝나면 힐끗 전 자세로", back and abs(back[0][1][1] - before[1]) < 0.01 and abs(back[0][1][2] - before[2]) < 0.01,
       (before, back))
 
+# 25. 두리번 끄기 (시험용): 아무도 없어도 안 움직임 (시작 정면 이동만)
+lb.SCAN_ON = False
+b, log = run(lambda t: [], 40)
+lb.SCAN_ON = True
+mv = [t for t, m, _, a in log for x in a if x[0] == "move"]
+check("25 scan 끄면 두리번 안 함", len(mv) == 1 and mv[0] == 0.0, mv)
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

@@ -57,7 +57,8 @@ CALM_DPS, SCAN_DPS, CALM_ACC = 60.0, 45.0, 10   # 딴짓·두리번 속도 (°/s
 FINE, FINE_WAIT = 3.0, 1.2           # 눈맞춤 다듬기: 오차 3° 넘고, 마지막 이동 뒤 1.2 s
 SCAN_AFTER = 5.0
 SCAN_EVERY = (6.0, 14.0)            # 11-12 Jasper: 4~7 s 는 너무 두리번거림
-SCAN_PANS = (-60.0, -30.0, 0.0, 30.0, 60.0)   # 11-17: ±70 → ±60 (소리·이동 시간)
+SCAN_PANS = (-60.0, -30.0, 0.0, 30.0, 60.0)
+SCAN_ON = True                       # False = 아무도 없을 때 두리번 안 함 (11-18: 힐끗 시험 때 헷갈려서. look_at_person -p scan:=false)   # 11-17: ±70 → ±60 (소리·이동 시간)
 LOST_S = 2.0
 CONTACT_IN, CONTACT_OUT = 20.0, 35.0
 CONTACT_AWAY_S = 2.0                 # 이만큼 딴 데 봐야 다음 contact 인정
@@ -331,7 +332,7 @@ class Brain:
         elif self.mode == "scan":
             if visible:
                 self.attend(out, now, "found", max(visible, key=lambda p: p["px"]))
-            elif now - self.seen_t > SCAN_AFTER and now > self.until:
+            elif SCAN_ON and now - self.seen_t > SCAN_AFTER and now > self.until:
                 self.until = now + self.rng.uniform(*SCAN_EVERY)
                 choices = [x for x in SCAN_PANS if abs(x - self.pan) > 20.0]
                 self.calm(out, now, self.rng.choice(choices), self.rng.uniform(5.0, 25.0), SCAN_DPS, settle=1.0)

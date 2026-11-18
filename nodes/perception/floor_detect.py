@@ -18,6 +18,7 @@ import numpy as np
 import ground
 
 W = 320                                   # 계산 폭
+BODY_X, BODY_Y = 0.126 + 0.05, 0.115 + 0.05   # 로봇 몸 (차체 반길이·반폭 + 5 cm). 이 바닥 자리는 안 봄 (11-18 실물: 고개 −30 에서 자기 앞부분을 후보로)
 
 
 class FloorDetect:
@@ -44,11 +45,18 @@ class FloorDetect:
         fl = ground.pixels_to_floor(px, self.K, self.D, pan, tilt)
         d = np.hypot(fl[:, 0], fl[:, 1]).reshape(h, w)
         self.dist = d
-        self.valid = np.isfinite(d) & (d < self.max_range)
+        body = ((np.abs(fl[:, 0]) < BODY_X) & (np.abs(fl[:, 1]) < BODY_Y)).reshape(h, w)   # 11-18: 고개 숙이면 자기 앞부분이 찍힘
+        self.valid = np.isfinite(d) & (d < self.max_range) & ~body
 
     def ref_box(self, h, w):
-        """기준 바닥 칸: 화면 아래 가운데 (맨 아래 8% 는 로봇 몸·글씨 가능성 → 뺌)"""
-        return int(h * 0.80), int(h * 0.92), int(w * 0.35), int(w * 0.65)
+        """기준 바닥 칸: 화면 아래 가운데 (맨 아래 8% 는 로봇 몸·글씨 가능성 → 뺌).
+           11-18: 고개를 많이 숙이면 그 칸이 로봇 몸 자리 → 진짜 바닥인 가장 낮은 칸까지 위로 올림"""
+        x0, x1 = int(w * 0.35), int(w * 0.65)
+        for top in np.arange(0.80, 0.30, -0.04):
+            y0, y1 = int(h * top), int(h * (top + 0.12))
+            if self.valid is None or self.valid[y0:y1, x0:x1].mean() > 0.9:
+                return y0, y1, x0, x1
+        return int(h * 0.80), int(h * 0.92), x0, x1
 
     def step(self, bgr, pan, tilt):
         """→ (blobs, odd_ref, mask 작은 크기)

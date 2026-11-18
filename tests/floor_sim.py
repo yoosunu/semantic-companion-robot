@@ -75,5 +75,15 @@ for k in range(8):
 b, _, _ = one.step(frame([], 9, glare=True), PAN, TILT)
 check("6c (비교) 기준 하나면 먼 바닥이 띠로 잡힘", len(b) >= 1, [(round(x["near"], 2), x["area"]) for x in b])
 
+# 7. 로봇 몸 자리 (11-18 실물: 고개 −30 에서 자기 앞부분을 후보로): 몸 둘레 + 5 cm 안 물건은 안 봄, 그 밖은 봄
+PAN, TILT = 0.0, -30.0
+fd = floor_detect.FloorDetect(K, D, (640, 480))
+for k in range(8):
+    fd.step(frame([], k), PAN, TILT)
+b_in, _, _ = fd.step(frame([(0.10, 0.17, -0.06, 0.06)], 9), PAN, TILT)
+b_out, _, _ = fd.step(frame([(0.30, 0.38, -0.06, 0.06)], 10), PAN, TILT)
+check("7 몸 자리 안은 안 봄 / 밖 0.30 m 는 봄", not [x for x in b_in if x["near"] < 0.2] and len(b_out) == 1 and abs(b_out[0]["near"] - 0.30) < 0.03,
+      ([round(x["near"], 2) for x in b_in], [round(x["near"], 3) for x in b_out]))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

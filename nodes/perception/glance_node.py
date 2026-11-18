@@ -3,12 +3,14 @@
   (처음 이름 inspect.py 는 파이썬 기본 모듈 inspect 를 가려서 같은 폴더 노드가 다 죽음 → 바꿈)
 
   판단은 glance.py (순수, tests/glance_sim.py). v2 (11-18 실물 16 장 보고 Jasper 와):
-    - 쿨다운 없음 → **새로운 것만** (Candidates 기억 30 분, 거리 비례 반경). 같은 쓰레기통 5 번 보던 문제
+    - 쿨다운 없음 → **새로운 것만** (Candidates 기억 켜져 있는 동안, 거리 비례 반경). 같은 쓰레기통 5 번 보던 문제
     - 멈춤 대기 = settle_base + 각도 × settle_per_deg (90° 면 ~0.8 s). 큰 각도에서 흐린 사진 (1·2·9·13) 문제
     - **흐린 프레임 버림** (라플라시안 분산 < 평소의 sharp_ratio) + 멈춘 뒤 첫 장 버림 (자동 노출) → 선명한 frames (2) 장
     - **YOLO26 (COCO) 먼저** — chair·bed·cell phone·teddy bear 등은 COCO 가 더 잘 봄. 후보 자리에 coco_on 넘으면 끝.
       아니면 **YOLOE (COCO 에 없는 단어만)** — yoloe_on (0.15) 넘으면 이름, maybe (0.08) 넘으면 "이름?"
-    - 이름 맞추기: 후보 점 (화면) 이 상자 안 (여유 margin px) — 바닥 좌표 비교는 1 m 넘으면 오차가 커서 (7 번 발닦개) 바꿈
+    - 이름 맞추기: 후보 점 (화면) 이 상자 **아래쪽 35%** 안 (여유 margin px), 같은 이름이면 작은 상자 — 바닥 좌표 비교는 1 m 넘으면
+      오차가 커서 (7 번 발닦개) 바꿈, 상자 전체로 하면 큰 침대가 앞 빈 바닥까지 가져감 (v2 9 번)
+    - 본 곳은 켜져 있는 동안 계속 기억 (Jasper: 30 분일 이유 없음). 물건이 옮겨진 건 나중에 지도 이름표 층에서
     - 상자 투표·다듬기: 같은 이름이 2 장에서 → 평균 점수·평균 상자. 한 장에서만 튄 건 버림
     - 가운데에서 본 상자 아래 끝 → 위치를 다시 계산해 기억 (가장자리에 걸쳤던 후보도 여기서 정확해짐)
   입력  floor/blobs, neri/profile, pantilt/cmd, camera/image_raw, odom
@@ -61,11 +63,12 @@ class GlanceNode(Node):
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.5).value
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.15).value, p("maybe", 0.08).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
+        self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건
         self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26n.onnx").value), size=320, conf=0.2)
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
         self.K, self.D, self.size = ground.load_calib()
-        self.cands = gl.Candidates(max_dist=p("max_dist", 1.2).value)
+        self.cands = gl.Candidates(max_dist=p("max_dist", 1.2).value, memory_s=float("inf"))   # 11-18 Jasper: 켜져 있는 동안 계속 기억
         self.mode, self.prof_glance = "IDLE", None
         self.pose = (0.0, 0.0, 0.0)
         self.head_cmd, self.head_t = (0.0, 10.0), 0.0
@@ -194,9 +197,13 @@ class GlanceNode(Node):
             for name, sc, bx, by, bw, bh in dets:
                 if words is not None and name not in words:
                     continue
-                if bx - self.margin <= cpx[0] <= bx + bw + self.margin and by - self.margin <= cpx[1] <= by + bh + self.margin:
-                    if sc > got.get(name, (0,))[0]:
-                        got[name] = (sc, (bx, by, bw, bh))
+                # 후보 점 = 물건이 바닥에 닿은 곳 → 상자 **아래쪽 끝 근처** 여야 그 물건 (11-18 9번: 큰 침대 상자가 앞 빈 바닥까지 가져감)
+                low = by + bh * (1 - self.bottom)
+                if bx - self.margin <= cpx[0] <= bx + bw + self.margin and low - self.margin <= cpx[1] <= by + bh + self.margin:
+                    area = bw * bh
+                    if name not in got or area < got[name][2]:       # 같은 이름이면 작은 상자 (더 정확히 감싼 것)
+                        got[name] = (sc, (bx, by, bw, bh), area)
+            got = {k: (v[0], v[1]) for k, v in got.items()}
             for name, v in got.items():
                 per[name].append(v)
         need = min(2, len(frames))
