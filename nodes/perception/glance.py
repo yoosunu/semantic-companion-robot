@@ -6,7 +6,7 @@
          세상 x = X + x·cosθ − y·sinθ,  세상 y = Y + x·sinθ + y·cosθ
        → 로봇이 움직여도 같은 물건은 세상 좌표에서 같은 자리 (11-18 Jasper: "로봇 좌표는 움직이고 odom 은 그대로")
     2. Candidates: 세상 좌표에서 같은 자리 (거리 비례 반경, 최소 30 cm) need (2) 번 → "진짜 후보". 보여야 하는데 안 보이면 miss.
-       이미 본 곳 (30 분) 은 다시 안 봄 = 쿨다운 대신 "새로운 것만" (11-18 v2). 로봇에서 max_dist (1.2 m) 넘으면 안 봄
+       이미 본 곳 (켜져 있는 동안) 은 다시 안 봄 = 쿨다운 대신 "새로운 것만" (11-18 v2). 로봇에서 max_dist (1.2 m) 넘으면 안 봄
     3. head_for: 바닥 점이 화면 가운데 오게 하는 고개 명령 (팬, 틸트) — ground.py 의 카메라 위치·틸트 0점 그대로
 """
 import math
@@ -43,9 +43,9 @@ class Candidates:
          고개 각도마다 "바닥 닿은 점" 이 20~30 cm 흔들림 (11-18 사진 3·5·8·10·15·16 = 같은 쓰레기통)
        - 사라짐: **보여야 하는데 (visible(x, y)) 안 잡히면** miss. 고개를 돌려 화면 밖이면 안 셈. miss 2 번 연속이면 지움
        - 가장자리에 걸친 덩어리 (edge) 도 후보 — 힐끗해서 가운데에서 다시 본 위치로 기억을 고쳐 씀 (refine)
-       - 본 곳 기억: memory_s (30 분), 반경 같은 규칙. 기억할 때 근처 추적도 같이 정리"""
+       - 본 곳 기억: 켜져 있는 동안 계속 (11-18 Jasper: "그냥 안 보게". 옮겨진 물건은 나중에 지도 이름표 층에서), 반경 같은 규칙"""
 
-    def __init__(self, match=0.30, rel=0.25, need=2, max_miss=2, max_age=10.0, memory_s=1800.0, max_dist=1.2):
+    def __init__(self, match=0.30, rel=0.25, need=2, max_miss=2, max_age=10.0, memory_s=float("inf"), max_dist=1.2):
         self.match, self.rel, self.need, self.max_miss, self.max_age = match, rel, need, max_miss, max_age
         self.memory_s, self.max_dist = memory_s, max_dist
         self.tracks = []                     # {"x","y","hits","miss","last","area","edge"} 세상 좌표

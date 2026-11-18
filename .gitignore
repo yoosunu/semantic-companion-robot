@@ -32,3 +32,4 @@ docs/portfolio.md
 # 모델 파일 (크기 큼, Pi 로는 scp)
 models/
 *.onnx
+*.pt

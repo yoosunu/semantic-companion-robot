@@ -3,7 +3,8 @@
 
   원칙 (11-18 Jasper): COCO 80 종류에 있는 건 YOLO26 이 더 잘 봄 → 여기는 **COCO 에 없는 집 물건만**.
     (핸드폰 = cell phone, 강아지 인형 = teddy bear, 의자·침대·소파·책·컵·병·가방·리모컨·노트북은 COCO)
-  필요: pip install ultralytics  (처음 실행 때 yoloe-26s-seg.pt 와 글자 모델을 받음)
+  필요: ultralytics + CLIP (11-18 Mac Homebrew 파이썬: python3 -m pip install --break-system-packages "git+https://github.com/ultralytics/CLIP.git")
+        처음 실행 때 yoloe-26s-seg.pt 와 글자 모델을 models/ 에 받음
   쓰기: python3 tools/mac/export_yoloe.py                → models/yoloe-26s-seg-home.onnx (320)
         python3 tools/mac/export_yoloe.py "trash can" sock …   단어 직접
   Pi 로: scp models/yoloe-26s-seg-home.onnx jasper@<Pi>:~/models/
@@ -25,15 +26,16 @@ WORDS = [
 def main():
     from ultralytics import YOLOE
     words = sys.argv[1:] or WORDS
+    models = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "models"))
+    os.makedirs(models, exist_ok=True)
+    os.chdir(models)                          # .pt·글자 모델은 models/ 에 받음 (gitignore — 저장소 맨 위에 받으면 커밋 위험)
     model = YOLOE("yoloe-26s-seg.pt")
     try:
         model.set_classes(words, model.get_text_pe(words))
     except (AttributeError, TypeError):
         model.set_classes(words)
     out = model.export(format="onnx", imgsz=320)
-    here = os.path.dirname(os.path.abspath(__file__))
-    dst = os.path.join(here, "..", "..", "models", "yoloe-26s-seg-home.onnx")
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    dst = os.path.join(models, "yoloe-26s-seg-home.onnx")
     shutil.move(out, dst)
     print(f"단어 {len(words)}개 → {os.path.realpath(dst)}")
 

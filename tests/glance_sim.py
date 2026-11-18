@@ -43,7 +43,7 @@ check("2 움직이며 같은 자리 2 번 → 후보 (깜빡인 건 아님)", ou
 c.remember(out[1]["wx"], out[1]["wy"], 1.0, "doormat", 0.8, pose=(1.0, 0, 0))
 again = c.step(2.0, (1.2, 0, 0), [gl.to_robot((1.2, 0, 0), 1.5, 0.1) + (300,)])
 later = [c.step(2000 + k * 0.5, (1.2, 0, 0), [gl.to_robot((1.2, 0, 0), 1.5, 0.1) + (300,)]) for k in range(2)]
-check("3 본 곳 기억 30 분", again is None and later[-1] is not None)
+check("3 본 곳은 계속 기억 (오래 지나도 안 봄)", again is None and later[-1] is None)
 
 # 3b. 쓰레기통 (11-18 실물): 고개 각도마다 바닥 닿은 점이 25 cm 흔들려도 같은 것 — 한 번 보면 다시 안 봄
 import random as _r
