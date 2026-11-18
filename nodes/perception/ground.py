@@ -66,10 +66,16 @@ def pixels_to_floor(px, K, D, pan_deg, tilt_deg):
 
 def floor_to_pixels(pts, K, D, pan_deg, tilt_deg):
     """pts: N×2 바닥 (x, y) m → N×2 픽셀 (카메라 뒤면 nan)"""
-    import cv2
     pts = np.asarray(pts, float).reshape(-1, 2)
+    return points_to_pixels(np.column_stack([pts, np.zeros(len(pts))]), K, D, pan_deg, tilt_deg)
+
+
+def points_to_pixels(pts, K, D, pan_deg, tilt_deg):
+    """pts: N×3 로봇 좌표 (x, y, z) m → N×2 픽셀 (카메라 뒤면 nan). 바닥 위에 떠 있는 점 (로봇 몸 등) 용"""
+    import cv2
+    pts = np.asarray(pts, float).reshape(-1, 3)
     R, t = cam_pose(pan_deg, tilt_deg)
-    P = np.column_stack([pts, np.zeros(len(pts))]) - t
+    P = pts - t
     cam = P @ R                                                          # 로봇 → 카메라 (R 의 전치)
     out = np.full((len(cam), 2), np.nan)
     front = cam[:, 2] > 0.02
@@ -77,3 +83,36 @@ def floor_to_pixels(pts, K, D, pan_deg, tilt_deg):
         img, _ = cv2.fisheye.projectPoints(cam[front].reshape(-1, 1, 3), np.zeros(3), np.zeros(3), K, D)
         out[front] = img.reshape(-1, 2)
     return out
+
+
+# 로봇 몸 (11-19): 상자 여러 개 — 하나로 크게 잡으면 꼭대기가 렌즈 높이 (22 cm) 근처라 화면 절반을 덮음.
+#   차체: 반길이 0.126·반폭 0.115 + 여유 1.5 cm, 높이 CHASSIS_H 6 cm (11-19 사진 #1·#2 에 맞춤 — 7 cm 면 몸 위 바닥까지, 줄자로 확인 필요)
+#   LiDAR: 중심 x LASER_X, 지름 5.6 cm + 여유, 윗면 17.5 cm (#3 사진: 윗면 앞 끝이 y≈350 → 17.5 와 맞음)
+CHASSIS_H = 0.06
+BODY_BOXES = (((-0.141, 0.141), (-0.130, 0.130), (0.0, CHASSIS_H)),
+              ((LASER_X - 0.033, LASER_X + 0.033), (-0.033, 0.033), (0.0, 0.175)))
+
+
+def body_mask(K, D, pan_deg, tilt_deg, w, h, boxes=BODY_BOXES, step=0.01):
+    """고개 자세에서 화면에 보이는 로봇 몸 자리 (w×h bool). 상자 겉면을 1 cm 칸으로 나눠 칸마다 픽셀 사각형을 칠함.
+       (전체를 감싸는 다각형 하나로 하면 어안 가장자리 점들 때문에 몸 위의 바닥까지 덮음 — 11-19 시험)
+       11-19: YOLO26-seg 가 몸통을 suitcase 0.33, LiDAR 를 chair 0.26 으로 봄 → 이 자리에 대부분 걸친 마스크는 버림"""
+    import cv2
+    m = np.zeros((h, w), np.uint8)
+    for (x0, x1), (y0, y1), (z0, z1) in boxes:
+        def grid(a0, a1, b0, b1):
+            return np.meshgrid(np.linspace(a0, a1, max(2, int(round((a1 - a0) / step)) + 1)),
+                               np.linspace(b0, b1, max(2, int(round((b1 - b0) / step)) + 1)))
+        faces = []
+        for x in (x0, x1):
+            Y, Z = grid(y0, y1, z0, z1); faces.append(np.stack([np.full_like(Y, x), Y, Z], -1))
+        for y in (y0, y1):
+            X, Z = grid(x0, x1, z0, z1); faces.append(np.stack([X, np.full_like(X, y), Z], -1))
+        X, Y = grid(x0, x1, y0, y1); faces.append(np.stack([X, Y, np.full_like(X, z1)], -1))   # 바닥면 (z0) 은 안 보임
+        for f in faces:
+            px = points_to_pixels(f.reshape(-1, 3), K, D, pan_deg, tilt_deg).reshape(f.shape[0], f.shape[1], 2)
+            quads = np.stack([px[:-1, :-1], px[:-1, 1:], px[1:, 1:], px[1:, :-1]], 2).reshape(-1, 4, 2)
+            quads = quads[np.isfinite(quads).all((1, 2))]
+            for q in quads:
+                cv2.fillConvexPoly(m, np.round(q).astype(np.int32), 1)
+    return m.astype(bool)

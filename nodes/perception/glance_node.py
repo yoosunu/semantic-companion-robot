@@ -11,6 +11,9 @@
       (11-18 v4: 빈 바닥을 toy 0.18 로 = 오탐 → 0.15 → 0.25)
     - v4 마스크 (YOLOE 는 seg 모델): 이름은 **후보 십자가 마스크 위 (여유 mask_px)** 일 때. 마스크 아래 윤곽 → ground.py → **바닥 발자국**
       (위에서 본 모양) → 위치 = 발자국에서 로봇에 제일 가까운 점, semantic/seen 에 발자국 점들. YOLO26 (마스크 없음) 은 상자 아래 35%
+    - v5 (11-19): YOLO26 도 seg (yolo26n-seg) → COCO 도 마스크로 이름 (#4 책상 밑 쓰레기통을 큰 chair 상자가 가져감).
+      **자기 몸 거르기**: ground.body_mask (차체·LiDAR 상자를 고개 자세로 화면에 그림) 에 마스크가 body_frac (0.5) 이상 걸치면 버림
+      (몸통 suitcase 0.33 → 96 %, LiDAR chair 0.26 → 100 %, 진짜 물건 0 %). **원본 프레임 저장** ~/glance_log/raw/ (+ json) → 오프라인 시뮬용
     - 이름 맞추기: 후보 점 (화면) 이 상자 **아래쪽 35%** 안 (여유 margin px), 같은 이름이면 작은 상자 — 바닥 좌표 비교는 1 m 넘으면
       오차가 커서 (7 번 발닦개) 바꿈, 상자 전체로 하면 큰 침대가 앞 빈 바닥까지 가져감 (v2 9 번)
     - 본 곳은 켜져 있는 동안 계속 기억 (Jasper: 30 분일 이유 없음). 물건이 옮겨진 건 나중에 지도 이름표 층에서
@@ -68,7 +71,9 @@ class GlanceNode(Node):
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
         self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건 (마스크 없을 때)
         self.mask_px = p("mask_px", 15).value               # 후보 점이 마스크에서 이만큼 안이면 그 물건 (마스크 있을 때)
-        self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26n.onnx").value), size=320, conf=0.2)
+        self.body_frac = p("body_frac", 0.5).value          # 마스크 (없으면 상자) 가 로봇 몸 자리에 이 비율 이상이면 자기 몸 → 버림
+        self.body_cache = {}
+        self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26n-seg.onnx").value), size=320, conf=0.2)
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
         self.K, self.D, self.size = ground.load_calib()
@@ -196,7 +201,24 @@ class GlanceNode(Node):
         self.job, self.end_t = None, time.time()
 
     # ---------- 이름 정하기 ----------
-    def vote(self, model, words, frames, cpx, on):
+    def body(self, pan, tilt, h, w):
+        """고개 자세별 로봇 몸 자리 (한 번 계산 ~5 ms 후 기억)"""
+        k = (round(pan, 1), round(tilt, 1), h, w)
+        if k not in self.body_cache:
+            self.body_cache[k] = ground.body_mask(self.K, self.D, pan, tilt, w, h)
+        return self.body_cache[k]
+
+    def is_body(self, d, body):
+        if len(d) > 6:
+            m = d[6]
+        else:
+            m = np.zeros_like(body)
+            x, y, w, h = (int(round(v)) for v in d[2:6])
+            m[max(0, y):y + h, max(0, x):x + w] = True
+        n = m.sum()
+        return n > 0 and (m & body).sum() >= self.body_frac * n
+
+    def vote(self, model, words, frames, cpx, on, body=None):
         """프레임마다 후보 점 (cpx) 이 그 물건인 검출 → 이름별 [(점수, 상자, 마스크)]. 2 장 (또는 받은 장 수) 에서 나온 이름 중 평균 점수 최고.
            마스크가 있으면 (YOLOE seg): 후보 점에서 마스크까지 거리 ≤ mask_px. 없으면 (YOLO26): 상자 아래쪽 bottom_frac 안"""
         per = collections.defaultdict(list)
@@ -204,6 +226,8 @@ class GlanceNode(Node):
         cx, cy = int(round(cpx[0])), int(round(cpx[1]))
         for bgr, _ in frames:
             dets = model.detect(bgr, masks=True)
+            if body is not None:
+                dets = [d for d in dets if not self.is_body(d, body)]        # 자기 몸 (몸통·LiDAR) 은 처음부터 뺌
             alldet.append(dets)
             got = {}
             for d in dets:
@@ -250,11 +274,19 @@ class GlanceNode(Node):
         t, now = j["t"], time.time()
         cx, cy = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
         cpx = ground.floor_to_pixels([[cx, cy]], self.K, self.D, j["pan"], j["tilt"])[0]
-        best, dets26 = self.vote(self.yolo26, None, j["frames"], cpx, self.coco_on)
+        h, w = j["frames"][0][0].shape[:2]
+        body = self.body(j["pan"], j["tilt"], h, w)
+        stem = time.strftime("%m%d_%H%M%S") + f"_{j['id']}"
+        os.makedirs(os.path.join(OUT, "raw"), exist_ok=True)              # 원본 (그림 없음) → 오프라인 시뮬
+        for k, (bgr, _) in enumerate(j["frames"]):
+            cv2.imwrite(os.path.join(OUT, "raw", f"{stem}_{k}.jpg"), bgr)
+        json.dump({"id": j["id"], "pan": j["pan"], "tilt": j["tilt"], "cpx": [float(v) for v in cpx], "cand": j["cand"],
+                   "pose": list(self.pose)}, open(os.path.join(OUT, "raw", stem + ".json"), "w"), default=float)
+        best, dets26 = self.vote(self.yolo26, None, j["frames"], cpx, self.coco_on, body)
         t["yolo26"] = time.time()
         model, detsE = "yolo26", []
         if not best or best[1] < self.coco_on:
-            bestE, detsE = self.vote(self.yoloe, set(self.yoloe_words), j["frames"], cpx, self.yoloe_on)
+            bestE, detsE = self.vote(self.yoloe, set(self.yoloe_words), j["frames"], cpx, self.yoloe_on, body)
             t["yoloe"] = time.time()
             if bestE and bestE[1] >= self.maybe and (not best or bestE[1] >= best[1] * 0.5):
                 best, model = bestE, "yoloe"
@@ -303,6 +335,8 @@ class GlanceNode(Node):
                 cv2.putText(img, f"{n} {sc:.2f}", (int(bx), max(12, int(by) - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1)
         if best and best[3] is not None:
             ov[best[3]] = (0, 220, 0)
+        cs, _ = cv2.findContours(body.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img, cs, -1, (160, 160, 160), 1)                # 로봇 몸 자리 (회색 선)
         img = cv2.addWeighted(ov, 0.4, img, 0.6, 0)
         if best:
             bx, by, bw, bh = best[2]
@@ -311,7 +345,7 @@ class GlanceNode(Node):
             cv2.drawMarker(img, (int(cpx[0]), int(cpx[1])), (0, 0, 255), cv2.MARKER_CROSS, 18, 2)
         cv2.putText(img, f"#{j['id']} {name} {conf:.2f} {model}  {ms.get('yoloe', ms.get('yolo26'))} ms  sharp {j['frames'][-1][1]:.0f}/{base:.0f}",
                     (6, img.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.imwrite(os.path.join(OUT, time.strftime("%m%d_%H%M%S") + f"_{j['id']}_{name.replace(' ', '_').replace('?', 'q')}.jpg"), img)
+        cv2.imwrite(os.path.join(OUT, stem + f"_{name.replace(' ', '_').replace('?', 'q')}.jpg"), img)
         if self.push:
             self.push(img)
         self.job, self.end_t = None, time.time()

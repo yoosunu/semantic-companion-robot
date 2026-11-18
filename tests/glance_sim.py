@@ -83,5 +83,21 @@ for x, y in [(0.5, 0.0), (0.8, 0.3), (0.6, -0.4), (1.0, 0.0), (0.4, 0.2)]:
     errs.append((round(pan), round(tilt), round(px[0] - K[0, 2]), round(px[1] - K[1, 2])))
 check("5 head_for: 점이 화면 가운데", all(abs(e[2]) <= 15 and (abs(e[3]) <= 40 or e[1] == -30) for e in errs), errs)
 
+# 6. 3D → 픽셀 (11-19): 바닥 점은 예전 floor_to_pixels 와 같고, 바닥 → 픽셀 → 바닥 왕복
+fl = np.array([[0.5, 0.1], [0.9, -0.3], [0.4, 0.25]])
+px = ground.floor_to_pixels(fl, K, D, -20, -15)
+back = ground.pixels_to_floor(px, K, D, -20, -15)
+p3 = ground.points_to_pixels(np.column_stack([fl, np.zeros(3)]), K, D, -20, -15)
+check("6 바닥 ↔ 픽셀 왕복 (1 mm), 3D 함수와 같음", np.abs(back - fl).max() < 1e-3 and np.abs(p3 - px).max() < 1e-9,
+      round(float(np.abs(back - fl).max() * 1000), 3))
+
+# 7. 자기 몸 자리 (11-19 사진 #3: 고개 −12, −30 → LiDAR 가 화면 아래 가운데, 윗면 앞 끝 y≈350)
+b = ground.body_mask(K, D, -12, -30, 640, 480)
+b0 = ground.body_mask(K, D, 0, 0, 640, 480)
+col = np.nonzero(b[:, 380])[0]
+check("7 몸 자리: −30 에서 LiDAR 아래 가운데 (위 끝 y 320~380), 위 절반 없음 / 고개 0 이면 거의 없음",
+      len(col) and 320 <= col.min() <= 380 and not b[:240].any() and b0.mean() < 0.03,
+      (int(col.min()) if len(col) else None, round(float(b0.mean()), 3)))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
