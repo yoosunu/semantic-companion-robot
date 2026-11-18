@@ -26,8 +26,10 @@ class Yolo:
         meta = self.sess.get_modelmeta().custom_metadata_map.get("names")      # 모델에 적힌 종류 이름 (YOLOE 는 우리가 준 단어들)
         self.names = [v for k, v in sorted(ast.literal_eval(meta).items())] if meta else list(NAMES)
 
-    def detect(self, bgr):
-        """→ [(이름, 점수, x, y, w, h)] 원본 좌표 (x,y = 왼쪽 위)"""
+    def detect(self, bgr, masks=False):
+        """→ [(이름, 점수, x, y, w, h)] 원본 좌표 (x,y = 왼쪽 위).
+           masks=True 이고 seg 모델 (출력 2 개: 계수 + 기본 무늬) 이면 끝에 마스크 하나 더: 원본 크기 bool, 상자 밖은 0 (11-18)
+           마스크 = sigmoid(그 물건의 계수 32 개 · 기본 무늬 32 장) → 입력 크기로 늘리고 회색 테두리 잘라 원본 크기로 → 상자로 자르기 → 0.5"""
         h, w = bgr.shape[:2]
         s = self.size / max(h, w)
         nw, nh = int(round(w * s)), int(round(h * s))
@@ -35,16 +37,35 @@ class Yolo:
         px, py = (self.size - nw) // 2, (self.size - nh) // 2
         pad[py:py + nh, px:px + nw] = cv2.resize(bgr, (nw, nh))
         x = pad[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0      # BGR → RGB, HWC → NCHW
-        out = self.sess.run(None, {self.inp: x})[0][0]
-        if out.shape[-1] == 6:                                                       # YOLO26 (nms=False): (300, 6) x1 y1 x2 y2 점수 종류, NMS 필요 없음
-            return [(self.names[int(c)], float(sc), (x1 - px) / s, (y1 - py) / s, (x2 - x1) / s, (y2 - y1) / s)
-                    for x1, y1, x2, y2, sc, c in out if sc >= self.conf]
-        out = out.T                                                    # YOLO11 (2100, 84) / YOLOE (2100, 4+종류+32 마스크): cx cy w h + 점수 → NMS
-        nc = len(self.names)
-        cls = out[:, 4:4 + nc].argmax(1)
-        sc = out[np.arange(len(out)), 4 + cls]
-        keep = sc >= self.conf
-        out, cls, sc = out[keep], cls[keep], sc[keep]
-        boxes = [[(cx - bw / 2 - px) / s, (cy - bh / 2 - py) / s, bw / s, bh / s] for cx, cy, bw, bh in out[:, :4]]
-        idx = cv2.dnn.NMSBoxes(boxes, sc.tolist(), self.conf, 0.45)
-        return [(self.names[cls[i]], float(sc[i]), *boxes[i]) for i in np.array(idx).flatten()]
+        outs = self.sess.run(None, {self.inp: x})
+        out = outs[0][0]
+        protos = outs[1][0] if masks and len(outs) > 1 else None                    # (32, 80, 80)
+        if out.shape[-1] in (6, 38) and out.shape[0] <= 300:                       # 끝까지 거른 출력 (300, 6) YOLO26 / (300, 6+32 마스크) YOLOE-26 새 내보내기 (11-18)
+            rows = [r for r in out if r[4] >= self.conf]
+            dets = [(self.names[int(r[5])], float(r[4]), (r[0] - px) / s, (r[1] - py) / s, (r[2] - r[0]) / s, (r[3] - r[1]) / s)
+                    for r in rows]
+            coef = [r[6:38] for r in rows] if out.shape[-1] == 38 else None
+        else:
+            out = out.T                                                    # YOLO11 (2100, 84) / YOLOE (2100, 4+종류+32 마스크): cx cy w h + 점수 → NMS
+            nc = len(self.names)
+            cls = out[:, 4:4 + nc].argmax(1)
+            sc = out[np.arange(len(out)), 4 + cls]
+            keep = sc >= self.conf
+            out, cls, sc = out[keep], cls[keep], sc[keep]
+            boxes = [[(cx - bw / 2 - px) / s, (cy - bh / 2 - py) / s, bw / s, bh / s] for cx, cy, bw, bh in out[:, :4]]
+            idx = [int(i) for i in np.array(cv2.dnn.NMSBoxes(boxes, sc.tolist(), self.conf, 0.45)).flatten()]
+            dets = [(self.names[cls[i]], float(sc[i]), *boxes[i]) for i in idx]
+            coef = [out[i, 4 + nc:4 + nc + 32] for i in idx] if out.shape[1] >= 4 + nc + 32 else None
+        if protos is None or coef is None:
+            return dets
+        P = protos.reshape(protos.shape[0], -1)
+        res = []
+        for d, c in zip(dets, coef):
+            m = 1.0 / (1.0 + np.exp(-(np.asarray(c, np.float32) @ P)))
+            m = cv2.resize(m.reshape(protos.shape[1:]), (self.size, self.size))[py:py + nh, px:px + nw]
+            m = cv2.resize(m, (w, h)) > 0.5
+            bx, by, bw, bh = (int(round(v)) for v in d[2:6])
+            crop = np.zeros_like(m)
+            crop[max(0, by):max(0, by + bh), max(0, bx):max(0, bx + bw)] = True
+            res.append(d + (m & crop,))
+        return res

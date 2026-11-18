@@ -62,9 +62,9 @@ class Yolo:
         pad[py:py + nh, px:px + nw] = cv2.resize(bgr, (nw, nh))
         x = pad[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0      # BGR → RGB, HWC → NCHW
         out = self.sess.run(None, {self.inp: x})[0][0]
-        if out.shape[-1] == 6:                                                       # YOLO26 (nms=False): (300, 6) x1 y1 x2 y2 점수 종류, NMS 필요 없음
+        if out.shape[-1] in (6, 38) and out.shape[0] <= 300:                       # 끝까지 거른 출력 (300, 6) YOLO26 / (300, 6+32 마스크) YOLOE-26 새 내보내기 (11-18)
             return [(self.names[int(c)], float(sc), (x1 - px) / s, (y1 - py) / s, (x2 - x1) / s, (y2 - y1) / s)
-                    for x1, y1, x2, y2, sc, c in out if sc >= self.conf]
+                    for x1, y1, x2, y2, sc, c in out[:, :6] if sc >= self.conf]   # 뒤 32 칸 = 마스크 계수 (지금은 안 씀)
         out = out.T                                                    # YOLO11 (2100, 84) / YOLOE (2100, 4+종류+32 마스크): cx cy w h + 점수 → NMS
         nc = len(self.names)
         cls = out[:, 4:4 + nc].argmax(1)

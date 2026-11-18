@@ -7,7 +7,10 @@
     - 멈춤 대기 = settle_base + 각도 × settle_per_deg (90° 면 ~0.8 s). 큰 각도에서 흐린 사진 (1·2·9·13) 문제
     - **흐린 프레임 버림** (라플라시안 분산 < 평소의 sharp_ratio) + 멈춘 뒤 첫 장 버림 (자동 노출) → 선명한 frames (2) 장
     - **YOLO26 (COCO) 먼저** — chair·bed·cell phone·teddy bear 등은 COCO 가 더 잘 봄. 후보 자리에 coco_on 넘으면 끝.
-      아니면 **YOLOE (COCO 에 없는 단어만)** — yoloe_on (0.15) 넘으면 이름, maybe (0.08) 넘으면 "이름?"
+      아니면 **YOLOE (COCO 에 없는 단어만)** — yoloe_on (0.25) 넘으면 이름, maybe (0.15) 넘으면 "이름?"
+      (11-18 v4: 빈 바닥을 toy 0.18 로 = 오탐 → 0.15 → 0.25)
+    - v4 마스크 (YOLOE 는 seg 모델): 이름은 **후보 십자가 마스크 위 (여유 mask_px)** 일 때. 마스크 아래 윤곽 → ground.py → **바닥 발자국**
+      (위에서 본 모양) → 위치 = 발자국에서 로봇에 제일 가까운 점, semantic/seen 에 발자국 점들. YOLO26 (마스크 없음) 은 상자 아래 35%
     - 이름 맞추기: 후보 점 (화면) 이 상자 **아래쪽 35%** 안 (여유 margin px), 같은 이름이면 작은 상자 — 바닥 좌표 비교는 1 m 넘으면
       오차가 커서 (7 번 발닦개) 바꿈, 상자 전체로 하면 큰 침대가 앞 빈 바닥까지 가져감 (v2 9 번)
     - 본 곳은 켜져 있는 동안 계속 기억 (Jasper: 30 분일 이유 없음). 물건이 옮겨진 건 나중에 지도 이름표 층에서
@@ -61,9 +64,10 @@ class GlanceNode(Node):
         p = self.declare_parameter
         self.settle_base, self.settle_deg = p("settle_base", 0.35).value, p("settle_per_deg", 0.005).value
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.5).value
-        self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.15).value, p("maybe", 0.08).value
+        self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
-        self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건
+        self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건 (마스크 없을 때)
+        self.mask_px = p("mask_px", 15).value               # 후보 점이 마스크에서 이만큼 안이면 그 물건 (마스크 있을 때)
         self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26n.onnx").value), size=320, conf=0.2)
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
@@ -181,31 +185,45 @@ class GlanceNode(Node):
             t["frames"] = now
             self.decide(j, base)
 
+    @staticmethod
+    def width(foot):
+        """발자국 폭 = 가장 먼 두 점 거리 (m)"""
+        f = np.asarray(foot)
+        return float(max(np.hypot(*(a - b)) for a in f for b in f)) if len(f) > 1 else 0.0
+
     def give_up(self, why):
         self.get_logger().warn(f"GLANCE #{self.job['id']} 포기: {why}")
         self.job, self.end_t = None, time.time()
 
     # ---------- 이름 정하기 ----------
     def vote(self, model, words, frames, cpx, on):
-        """프레임마다 후보 점 (cpx) 을 품은 상자 → 이름별 [(점수, 상자)]. 2 장 (또는 받은 장 수) 에서 나온 이름 중 평균 점수 최고"""
+        """프레임마다 후보 점 (cpx) 이 그 물건인 검출 → 이름별 [(점수, 상자, 마스크)]. 2 장 (또는 받은 장 수) 에서 나온 이름 중 평균 점수 최고.
+           마스크가 있으면 (YOLOE seg): 후보 점에서 마스크까지 거리 ≤ mask_px. 없으면 (YOLO26): 상자 아래쪽 bottom_frac 안"""
         per = collections.defaultdict(list)
         alldet = []
+        cx, cy = int(round(cpx[0])), int(round(cpx[1]))
         for bgr, _ in frames:
-            dets = model.detect(bgr)
+            dets = model.detect(bgr, masks=True)
             alldet.append(dets)
             got = {}
-            for name, sc, bx, by, bw, bh in dets:
+            for d in dets:
+                name, sc, bx, by, bw, bh = d[:6]
+                mask = d[6] if len(d) > 6 else None
                 if words is not None and name not in words:
                     continue
-                # 후보 점 = 물건이 바닥에 닿은 곳 → 상자 **아래쪽 끝 근처** 여야 그 물건 (11-18 9번: 큰 침대 상자가 앞 빈 바닥까지 가져감)
-                low = by + bh * (1 - self.bottom)
-                if bx - self.margin <= cpx[0] <= bx + bw + self.margin and low - self.margin <= cpx[1] <= by + bh + self.margin:
+                if mask is not None:
+                    ys, xs = np.nonzero(mask[max(0, cy - self.mask_px):cy + self.mask_px + 1, max(0, cx - self.mask_px):cx + self.mask_px + 1])
+                    hit = len(ys) > 0
+                else:
+                    # 후보 점 = 물건이 바닥에 닿은 곳 → 상자 **아래쪽 끝 근처** 여야 그 물건 (11-18 9번: 큰 침대 상자가 앞 빈 바닥까지 가져감)
+                    low = by + bh * (1 - self.bottom)
+                    hit = bx - self.margin <= cpx[0] <= bx + bw + self.margin and low - self.margin <= cpx[1] <= by + bh + self.margin
+                if hit:
                     area = bw * bh
-                    if name not in got or area < got[name][2]:       # 같은 이름이면 작은 상자 (더 정확히 감싼 것)
-                        got[name] = (sc, (bx, by, bw, bh), area)
-            got = {k: (v[0], v[1]) for k, v in got.items()}
+                    if name not in got or area < got[name][3]:       # 같은 이름이면 작은 것 (더 정확히 감싼 것)
+                        got[name] = (sc, (bx, by, bw, bh), mask, area)
             for name, v in got.items():
-                per[name].append(v)
+                per[name].append(v[:3])
         need = min(2, len(frames))
         best = None
         for name, v in per.items():
@@ -214,8 +232,19 @@ class GlanceNode(Node):
             sc = sum(x[0] for x in v) / len(frames)
             box = tuple(np.mean([x[1] for x in v], axis=0))
             if best is None or sc > best[1]:
-                best = (name, sc, box)
+                best = (name, sc, box, v[-1][2])                        # 마스크는 마지막 장 것
         return best, alldet
+
+    def footprint(self, mask, pan, tilt):
+        """마스크 아래 윤곽 (열마다 가장 아래 픽셀) → 바닥 (x, y) 로봇 좌표 m. 위에서 본 물건이 바닥에 닿은 모양"""
+        cols = np.nonzero(mask.any(0))[0]
+        if not len(cols):
+            return np.zeros((0, 2))
+        cols = cols[:: max(1, len(cols) // 24)]
+        bottom = [(c + 0.5, np.nonzero(mask[:, c])[0].max() + 0.5) for c in cols]
+        fl = ground.pixels_to_floor(bottom, self.K, self.D, pan, tilt)
+        fl = fl[np.isfinite(fl).all(1)]
+        return fl[np.hypot(fl[:, 0], fl[:, 1]) < 2.5]
 
     def decide(self, j, base):
         t, now = j["t"], time.time()
@@ -237,7 +266,14 @@ class GlanceNode(Node):
         else:
             name, conf, model = "?", 0.0, "-"
         wx, wy = j["cand"]["wx"], j["cand"]["wy"]
-        if best:                                                        # 가운데에서 본 상자 아래 끝으로 위치 다시 (가장자리 후보도 정확해짐)
+        foot = []
+        if best and best[3] is not None:                                # 마스크 → 바닥 발자국 → 위치 = 로봇에 제일 가까운 발자국 점
+            fp = self.footprint(best[3], j["pan"], j["tilt"])
+            if len(fp):
+                i = int(np.argmin(np.hypot(fp[:, 0], fp[:, 1])))
+                wx, wy = gl.to_world(self.pose, fp[i, 0], fp[i, 1])
+                foot = [[round(v, 3) for v in gl.to_world(self.pose, x, y)] for x, y in fp]
+        elif best:                                                      # 마스크 없음: 가운데에서 본 상자 아래 끝으로 위치 다시
             bx, by, bw, bh = best[2]
             fl = ground.pixels_to_floor([[bx + bw / 2, by + bh]], self.K, self.D, j["pan"], j["tilt"])[0]
             if np.isfinite(fl).all() and math.hypot(fl[0], fl[1]) < 2.0:
@@ -247,19 +283,27 @@ class GlanceNode(Node):
         r = t["req"]
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
-                                                      "wx": round(wx, 3), "wy": round(wy, 3), "ms": ms})))
+                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "ms": ms})))
         self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
-        top = lambda ds: ", ".join(f"{n} {s:.2f}" for n, s, *_ in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
+        top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(
             f"GLANCE #{j['id']} → {name} {conf:.2f} ({model}) | ms 사령관 {ms.get('mode')} 고개 {ms.get('head')} "
             f"영상 {ms.get('frames')} (대기 {j['settle']:.2f} s, 흐림 버림 {j['skipped']}) YOLO26 {ms.get('yolo26')}"
-            + (f" YOLOE {ms['yoloe']}" if "yoloe" in ms else "") + f" | 화면: {top(dets26[-1])}"
+            + (f" YOLOE {ms['yoloe']}" if "yoloe" in ms else "")
+            + (f" | 발자국 {len(foot)} 점, 폭 {self.width(foot) * 100:.0f} cm" if foot else "") + f" | 화면: {top(dets26[-1])}"
             + (f" / E: {top(detsE[-1])}" if detsE else ""))
         img = j["frames"][-1][0].copy()
+        ov = img.copy()
         for ds, col in ((dets26[-1], (200, 200, 0)), (detsE[-1] if detsE else [], (200, 0, 200))):
-            for n, s, bx, by, bw, bh in ds:
+            for d in ds:
+                n, sc, bx, by, bw, bh = d[:6]
+                if len(d) > 6 and sc >= self.maybe:
+                    ov[d[6]] = col                                      # 마스크 칠하기
                 cv2.rectangle(img, (int(bx), int(by)), (int(bx + bw), int(by + bh)), col, 1)
-                cv2.putText(img, f"{n} {s:.2f}", (int(bx), max(12, int(by) - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1)
+                cv2.putText(img, f"{n} {sc:.2f}", (int(bx), max(12, int(by) - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1)
+        if best and best[3] is not None:
+            ov[best[3]] = (0, 220, 0)
+        img = cv2.addWeighted(ov, 0.4, img, 0.6, 0)
         if best:
             bx, by, bw, bh = best[2]
             cv2.rectangle(img, (int(bx), int(by)), (int(bx + bw), int(by + bh)), (0, 220, 0), 2)
