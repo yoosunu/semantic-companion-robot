@@ -18,7 +18,7 @@ tmux new -d -s exec "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R
 tmux new -d -s oled "bash -ic 'python3 -u $R/nodes/behavior/status_display.py; exec bash'"
 if [ "${GLANCE:-0}" = "1" ]; then
   tmux new -d -s floor "bash -ic 'python3 -u $R/nodes/perception/floor_perception.py --ros-args -p stream_port:=8085 ${FLOOR_ARGS}; exec bash'"
-  tmux new -d -s inspect "bash -ic 'source ~/scr_ws/install/setup.bash; ~/yolo_venv/bin/python -u $R/nodes/perception/inspect.py --ros-args ${INSPECT_ARGS}; exec bash'"
+  tmux new -d -s inspect "bash -ic 'source ~/scr_ws/install/setup.bash; ~/yolo_venv/bin/python -u $R/nodes/perception/glance_node.py --ros-args ${INSPECT_ARGS}; exec bash'"
 fi
 sleep 8
 echo "--- 보기";  tmux capture-pane -J -pt face | grep -v '^$' | tail -2

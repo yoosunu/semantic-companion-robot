@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""inspect — "안경 쓰기" 노드 (11-18). 바닥 후보가 반복되면 사령관에 힐끗 요청 → 고개가 가면 YOLOE 한 번 → 결과·시간 기록.
+"""glance_node — "안경 쓰기" 노드 (11-18. 처음 이름 inspect.py 는 파이썬 기본 모듈 inspect 를 가려서 같은 폴더 노드가 다 죽음 → 바꿈). 바닥 후보가 반복되면 사령관에 힐끗 요청 → 고개가 가면 YOLOE 한 번 → 결과·시간 기록.
 
   판단은 glance.py (순수, tests/glance_sim.py). 흐름 (11-13 설계, 11-18 Jasper: 걸으면서 힐끗, 애매하면 "이게 뭐지?" 는 다음 단계)
     floor/blobs (floor_perception, 2 Hz) → Candidates (세상 좌표 같은 자리 2 번, 1.2 m 안, 본 곳 5 분 기억)
@@ -40,7 +40,7 @@ OUT = os.path.expanduser("~/glance_log")
 
 class Inspect(Node):
     def __init__(self):
-        super().__init__("inspect")
+        super().__init__("glance")
         p = self.declare_parameter
         self.settle = p("settle_s", 0.6).value
         self.min_gap = p("min_gap_s", 4.0).value          # 힐끗 사이 최소
