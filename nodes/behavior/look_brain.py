@@ -15,6 +15,8 @@
               A: 툭(작게) → 스르르륵(아주 느리게 8~12°) → 툭(빠르게 6~10°) → 멈칫 → 깸(원래보다 살짝 위로, 빠르게) → 천천히 제자리
               B: 스르르륵 → 툭 → (조금 길게) 멈칫 → 깸
             nods 번째는 안 깸: 스르르륵 → 툭 → 천천히 끝까지 숙임 → "asleep" 알림 (executive 가 SLEEP)
+    glance  힐끗 (executive 가 head=glance + glance {"id","pan","tilt"}, 11-18 안경 쓰기): 그 방향으로 빠르게 → 가만히
+            (그동안 inspect 노드가 YOLOE). head 가 다시 free 가 되면 힐끗 전 모드·자세로 빠르게 돌아옴. 트리거 알림은 계속
     sleep   잠 (executive 가 head=sleep). 고개 끝까지 숙임. 뒤척임(stir) = 살짝 움직였다 다시
             깨기 (head 가 free 로): wake.strength strong = 번쩍 + 자극 쪽(dir)으로 / weak = 천천히 들고 두리번
   11-14 사령관 v1: **언제** 졸고 자고 깨는지는 executive (nodes/behavior/executive_brain.py) 가 정함.
@@ -107,6 +109,7 @@ class Brain:
         self.attend_t = -1e9                 # attend 시작 (막 쳐다보기 시작한 3 s 는 까꿍 안 함 — 깨자마자 가짜 까꿍)
         self.approach0 = None                # 움찔: (다가옴 시각, 다가오기 전 얼굴 px, 트랙)
         self.follow_done = None              # 시선 따라가기: 이번 고개 돌림에 이미 했나 (away_t)
+        self.pre_glance = None               # 힐끗 전 (모드, 이유, 팬, 틸트) — 끝나면 돌아감
 
     # ---------- 작은 도구 ----------
     def move(self, out, now, pan, tilt, spd=0, acc=0, settle=SETTLE):
@@ -182,7 +185,7 @@ class Brain:
         return found
 
     # ---------- 한 번 (0.1 s 마다) ----------
-    def set_head(self, head, now, nods=3, wake=None, stir=0):
+    def set_head(self, head, now, nods=3, wake=None, stir=0, glance=None):
         """executive 설정표의 head·nods·wake·stir 칸. 바뀔 때만 동작 → 이번에 보낼 동작 목록"""
         out = []
         if stir != self.stir_id:
@@ -194,6 +197,20 @@ class Brain:
         if head == self.head:
             return out
         prev, self.head = self.head, head
+        if head == "glance" and glance:
+            self.pre_glance = (self.mode, self.reason, self.pan, self.tilt)
+            self.clip = []
+            self.set_mode("glance", f"glance #{glance.get('id')}", now)
+            self.move(out, now, float(glance["pan"]), float(glance["tilt"]))      # 빠르게 (최고 속도) → 멈춤 SETTLE
+            return out
+        if prev == "glance" and self.pre_glance:
+            mode, reason, pn, tl = self.pre_glance
+            self.pre_glance = None
+            if head == "free":
+                self.set_mode(mode, "glance done", now)
+                self.until = 0.0 if mode != "attend" else self.until
+                self.move(out, now, pn, tl)                                         # 힐끗 전 자세로 빠르게
+                return out
         if head == "doze":
             self.doze(out, now, "executive", nods)
         elif head == "sleep":
@@ -243,6 +260,8 @@ class Brain:
 
         if trig:
             self.events += [(name, p["id"]) for name, p in trig]   # executive 에 알림 (꾸벅 중이어도)
+        if self.mode == "glance":
+            return out                                       # 힐끗: 고개는 그대로 (YOLOE 보는 중), 알림만
         if self.mode == "doze":
             if not self.clip and now > self.until and self.nods_left > 0:
                 self.nods_left -= 1

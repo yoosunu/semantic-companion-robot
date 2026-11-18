@@ -190,5 +190,25 @@ ok_dir = hits and hits[0][1] is None                    # 축 확인 전엔 방�
 check("13 톡톡: 감지·자기 흔들림 무시·한 번만 (방향은 축 확인 전 끔)", len(hits) == 1 and hits[0][0] == 10.0 and
       (ok_dir if not imu_touch.DIR_OK else abs(abs(hits[0][1]) - 90) < 15), hits)
 
+# 14. 힐끗 (GLANCE, 11-18 안경 쓰기)
+G = 'glance:{"id": 7, "pan": -20, "tilt": -25}'
+ex = run(3, req=lambda t: [G] if once(1)(t) else [], events=lambda t: [("glanced", 7)] if once(2.2)(t) else [])
+p = None
+ex2 = run(1.5, req=lambda t: [G] if once(1)(t) else [])
+p = ex2.profile()
+check("14a IDLE → 힐끗 (고개 glance, 바퀴 stay) → glanced → IDLE", [x[2] for x in ex.log] == ["GLANCE", "IDLE"]
+      and p["head"] == "glance" and p["glance"]["pan"] == -20 and p["wheels"] == "stay" and ex.profile()["glance"] is None, (ex.log, p))
+ex = run(6, req=lambda t: [G] if once(1)(t) else [])
+check("14b glanced 안 오면 3 s 뒤 복귀", abs(when(ex, "IDLE", 1) - 4.0) < 0.2, ex.log)
+ex = run(2, req=lambda t: ["task:patrol"] if once(0.5)(t) else ([G] if once(1)(t) else []))
+p = ex.profile()
+ex = run(2, ex, t0=2, events=lambda t: [("glanced", 7)] if once(2.5)(t) else [])
+check("14c 작업 중 힐끗 → 바퀴 slow → 작업으로 복귀", p["wheels"] == "slow" and ex.mode == "TASK:patrol", (p["wheels"], ex.log))
+ex = run(3, events=lambda t: [("contact", 1)] if once(0.5)(t) else [], req=lambda t: [G] if once(1)(t) else [])
+check("14d 같이 있는 중엔 힐끗 안 받음", "GLANCE" not in [x[2] for x in ex.log], ex.log)
+ex = run(3, req=lambda t: [G] if once(1)(t) else [], events=lambda t: [("contact", 2)] if once(1.5)(t) else [])
+check("14e 힐끗 중 사람이 봄 → 같이 있기 (사람 우선)", ex.mode == "COMPANION" and [x[2] for x in ex.log] == ["GLANCE", "IDLE", "COMPANION"], ex.log)
+check("14f 바닥 감지: IDLE 2 Hz, 잠 0", eb.PROFILE["IDLE"]["floor_hz"] == 2.0 and eb.PROFILE["SLEEP"]["floor_hz"] == 0.0)
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

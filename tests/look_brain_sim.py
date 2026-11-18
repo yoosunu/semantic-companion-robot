@@ -259,5 +259,25 @@ b, log = run(w, 22)
 mv = [(t, round(x[2])) for t, m, _, a in log if t >= 20 for x in a if x[0] == "move"]
 check("23 움찔: 젖힘(+5) → 올려다봄", any(e[0] == "flinch" for e in b.events) and any(t2 > t1 and a2 - a1 == 5 for (t1, a1), (t2, a2) in zip(mv, mv[1:])), mv[:4])
 
+# 24. 힐끗 (11-18 안경 쓰기): glance → 그 방향 빠르게, 가만히 (사람 트리거는 알림만), free → 원래 자세로
+G = {"id": 3, "pan": -25.0, "tilt": -28.0}
+head = lambda t: "glance" if 20 <= t < 22 else "free"
+b = lb.Brain(random.Random(1))
+log, t, evs = [], 0.0, []
+while t < 25:
+    acts = b.set_head(head(t), t, glance=G if head(t) == "glance" else None) + b.tick(t, [person(pan=10, yaw=60 if t < 20.8 else 5)], False)   # 계속 딴 데 보다가 힐끗 중에 쳐다봄
+    log.append((round(t, 1), b.mode, b.reason, acts))
+    evs += [(round(t, 1), e) for e in b.events]
+    b.events = []
+    t = round(t + DT, 6)
+before = [x for tt, m, _, a in log if tt < 20 for x in a if x[0] == "move"][-1]
+gl_moves = [(tt, x) for tt, m, _, a in log if 20 <= tt < 22 for x in a if x[0] == "move"]
+back = [(tt, x) for tt, m, _, a in log if 22 <= tt < 22.2 for x in a if x[0] == "move"]
+check("24a 힐끗: 그 방향으로 빠르게 한 번, 그동안 안 움직임", len(gl_moves) == 1 and gl_moves[0][1][1:3] == (-25.0, -28.0)
+      and gl_moves[0][1][3] == 0, gl_moves)
+check("24b 힐끗 중 사람 트리거는 알림 (contact)", any(20 <= tt < 22 and e[0] == "contact" for tt, e in evs), [e for e in evs if 19 < e[0] < 23])
+check("24c 끝나면 힐끗 전 자세로", back and abs(back[0][1][1] - before[1]) < 0.01 and abs(back[0][1][2] - before[2]) < 0.01,
+      (before, back))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

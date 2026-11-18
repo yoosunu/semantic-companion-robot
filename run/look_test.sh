@@ -3,6 +3,7 @@
 #   bash ~/semantic-companion-robot/run/look_test.sh      끄기: bash ~/semantic-companion-robot/run/stop_all.sh
 #   옵션: CAM="320 240 10" (카메라), DET_W=320 (검출 폭), EXEC_ARGS="-p doze_after:=[10.0,15.0]" (빨리 졸기 시험. 시간은 [최소,최대], 띄어쓰기 없이)
 #   모드 수동: ros2 topic pub --once /neri/request std_msgs/msg/String "{data: sleep}"   (wake 도)
+#   GLANCE=1 (11-18 안경 쓰기): + floor_perception (바닥 후보, 스트림 8085) + inspect (YOLOE 힐끗). 로그: tmux capture-pane -J -pt inspect -S -200 | grep GLANCE
 R=~/semantic-companion-robot
 bash $R/run/stop_all.sh quiet; pkill -f "camera_ros/camera_node" 2>/dev/null   # 남은 카메라 노드 (카메라는 한 번에 하나만)
 tmux new -d -s robot "bash -ic 'ros2 launch scr_bringup robot.launch.py ugv_port:=/dev/ttyAMA0; exec bash'"
@@ -15,8 +16,13 @@ tmux new -d -s face "bash -ic 'source ~/scr_ws/install/setup.bash; ~/yolo_venv/b
 tmux new -d -s look "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R/nodes/behavior/look_at_person.py --ros-args ${LOOK_ARGS}; exec bash'"
 tmux new -d -s exec "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R/nodes/behavior/executive.py --ros-args ${EXEC_ARGS}; exec bash'"
 tmux new -d -s oled "bash -ic 'python3 -u $R/nodes/behavior/status_display.py; exec bash'"
+if [ "${GLANCE:-0}" = "1" ]; then
+  tmux new -d -s floor "bash -ic 'python3 -u $R/nodes/perception/floor_perception.py --ros-args -p stream_port:=8085 ${FLOOR_ARGS}; exec bash'"
+  tmux new -d -s inspect "bash -ic 'source ~/scr_ws/install/setup.bash; ~/yolo_venv/bin/python -u $R/nodes/perception/inspect.py --ros-args ${INSPECT_ARGS}; exec bash'"
+fi
 sleep 8
 echo "--- 보기";  tmux capture-pane -J -pt face | grep -v '^$' | tail -2
 echo "--- 고개";  tmux capture-pane -J -pt look | grep -v '^$' | tail -3
 echo "--- 사령관"; tmux capture-pane -J -pt exec | grep -v '^$' | tail -3
+[ "${GLANCE:-0}" = "1" ] && { echo "--- 바닥"; tmux capture-pane -J -pt floor | grep -v '^$' | tail -2; echo "--- 힐끗"; tmux capture-pane -J -pt inspect | grep -v '^$' | tail -2; }
 echo "로그: tmux capture-pane -J -pt exec -S -300 | grep -E 'MODE|WAKE' ; tmux capture-pane -J -pt look -S -300 | grep -E 'EVENT|LOOK' | tail -20"

@@ -10,6 +10,9 @@
                다시 상호작용이 없으면 IDLE. (bored 가 안 와도 마지막 상호작용 40 s 뒤 IDLE — 안전장치)
     SLEEP      잠. 얼굴 처리 끔. 자극(LiDAR 새로 들어옴·톡톡·나중에 소리·이름)으로만 깸
     TASK:<이름> 예약 작업 (v1 은 틀만). 요청 done:<이름> 이면 IDLE
+    GLANCE     힐끗 (11-18 "안경 쓰기"): 바닥 후보 쪽으로 고개 → YOLOE 잠깐. IDLE·TASK 에서만 받음, 끝나면 원래 모드로.
+               요청 glance:{"id","pan","tilt"} (inspect 노드) → 이벤트 glanced (같은 id) 또는 glance_max 지나면 복귀.
+               작업 중이면 바퀴 slow (11-18 Jasper: 걸으면서 보면 매력적 → 멈추지 않고 절반 속도)
   이벤트 (look 이 보냄): contact 눈맞춤 · approach 다가옴 · arrive 새 사람 · glance 두리번 · peekaboo 까꿍 ·
                        follow_gaze 시선 따라감 · nod 따라 끄덕  = 상호작용 / bored 쳐다보기 끝 / asleep 꾸벅 다 함
   자극 (잠 깨우기): (종류, 세기 1약·2중·3강, 방향 pan°|None)  — 동물 수면 참고 (설계 v2 4절)
@@ -19,6 +22,7 @@
 
   시간: DUR 의 (최소, 최대) 에서 균등 랜덤 (11-14 Jasper: "네리 맘대로"). dur() 한 곳만 바꾸면 분포 교체.
 """
+import json
 import random
 
 DUR = {
@@ -29,6 +33,7 @@ DUR = {
     "shallow": (120.0, 120.0),        # 잠든 뒤 얕은 잠
     "defer_max": (600.0, 600.0),      # 예약 작업: 같이 있는 중이면 최대 이만큼 미룸 (11-14 Jasper: 10분)
     "lidar_look": (10.0, 10.0),       # 자극으로 깼는데 얼굴이 없으면 이만큼 둘러보고 다시 꾸벅
+    "glance_max": (3.0, 3.0),         # 힐끗 최대 (고개 0.3 + 멈춤 0.6 + YOLOE 0.2 + 여유). 넘으면 그냥 돌아옴
 }
 NODS = 3                               # 꾸벅 3번째에 잠듦 (11-14 Jasper)
 
@@ -36,10 +41,10 @@ NODS = 3                               # 꾸벅 3번째에 잠듦 (11-14 Jasper)
 #            얼굴 Hz   YOLO Hz  바닥 Hz   고개          바퀴
 PROFILE = {
     "SLEEP":     dict(face_hz=0.0, yolo_hz=0.0, floor_hz=0.0, head="sleep", wheels="stay"),
-    "IDLE":      dict(face_hz=2.0, yolo_hz=0.0, floor_hz=0.0, head="free", wheels="stay"),
+    "IDLE":      dict(face_hz=2.0, yolo_hz=0.0, floor_hz=2.0, head="free", wheels="stay"),   # 11-18 바닥 2 Hz (안경 쓰기 후보)
     "DOZE":      dict(face_hz=2.0, yolo_hz=0.0, floor_hz=0.0, head="doze", wheels="stay"),
     "COMPANION": dict(face_hz=5.0, yolo_hz=0.0, floor_hz=0.0, head="free", wheels="stay"),
-    "TASK":      dict(face_hz=1.0, yolo_hz=0.0, floor_hz=0.0, head="free", wheels="task"),   # v1 자리만
+    "TASK":      dict(face_hz=1.0, yolo_hz=0.0, floor_hz=2.0, head="free", wheels="task"),   # v1 자리만
 }
 INTERACT = {"contact", "approach", "arrive", "glance", "peekaboo", "follow_gaze", "nod", "flinch"}
 
@@ -56,6 +61,8 @@ class Executive:
         self.wake = None                   # 마지막 깨움 {"id","strength","dir"} — look 이 깨는 모양에 씀
         self.stir = 0                      # 뒤척임 횟수 (바뀌면 look 이 살짝 움직임)
         self.log = []                      # [(시각, 이전, 다음, 이유)]
+        self.glance = None                 # 힐끗 중이면 {"id","pan","tilt"}
+        self.glance_prev = None            # 힐끗 끝나면 돌아갈 모드
 
     def dur(self, name):
         """시간 하나 (균등 랜덤). 나중에 로그정규·감정으로 바꿀 자리"""
@@ -78,8 +85,17 @@ class Executive:
         self.go(now, "IDLE", why)
 
     def profile(self):
+        if self.mode == "GLANCE":
+            prev = self.glance_prev or "IDLE"
+            base = "TASK" if prev.startswith("TASK:") else prev
+            p = dict(PROFILE[base], head="glance", wheels="slow" if base == "TASK" else "stay")
+            return dict(mode=self.mode, why=self.why, nods=NODS, wake=self.wake, stir=self.stir, glance=self.glance, **p)
         base = "TASK" if self.mode.startswith("TASK:") else self.mode
-        return dict(mode=self.mode, why=self.why, nods=NODS, wake=self.wake, stir=self.stir, **PROFILE[base])
+        return dict(mode=self.mode, why=self.why, nods=NODS, wake=self.wake, stir=self.stir, glance=None, **PROFILE[base])
+
+    def end_glance(self, now, why):
+        prev, self.glance, self.glance_prev = self.glance_prev or "IDLE", None, None
+        self.go(now, prev, why)
 
     def tick(self, now, events=(), people=False, stimuli=(), requests=()):
         """events: [(종류, 트랙)] look 이 보낸 것 / people: 지금 얼굴이 보이나
@@ -96,6 +112,14 @@ class Executive:
                     self.go(now, "TASK:" + r[5:], "task")
             elif r.startswith("done:") and self.mode == "TASK:" + r[5:]:
                 self.go(now, "IDLE", "task done")
+            elif r.startswith("glance:") and (self.mode == "IDLE" or self.mode.startswith("TASK:")):
+                try:
+                    g = json.loads(r[7:])
+                    self.glance = {"id": g["id"], "pan": float(g["pan"]), "tilt": float(g["tilt"])}
+                except (ValueError, KeyError, TypeError):
+                    continue
+                self.glance_prev = self.mode
+                self.go(now, "GLANCE", f"glance #{self.glance['id']}")
 
         if self.mode == "SLEEP":                             # 2. 잠: 자극으로만 깸 (세기 vs 깊이)
             shallow = now - self.since < self.dur("shallow")
@@ -115,6 +139,18 @@ class Executive:
 
         names = [e[0] for e in events]
         ev = [e for e in events if e[0] in INTERACT]
+        if self.mode == "GLANCE":                            # 힐끗: 끝 알림·시간 넘음 → 원래 모드. 사람이 우선 (IDLE 에서 왔을 때)
+            done = [e for e in events if e[0] == "glanced" and self.glance and e[1] == self.glance["id"]]
+            if ev and not (self.glance_prev or "").startswith("TASK:"):
+                self.end_glance(now, "glance: person")
+            elif done:
+                self.end_glance(now, "glanced")
+                return self.profile()
+            elif now - self.since > self.dur("glance_max"):
+                self.end_glance(now, "glance timeout")
+                return self.profile()
+            else:
+                return self.profile()
         if ev and not self.mode.startswith("TASK:"):         # 4. 상호작용 → 같이 있기 (작업 중이면 작업 계속)
             self.event_t = now
             self.short_look = False

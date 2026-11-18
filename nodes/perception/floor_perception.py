@@ -5,7 +5,9 @@
         pantilt/cmd        고개 명령 [팬, 틸트, …] — 바닥 좌표 계산 + 고개 바뀐 뒤 settle_s 동안은 안 셈 (자기 움직임)
         neri/profile       사령관 설정표 floor_hz (0 = 끔). 설정표가 없으면 rate_hz
   출력  floor/points       sensor_msgs/PointCloud2 (base_footprint, z = 0.02): 후보 덩어리의 바닥 닿은 아래 끝 점들
-        floor/blobs        String JSON [{"near": m, "y": 평균 좌우 m, "area": px}] 가까운 순 — 사람·로그용
+        odom               로봇 위치 (X, Y, θ) — 찍힌 순간 위치를 blobs 에 같이 실음 (11-18: 세상 좌표로 같은 자리인지 = inspect)
+        floor/blobs        String JSON {"pose": [X, Y, θ], "head": [팬, 틸트], "blobs": [{"near": m, "x","y": 가장 가까운 점 (로봇 좌표),
+                           "ym": 평균 좌우, "area": px}]} 가까운 순
   아직 안 하는 것 (다음 단계): costmap 연결, 여러 장면 반복 확인 (그림자·햇빛 거르기), 로봇이 움직일 때
   시험: 고개를 다른 노드가 안 움직이면 -p tilt0:=-20.0 처럼 지금 자세를 알려줌 (명령을 받으면 그걸 씀)
   확인용: -p stream_port:=8085 → Mac 브라우저 http://<Pi IP>:8085 (분홍 = 다름, 하늘색 선 = 보는 바닥 1.5 m, 주황 = 후보 + 거리)
@@ -13,6 +15,7 @@
 """
 import collections
 import json
+import math
 import os
 import sys
 import time
@@ -22,6 +25,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Float32MultiArray, Header, String
@@ -59,6 +63,8 @@ class FloorPerception(Node):
         self.create_subscription(Image, "camera/image_raw", self.on_img, qos_profile_sensor_data)
         self.create_subscription(Float32MultiArray, "pantilt/cmd", self.on_head, 10)
         self.create_subscription(String, "neri/profile", self.on_profile, 10)
+        self.poses = collections.deque(maxlen=200)                    # (받은 시각, X, Y, θ)
+        self.create_subscription(Odometry, "odom", self.on_odom, 20)
         self.pub_pts = self.create_publisher(PointCloud2, "floor/points", 10)
         self.pub_blobs = self.create_publisher(String, "floor/blobs", 10)
         self.get_logger().info(f"FLOOR 준비: {self.rate:.0f} Hz, 보는 바닥 {self.fd.max_range} m, 보정 {size[0]}x{size[1]}"
@@ -74,6 +80,17 @@ class FloorPerception(Node):
         self.enabled = hz > 0
         if hz > 0:
             self.rate = hz
+
+    def on_odom(self, m):
+        q = m.pose.pose.orientation
+        th = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        self.poses.append((time.time(), m.pose.pose.position.x, m.pose.pose.position.y, th))
+
+    def pose_at(self, t):
+        for pt, x, y, th in reversed(self.poses):
+            if pt <= t:
+                return [x, y, th]
+        return list(self.poses[0][1:]) if self.poses else [0.0, 0.0, 0.0]
 
     def on_head(self, m):
         pan, tilt = float(m.data[0]), float(m.data[1])
@@ -112,8 +129,13 @@ class FloorPerception(Node):
         hdr.stamp = m.header.stamp
         pts = [(float(x), float(y), 0.02) for b in blobs for x, y in b["pts"]]
         self.pub_pts.publish(point_cloud2.create_cloud_xyz32(hdr, pts))
-        self.pub_blobs.publish(String(data=json.dumps(
-            [{"near": round(b["near"], 3), "y": round(float(b["pts"][:, 1].mean()), 3), "area": b["area"]} for b in blobs])))
+        out = []
+        for b in blobs:
+            i = int(np.argmin(np.hypot(b["pts"][:, 0], b["pts"][:, 1])))
+            out.append({"near": round(b["near"], 3), "x": round(float(b["pts"][i, 0]), 3), "y": round(float(b["pts"][i, 1]), 3),
+                        "ym": round(float(b["pts"][:, 1].mean()), 3), "area": b["area"]})
+        self.pub_blobs.publish(String(data=json.dumps({"t": shot, "pose": [round(v, 4) for v in self.pose_at(shot)],
+                                                       "head": [pan, tilt], "blobs": out})))
         if self.push:
             self.push(floor_detect.draw(bgr, self.fd, blobs, mask, odd, ms))
         if now - self.log_t >= 1.0:
