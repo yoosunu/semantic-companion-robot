@@ -199,7 +199,7 @@ p = ex2.profile()
 check("14a IDLE → 힐끗 (고개 glance, 바퀴 stay) → glanced → IDLE", [x[2] for x in ex.log] == ["GLANCE", "IDLE"]
       and p["head"] == "glance" and p["glance"]["pan"] == -20 and p["wheels"] == "stay" and ex.profile()["glance"] is None, (ex.log, p))
 ex = run(6, req=lambda t: [G] if once(1)(t) else [])
-check("14b glanced 안 오면 3 s 뒤 복귀", abs(when(ex, "IDLE", 1) - 4.0) < 0.2, ex.log)
+check("14b glanced 안 오면 4 s 뒤 복귀", abs(when(ex, "IDLE", 1) - 5.0) < 0.2, ex.log)
 ex = run(2, req=lambda t: ["task:patrol"] if once(0.5)(t) else ([G] if once(1)(t) else []))
 p = ex.profile()
 ex = run(2, ex, t0=2, events=lambda t: [("glanced", 7)] if once(2.5)(t) else [])

@@ -7,7 +7,7 @@
   출력  floor/points       sensor_msgs/PointCloud2 (base_footprint, z = 0.02): 후보 덩어리의 바닥 닿은 아래 끝 점들
         odom               로봇 위치 (X, Y, θ) — 찍힌 순간 위치를 blobs 에 같이 실음 (11-18: 세상 좌표로 같은 자리인지 = inspect)
         floor/blobs        String JSON {"pose": [X, Y, θ], "head": [팬, 틸트], "blobs": [{"near": m, "x","y": 가장 가까운 점 (로봇 좌표),
-                           "ym": 평균 좌우, "area": px}]} 가까운 순
+                           "ym": 평균 좌우, "area": px, "edge": 화면 가장자리에 걸침}]} 가까운 순
   아직 안 하는 것 (다음 단계): costmap 연결, 여러 장면 반복 확인 (그림자·햇빛 거르기), 로봇이 움직일 때
   시험: 고개를 다른 노드가 안 움직이면 -p tilt0:=-20.0 처럼 지금 자세를 알려줌 (명령을 받으면 그걸 씀)
   확인용: -p stream_port:=8085 → Mac 브라우저 http://<Pi IP>:8085 (분홍 = 다름, 하늘색 선 = 보는 바닥 1.5 m, 주황 = 후보 + 거리)
@@ -132,8 +132,10 @@ class FloorPerception(Node):
         out = []
         for b in blobs:
             i = int(np.argmin(np.hypot(b["pts"][:, 0], b["pts"][:, 1])))
+            bx, by, bw, bh = b["box"]
+            edge = bx <= 3 or by <= 3 or bx + bw >= m.width - 3 or by + bh >= m.height - 3   # 화면 가장자리에 걸침 = 잘렸을 수 있음
             out.append({"near": round(b["near"], 3), "x": round(float(b["pts"][i, 0]), 3), "y": round(float(b["pts"][i, 1]), 3),
-                        "ym": round(float(b["pts"][:, 1].mean()), 3), "area": b["area"]})
+                        "ym": round(float(b["pts"][:, 1].mean()), 3), "area": b["area"], "edge": bool(edge)})
         self.pub_blobs.publish(String(data=json.dumps({"t": shot, "pose": [round(v, 4) for v in self.pose_at(shot)],
                                                        "head": [pan, tilt], "blobs": out})))
         if self.push:

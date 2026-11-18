@@ -39,11 +39,34 @@ for k in range(4):
 check("2 움직이며 같은 자리 2 번 → 후보 (깜빡인 건 아님)", out[0] is None and out[1] and abs(out[1]["wx"] - 1.5) < 0.02
       and abs(out[1]["wy"] - 0.1) < 0.02 and all(o is None or abs(o["wy"] - 0.1) < 0.02 for o in out), out[1])
 
-# 3. 본 곳은 5 분 동안 다시 안 봄, 그 뒤엔 다시
-c.remember(out[1]["wx"], out[1]["wy"], 1.0, "doormat", 0.8)
+# 3. 본 곳은 30 분 동안 다시 안 봄, 그 뒤엔 다시
+c.remember(out[1]["wx"], out[1]["wy"], 1.0, "doormat", 0.8, pose=(1.0, 0, 0))
 again = c.step(2.0, (1.2, 0, 0), [gl.to_robot((1.2, 0, 0), 1.5, 0.1) + (300,)])
-later = [c.step(400 + k * 0.5, (1.2, 0, 0), [gl.to_robot((1.2, 0, 0), 1.5, 0.1) + (300,)]) for k in range(2)]
-check("3 본 곳 기억 5 분", again is None and later[-1] is not None)
+later = [c.step(2000 + k * 0.5, (1.2, 0, 0), [gl.to_robot((1.2, 0, 0), 1.5, 0.1) + (300,)]) for k in range(2)]
+check("3 본 곳 기억 30 분", again is None and later[-1] is not None)
+
+# 3b. 쓰레기통 (11-18 실물): 고개 각도마다 바닥 닿은 점이 25 cm 흔들려도 같은 것 — 한 번 보면 다시 안 봄
+import random as _r
+rng = _r.Random(2)
+c = gl.Candidates()
+asked = 0
+for k in range(30):
+    jx, jy = rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12)
+    cand = c.step(k * 0.5, (0, 0, 0), [(0.75 + jx, -0.35 + jy, 400)])
+    if cand:
+        asked += 1
+        c.remember(cand["wx"], cand["wy"], k * 0.5, "trash can", 0.5, pose=(0, 0, 0))
+check("3b 흔들리는 물건 (±12 cm) 은 한 번만 봄", asked == 1, f"{asked} 번")
+
+# 3c. 사라짐: 보여야 하는데 2 번 안 잡히면 지움 / 고개 돌려 화면 밖이면 안 지움
+c = gl.Candidates()
+c.step(0.0, (0, 0, 0), [(0.6, 0.0, 300)])
+c.step(0.5, (0, 0, 0), [], visible=lambda x, y: False)
+c.step(1.0, (0, 0, 0), [], visible=lambda x, y: False)
+kept = len(c.tracks)
+c.step(1.5, (0, 0, 0), [], visible=lambda x, y: True)
+c.step(2.0, (0, 0, 0), [], visible=lambda x, y: True)
+check("3c 화면 밖은 안 지움, 보여야 하는데 2 번 없으면 지움", kept == 1 and len(c.tracks) == 0, (kept, len(c.tracks)))
 
 # 4. 멀면 (1.2 m 넘게) 안 봄
 c = gl.Candidates()
