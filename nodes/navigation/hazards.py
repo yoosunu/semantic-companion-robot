@@ -10,15 +10,18 @@
     ② 그 모양 안 (+pad) 에 LiDAR 점이 scan_max 개 이하 → 센서가 못 봄 → 표시. 많으면 센서가 봄 → 이름표만
   모양: 납작한 것 (flat) = 마스크 윤곽 전체를 바닥에 내린 것의 볼록 껍질 (바닥에 깔려 있으니 윤곽 전체가 바닥 위)
         나머지 바닥형 (신발류) = 아래 발자국의 볼록 껍질 + min_w 두께
-  같은 자리 (중심 merge m 안, 이름 무관) 는 합침: 모양 = **더 가까이서 본 것** (11-19 실측: 1.2 m 에서 본 발닦개 57×38 cm →
-    69×59 cm. 마스크 가장자리 몇 px 가 먼 바닥에선 수 cm → 멀수록 크게 나옴. 합집합으로 하면 계속 커지기만 함), 점수 = 최대
+  같은 물건 = 10 cm 키운 모양끼리 닿거나 겹침 (11-20: 같은 발닦개를 화면 양 끝에서 잘려 본 두 조각, 중심 36 cm 떨어져 따로 찍힘).
+  통째 (full) vs 잘림 (화면 끝에 닿은 마스크 = 일부만 보임, 11-20 삼각형·조각):
+    통째가 오면 → 그걸로 바꿈 (이미 통째면 더 가까이서 본 것. 11-19: 1.2 m 에서 57×38 → 69×59, 가까울수록 정확)
+    잘림끼리 → 합침 (볼록 껍질)
+    통째가 있는데 잘림이 오면 → 모양은 그대로 (확인만)
   지우기: clear() (수동, /semantic/clear) 만. 자동 지우기는 다음 단계
 """
 import math
 
 import numpy as np
 
-FLAT = ("doormat", "sock", "towel", "clothes", "plastic bag")
+FLAT = ("doormat", "rug", "sock", "towel", "clothes", "plastic bag")   # rug: 11-20 YOLOE 가 발닦개를 rug 로 더 자주 부름 (0.67~0.81). Jasper: 둘 다 피함
 LOW = ("shoe", "slipper")
 
 
@@ -109,18 +112,32 @@ class HazardMap:
             return "skip", f"LiDAR 점 {n} 개 = 센서가 봄 → 이름표만"
         return "mark", f"LiDAR 점 {n} 개 = 센서 사각"
 
-    def add(self, name, conf, poly, now, dist=9.9):
-        """표시 더하기 (같은 자리면 합침) → "new" / "merged". dist = 본 거리 (가까울수록 모양이 정확)"""
-        c = poly.mean(0)
+    def same(self, a, b, touch, pad=0.10):
+        """같은 물건? 중심 merge 안, 또는 (touch 일 때) 각자 pad 키운 모양이 닿거나 겹침.
+           touch = 둘 중 하나라도 잘린 조각일 때만 (통째끼리 닿음으로 합치면 옆에 놓인 신발이 발닦개를 덮어씀 — hazard_sim 7)"""
+        if math.hypot(*(a.mean(0) - b.mean(0))) < self.merge:
+            return True
+        if not touch:
+            return False
+        ga, gb = grow(a, pad), grow(b, pad)
+        return bool(inside(ga, gb).any() or inside(gb, ga).any())
+
+    def add(self, name, conf, poly, now, dist=9.9, full=True):
+        """표시 더하기 → "new" / "replaced" / "joined" / "kept". dist = 본 거리, full = 통째로 봄 (화면 끝에 안 잘림)"""
         for it in self.items:
-            if math.hypot(*(it["poly"].mean(0) - c)) < self.merge or inside(it["poly"], [c])[0] or inside(poly, [it["poly"].mean(0)])[0]:
-                if dist < it["dist"]:
-                    it["poly"], it["dist"] = poly, dist
-                if conf >= it["conf"]:
-                    it["name"], it["conf"] = name, conf
-                it["t"], it["n"] = now, it["n"] + 1
-                return "merged"
-        self.items.append({"name": name, "conf": conf, "poly": poly, "t": now, "n": 1, "dist": dist})
+            if not self.same(it["poly"], poly, touch=not (full and it["full"])):
+                continue
+            if full and (not it["full"] or dist < it["dist"]):
+                it["poly"], it["dist"], it["full"], how = poly, dist, True, "replaced"
+            elif not full and not it["full"]:
+                it["poly"], it["dist"], how = hull(np.vstack([it["poly"], poly])), min(it["dist"], dist), "joined"
+            else:
+                how = "kept"
+            if conf >= it["conf"]:
+                it["name"], it["conf"] = name, conf
+            it["t"], it["n"] = now, it["n"] + 1
+            return how
+        self.items.append({"name": name, "conf": conf, "poly": poly, "t": now, "n": 1, "dist": dist, "full": full})
         return "new"
 
     def clear(self):
@@ -143,4 +160,4 @@ class HazardMap:
     def state(self):
         return [{"name": it["name"], "conf": round(it["conf"], 3), "n": it["n"],
                  "cx": round(float(it["poly"][:, 0].mean()), 3), "cy": round(float(it["poly"][:, 1].mean()), 3),
-                 "area": round(area(it["poly"]), 3)} for it in self.items]
+                 "area": round(area(it["poly"]), 3), "full": it["full"]} for it in self.items]

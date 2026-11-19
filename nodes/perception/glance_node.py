@@ -286,9 +286,14 @@ class GlanceNode(Node):
                 continue
             wx, wy = gl.to_world(self.pose, x, y)
             out.append({"name": d[0], "conf": round(float(d[1]), 3), "x": round(x, 3), "y": round(y, 3),
-                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]],
+                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": self.cut(d[6]), "box": [int(v) for v in d[2:6]],
                         "footprint": self.world(fp), "outline": self.world(self.outline(d[6], j["pan"], j["tilt"]))})
         return out
+
+    @staticmethod
+    def cut(mask, edge=3):
+        """마스크가 화면 끝 (네 변 어디든) 에 닿음 = 일부만 보임. 11-20: 아래만 봤더니 좌우 끝에 잘린 발닦개가 삼각형·조각으로 찍힘"""
+        return bool(mask[:edge].any() or mask[-edge:].any() or mask[:, :edge].any() or mask[:, -edge:].any())
 
     def outline(self, mask, pan, tilt):
         """마스크 바깥 윤곽 전체 → 바닥 (x, y) 로봇 좌표 m (최대 40 점). 납작한 물건 (발닦개) 은 윤곽 전체가 바닥 위라 이게 모양.
@@ -368,7 +373,8 @@ class GlanceNode(Node):
         r = t["req"]
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
-                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl, "extras": ext, "ms": ms})))
+                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl,
+                                                      "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms})))
         self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(

@@ -55,7 +55,7 @@ far = hz.shape_for("doormat", rect(1.05, 0.22, 0.69, 0.59), [])     # 멀리서 
 a = H.add("doormat", 0.84, far, 1.0, dist=1.2)
 b = H.add("rug", 0.64, mat, 2.0, dist=0.7)                            # 가까이서 다시 봄 → 모양 바꿈, 이름은 점수 높은 것
 c6 = H.add("doormat", 0.70, far, 3.0, dist=1.3)                       # 다시 멀리서 → 모양 유지
-check("6 같은 자리 → 합침, 모양 = 가까이서 본 것, 이름 = 점수 높은 것", a == "new" and b == c6 == "merged" and len(H.items) == 1
+check("6 같은 자리 → 합침, 모양 = 가까이서 본 것, 이름 = 점수 높은 것", a == "new" and b == "replaced" and c6 == "kept" and len(H.items) == 1
       and H.items[0]["n"] == 3 and H.items[0]["name"] == "doormat" and abs(hz.area(H.items[0]["poly"]) - hz.area(mat)) < 1e-6,
       (a, b, c6, round(hz.area(H.items[0]["poly"]), 3)))
 
@@ -73,5 +73,21 @@ check("8 costmap 점: 발닦개 격자 ~240 점, 전부 표시 안", ok and insi
 
 # 9. 지우기
 check("9 지우기 → 0 개", H.clear() == 2 and len(H.items) == 0 and len(H.cloud_points()) == 0)
+
+# 10~12. 화면 끝에 잘린 조각 (11-20 실물: 같은 발닦개를 왼쪽 끝·오른쪽 끝에서 봄 → 삼각형 + 조각, 중심 36 cm, 따로 찍힘)
+G = hz.HazardMap()
+left = hz.hull(np.array([(0.55, 0.05), (0.85, 0.05), (0.85, 0.30), (0.55, 0.30), (0.70, 0.40)]))   # 왼쪽 조각
+right = hz.hull(np.array([(0.60, -0.10), (0.95, -0.10), (0.95, 0.02), (0.60, 0.0)]))               # 오른쪽 조각 (8 cm 틈)
+r10 = [G.add("doormat", 0.80, left, 1.0, 0.74, full=False), G.add("doormat", 0.83, right, 2.0, 0.87, full=False)]
+check("10 잘린 두 조각 (8 cm 틈) → 한 물건으로 합침", r10 == ["new", "joined"] and len(G.items) == 1
+      and hz.area(G.items[0]["poly"]) > hz.area(left) + hz.area(right) - 0.01, (r10, round(hz.area(G.items[0]["poly"]), 3)))
+whole = hz.shape_for("rug", rect(0.75, 0.10, 0.57, 0.38), [])
+r11 = G.add("rug", 0.67, whole, 3.0, 0.64, full=True)
+check("11 통째로 본 모양 (rug) 이 오면 → 그걸로 바꿈, 이름은 점수 높은 doormat 유지", r11 == "replaced" and G.items[0]["full"]
+      and abs(hz.area(G.items[0]["poly"]) - hz.area(whole)) < 1e-6 and G.items[0]["name"] == "doormat", r11)
+r12 = G.add("doormat", 0.85, left, 4.0, 0.5, full=False)
+check("12 통째가 있는데 잘린 조각 → 모양 그대로 (확인만)", r12 == "kept" and abs(hz.area(G.items[0]["poly"]) - hz.area(whole)) < 1e-6
+      and len(G.items) == 1, r12)
+check("13 rug 도 바닥형·납작 (발닦개와 같게)", G.judge("rug", 0.67, whole, wall)[0] == "mark")
 
 print(f"\n{sum(results)}/{len(results)} 통과")

@@ -52,7 +52,8 @@ def cam_pose(pan_deg, tilt_deg):
 def pixels_to_floor(px, K, D, pan_deg, tilt_deg):
     """px: N×2 픽셀 → N×2 바닥 (x, y) m. 바닥에 안 닿는 광선(수평 위) 은 nan"""
     import cv2
-    px = np.asarray(px, float).reshape(-1, 1, 2)
+    px = np.ascontiguousarray(np.asarray(px, float).reshape(-1, 2)).reshape(-1, 1, 2)   # 11-20: c[::k] 같은 건너뛴 배열을
+    #   OpenCV 가 메모리 순서대로 읽어 엉뚱한 점을 내림 (발닦개 윤곽 오른쪽 끝 413 px → 왼쪽 +0.25 m, 57×38 → 42×21) → 연속 배열로
     und = cv2.fisheye.undistortPoints(px, K, D).reshape(-1, 2)          # 정규 좌표 (x/z, y/z)
     rays = np.column_stack([und, np.ones(len(und))])
     R, t = cam_pose(pan_deg, tilt_deg)

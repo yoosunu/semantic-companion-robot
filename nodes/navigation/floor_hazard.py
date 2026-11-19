@@ -98,6 +98,9 @@ class FloorHazard(Node):
         if j.get("name") and not j["name"].endswith("?"):
             objs.append(j)
         objs += j.get("extras", [])
+        other = sorted({o["name"] for o in objs if o["name"] not in self.H.types})
+        if other:                                                       # 11-20: rug 를 조용히 버려서 원인 찾기 어려웠음 → 남김
+            self.get_logger().info(f"HAZARD #{j.get('id')} 바닥형 아님 (이름표만): {', '.join(other)}")
         objs = [o for o in objs if o["name"] in self.H.types]
         if not objs:
             return
@@ -113,10 +116,12 @@ class FloorHazard(Node):
             res, why = self.H.judge(o["name"], o["conf"], poly, pts)
             if res == "mark":
                 dist = math.hypot(*(poly.mean(0) - np.array(Tb[:2])))
-                how = self.H.add(o["name"], o["conf"], poly, now, dist=dist)
+                full = not o.get("cut", False)
+                how = self.H.add(o["name"], o["conf"], poly, now, dist=dist, full=full)
                 c = poly.mean(0)
-                self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} → 표시 ({'새로' if how == 'new' else '합침'}) "
-                                       f"중심 ({c[0]:+.2f}, {c[1]:+.2f}) 넓이 {hz.area(poly):.2f} m² 거리 {dist:.2f} m | {why}")
+                word = {"new": "새로", "replaced": "모양 바꿈", "joined": "조각 합침", "kept": "확인만"}[how]
+                self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} {'통째' if full else '잘림'} → 표시 ({word}) "
+                                       f"중심 ({c[0]:+.2f}, {c[1]:+.2f}) 넓이 {hz.area(poly):.2f} m² 거리 {dist:.2f} m | {why} | 지금 {len(self.H.items)} 개")
             else:
                 self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} → 안 찍음 | {why}")
 

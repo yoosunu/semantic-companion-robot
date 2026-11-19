@@ -117,5 +117,11 @@ other = c.fail(-0.5, 0.2, 7.0, pose=(0, 0, 0))
 check("9 포기 2 번 → '?' 기억, 다시 안 봄 (다른 자리는 따로 셈)", not first and second and all(a is None for a in again) and not other
       and c.known(0.5, 0.7, 11, pose=(0, 0, 0))[3] == "?", (first, second))
 
+# 10. 건너뛴 (연속 아닌) 배열도 같은 결과 (11-20 버그: 윤곽 c[::k] 를 OpenCV 가 잘못 읽음)
+pts = np.column_stack([np.linspace(150, 420, 60), np.linspace(170, 230, 60)])
+a10 = ground.pixels_to_floor(pts[::3], K, D, 8, -26)
+b10 = ground.pixels_to_floor(np.ascontiguousarray(pts[::3]), K, D, 8, -26)
+check("10 건너뛴 배열 = 연속 배열 (바닥 좌표 같음)", np.allclose(a10, b10, equal_nan=True), round(float(np.nanmax(np.abs(a10 - b10))), 4))
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
