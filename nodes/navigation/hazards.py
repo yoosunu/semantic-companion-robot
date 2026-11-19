@@ -82,6 +82,17 @@ def area(poly):
     return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
 
 
+def near_dist(poly, r, step=0.01):
+    """로봇 위치 r 에서 다각형 (둘레) 까지 가장 가까운 거리 — 표시의 앞 가장자리"""
+    pts = []
+    for i in range(len(poly)):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        n = max(2, int(np.hypot(*(b - a)) / step) + 1)
+        pts.append(a + (b - a) * np.linspace(0, 1, n)[:, None])
+    pts = np.vstack(pts)
+    return float(np.hypot(pts[:, 0] - r[0], pts[:, 1] - r[1]).min())
+
+
 def floating(obs, min_move=0.25, thr=0.06, rel=0.12, min_obs=3):
     """obs: [(rx, ry, px, py)] 같은 좌표계 — 로봇 위치, 그때 바닥 감지가 본 덩어리의 가장 가까운 점.
        → (판정, 끌려온 m, 로봇 이동 m). 판정 None = 근거 부족 (로봇이 min_move 만큼 안 다가감, 제자리 회전은 정보 없음),
@@ -161,12 +172,29 @@ class HazardMap:
                            "obs": [], "ground": None})
         return "new"
 
-    def observe(self, rx, ry, px, py, near=0.20, keep=40, info=None, remove=True):
+    def observe_frame(self, rx, ry, pts, infos=None, front=0.10, **kw):
+        """한 장면의 덩어리들 (가장 가까운 점들) → 표시마다 **앞 끝 점 하나만** 기록 (11-20 실물: 발닦개가 무늬 때문에 조각 여러 개로
+           잡히고, 멀리선 안쪽 조각 (0.99) 만, 가까이선 앞 끝 (0.84) → 다른 부위를 비교해 "15 cm 끌려옴" 오판).
+           앞 끝 = 로봇에서 가장 가까운 점, 그리고 표시 앞 가장자리 + front (10 cm) 안. 안쪽 깊은 조각은 버림"""
+        out = []
+        infos = infos or [None] * len(pts)
+        for it in list(self.items):
+            cand = [(math.hypot(px - rx, py - ry), px, py, inf) for (px, py), inf in zip(pts, infos)
+                    if inside(grow(it["poly"], kw.get("near", 0.20)), [(px, py)])[0]]
+            if not cand:
+                continue
+            d, px, py, inf = min(cand)
+            if d > near_dist(it["poly"], (rx, ry)) + front:
+                continue
+            out += self.observe(rx, ry, px, py, info=inf, only=it, **kw)
+        return out
+
+    def observe(self, rx, ry, px, py, near=0.20, keep=40, info=None, remove=True, only=None):
         """바닥 감지 덩어리 하나 (로봇 위치 + 가장 가까운 점, 표시와 같은 좌표) → 근처 표시에 모으고 떠 있나 판정.
            → [(결과, 표시)] 결과: "floating" (remove 면 표시 뺌, 아니면 처음 한 번만 알림) / "ground" (바닥 확인, 처음 한 번)
            info = 기록용 (시각·거리 등, 판정엔 안 씀). remove=False = 관찰 모드 (11-20: 진짜 발닦개를 두 번 뺌 → 원인 볼 때까지)"""
         out = []
-        for it in list(self.items):
+        for it in ([only] if only is not None else list(self.items)):
             if not inside(grow(it["poly"], near), [(px, py)])[0]:
                 continue
             it["obs"] = (it["obs"] + [(rx, ry, px, py)])[-keep:]

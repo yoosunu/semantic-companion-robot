@@ -112,4 +112,26 @@ check("18 표시 + 다가가며 본 덩어리 → 떠 있음 → 표시 뺌", [e
 
 check("19 기록 2 개로는 판정 안 함 (3 개부터)", hz.floating(seen(0.05, [0.0, 0.5]))[0] is None)
 
+# 20~21. 11-20 02:09 실물 기록 그대로 (발닦개, 표시 중심 (+1.01, −0.01) 넓이 0.24 → 앞 가장자리 ~0.81).
+#   장면별 덩어리 (가장 가까운 점 x, y). 로봇 0.12 에선 안쪽 조각 (0.99) 만, 이후엔 앞 끝 0.84 가 그대로 → 예전 판정은 "15 cm 끌려옴"
+real = [(0.12, [(0.99, 0.06), (0.99, -0.02)]), (0.17, [(0.84, -0.04), (0.95, 0.05), (1.05, -0.19)]),
+        (0.23, [(0.84, -0.07), (0.92, 0.11)]), (0.29, [(0.85, -0.04)])]
+R = hz.HazardMap()
+R.add("doormat", 0.77, hz.shape_for("doormat", rect(1.01, -0.01, 0.40, 0.60), []), 0.0, 1.0)
+ev = []
+for rx, pts in real:
+    ev += R.observe_frame(rx, 0.0, pts, remove=False)
+check("20 실물 기록 (조각 섞임) → 떠 있음 아님 (앞 끝 점만, 안쪽 조각 버림)", not ev and len(R.items) == 1
+      and [round(o[2], 2) for o in R.items[0]["obs"]] == [0.84, 0.84, 0.85], [round(o[2], 2) for o in R.items[0]["obs"]])
+for rx in (0.36, 0.43, 0.50):                                        # 더 다가감 (앞 끝 그대로) → 바닥 확인
+    ev += R.observe_frame(rx, 0.0, [(0.845, -0.05), (0.97, 0.08)], remove=False)
+check("21 더 다가가면 → 바닥 확인", [e[0] for e in ev] == ["ground"], [e[0] for e in ev])
+
+Q2 = hz.HazardMap()                                                  # 18 과 같은 떠 있는 수건을 장면 단위로 (조각 하나 더 섞어서)
+Q2.add("towel", 0.7, hz.shape_for("towel", rect(1.45, 0.0, 0.4, 0.3), []), 0.0, 1.3)
+ev2 = []
+for rx, ry, px, py in seen(0.05, [0.0, 0.2, 0.35, 0.5]):
+    ev2 += Q2.observe_frame(rx, ry, [(px, py), (px + 0.15, 0.05)], remove=True)
+check("22 떠 있는 것 (장면 단위, 조각 섞임) → 떠 있음", [e[0] for e in ev2] == ["floating"] and not Q2.items, [e[0] for e in ev2])
+
 print(f"\n{sum(results)}/{len(results)} 통과")

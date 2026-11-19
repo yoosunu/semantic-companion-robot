@@ -141,14 +141,17 @@ class FloorHazard(Node):
         r = apply(To, [(X, Y)])[0]
         lag = round(self.get_clock().now().nanoseconds * 1e-9 - float(j.get("t", 0.0)), 2)   # 사진 시각 → 지금 (자세 시각 어긋남 확인용)
         c, s = math.cos(th), math.sin(th)
+        pts, infos = [], []
         for b in j["blobs"]:
             if b.get("edge"):
                 continue        # 11-20 실물: 다가가면 발닦개 앞쪽이 화면 아래로 빠짐 → "가장 가까운 점" = 화면 아래 끝선 = 로봇과 같이 움직임
                                 #   → 진짜 발닦개를 "떠 있음 (25 cm 에 16 cm 끌려옴)" 으로 뺐음. 화면 끝에 걸친 덩어리는 기록 안 함
             p = apply(To, [(X + b["x"] * c - b["y"] * s, Y + b["x"] * s + b["y"] * c)])[0]
-            info = {"t": j.get("t"), "lag": lag, "near": b.get("near"), "head": j.get("head"), "area": b.get("area"),
-                    "r": [round(r[0], 3), round(r[1], 3)], "p": [round(p[0], 3), round(p[1], 3)]}
-            for res, it in self.H.observe(r[0], r[1], p[0], p[1], info=info, remove=self.remove_floating):
+            pts.append(p)
+            infos.append({"t": j.get("t"), "lag": lag, "near": b.get("near"), "head": j.get("head"), "area": b.get("area"),
+                          "r": [round(r[0], 3), round(r[1], 3)], "p": [round(p[0], 3), round(p[1], 3)]})
+        if pts:
+            for res, it in self.H.observe_frame(r[0], r[1], pts, infos, remove=self.remove_floating):
                 rec = " ; ".join(f"r({o['r'][0]:+.2f},{o['r'][1]:+.2f}) p({o['p'][0]:+.2f},{o['p'][1]:+.2f}) near {o['near']} "
                                  f"고개 {o['head']} 면적 {o['area']} 늦음 {o['lag']}s" for o in it.get("raw", [])[-8:] if o)
                 if res == "floating":
