@@ -415,14 +415,14 @@ class GlanceNode(Node):
         cv2.imwrite(os.path.join(OUT, stem + f"_{name.replace(' ', '_').replace('?', 'q')}.jpg"), img)
         if self.push:
             self.push(img)
-        self.focus_next(j, best, wx, wy)
+        self.focus_next(j, best, wx, wy, ext)
 
     def hazard_near(self, wx, wy, r=0.4):
         """floor_hazard 표시 중 (odom 좌표) 가장 가까운 것 (r 안) 또는 None"""
         near = [h for h in self.hazards if "ox" in h and math.hypot(h["ox"] - wx, h["oy"] - wy) < r]
         return min(near, key=lambda h: math.hypot(h["ox"] - wx, h["oy"] - wy)) if near else None
 
-    def focus_next(self, j, best, wx, wy):
+    def focus_next(self, j, best, wx, wy, ext=()):
         """따라보기 (11-20 Jasper): 확신 못 한 건 고개로 그 물건만 따라가며 다시 봄 → 확신되면 끝 (glanced) → 다음 후보.
            확신 = glance.focus_verdict (이름 0.5 이상 두 번, 바닥형이면 통째 + 바닥 확인). 끝: 확신 / 빈 바닥 / focus_max 초과 /
            너무 가깝거나 멀어 못 봄 (고개 −30 이 바닥 ~0.45 m 까지)"""
@@ -434,6 +434,19 @@ class GlanceNode(Node):
         if best and best[3] is not None:
             j["full"] = j.get("full", False) or not self.cut(best[3])
             j["cand"] = dict(j["cand"], wx=wx, wy=wy)                   # 다음엔 물건 앞 끝을 겨눔 (십자도 거기)
+        elif ext:
+            # 11-20 실물: 십자가 발닦개 마스크를 살짝 빗나감 (덤으로는 rug 0.73 통째) → 표가 비어 빈 점만 따라봄.
+            #   십자 30 cm 안에 덤 물건이 있으면 그걸로 겨냥을 옮김
+            cw, ch = j["cand"]["wx"], j["cand"]["wy"]
+            near = [e for e in ext if math.hypot(e["wx"] - cw, e["wy"] - ch) < 0.30]
+            if near:
+                e = min(near, key=lambda e: math.hypot(e["wx"] - cw, e["wy"] - ch))
+                votes.setdefault(e["name"], []).append(round(float(e["conf"]), 3))
+                j["full"] = j.get("full", False) or not e["cut"]
+                j["cand"] = dict(j["cand"], wx=e["wx"], wy=e["wy"])
+                wx, wy = e["wx"], e["wy"]
+                self.get_logger().info(f"FOCUS #{j['id']} 십자 옆 {e['name']} {e['conf']:.2f} 로 겨냥 옮김 "
+                                       f"({math.hypot(e['wx'] - cw, e['wy'] - ch) * 100:.0f} cm)")
         done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on)
         took = now - j["t"]["req"]
         x, y = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
@@ -452,6 +465,7 @@ class GlanceNode(Node):
                  frames=[], pool=[], skipped=0)
         for k in ("head", "first", "frames", "yolo26", "yoloe"):
             j["t"].pop(k, None)
+        j["t"]["mode"] = now          # 11-20 버그: 안 바꾸면 "고개 명령 1 s 안에" 를 첫 보기 시각부터 재서 다시 겨누자마자 포기
         self.pub_req.publish(String(data="glance:" + json.dumps({"id": j["id"], "pan": j["pan"], "tilt": j["tilt"],
                                                                   "hold": self.focus_max + 3.0})))
         self.get_logger().info(f"FOCUS #{j['id']} 다시 봄 ({why}) → 고개 ({pan:+.0f}, {tilt:+.0f}), 거리 {d:.2f} m, {took:.1f} s")
