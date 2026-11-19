@@ -25,7 +25,7 @@
     - 상자 투표·다듬기: 같은 이름이 2 장에서 → 평균 점수·평균 상자. 한 장에서만 튄 건 버림
     - 가운데에서 본 상자 아래 끝 → 위치를 다시 계산해 기억 (가장자리에 걸쳤던 후보도 여기서 정확해짐)
   입력  floor/blobs, neri/profile, pantilt/cmd, camera/image_raw, odom
-  출력  neri/request "glance:{id,pan,tilt}", neri/event glanced, semantic/seen {"id","name","conf","model","wx","wy","footprint","extras","ms"}
+  출력  neri/request "glance:{id,pan,tilt}", neri/event glanced, semantic/seen {"id","name","conf","model","wx","wy","footprint","outline","extras","ms"} (좌표 = odom)
   확인용: -p stream_port:=8086 → 마지막 힐끗 장면 (상자·후보 십자·투표·시간). 사진 ~/glance_log/ (집 안 → repo 에 안 올림)
   파이썬: onnxruntime → ~/yolo_venv/bin/python
 """
@@ -286,8 +286,24 @@ class GlanceNode(Node):
                 continue
             wx, wy = gl.to_world(self.pose, x, y)
             out.append({"name": d[0], "conf": round(float(d[1]), 3), "x": round(x, 3), "y": round(y, 3),
-                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]]})
+                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]],
+                        "footprint": self.world(fp), "outline": self.world(self.outline(d[6], j["pan"], j["tilt"]))})
         return out
+
+    def outline(self, mask, pan, tilt):
+        """마스크 바깥 윤곽 전체 → 바닥 (x, y) 로봇 좌표 m (최대 40 점). 납작한 물건 (발닦개) 은 윤곽 전체가 바닥 위라 이게 모양.
+           떠 있는 물건엔 틀린 값 → 쓸지는 받는 쪽 (floor_hazard: 바닥형 + LiDAR 못 봄) 이 정함 (11-19)"""
+        cs, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cs:
+            return np.zeros((0, 2))
+        c = max(cs, key=cv2.contourArea).reshape(-1, 2).astype(float) + 0.5
+        c = c[:: max(1, len(c) // 40)]
+        fl = ground.pixels_to_floor(c, self.K, self.D, pan, tilt)
+        fl = fl[np.isfinite(fl).all(1)]
+        return fl[np.hypot(fl[:, 0], fl[:, 1]) < 2.5]
+
+    def world(self, pts):
+        return [[round(v, 3) for v in gl.to_world(self.pose, x, y)] for x, y in pts]
 
     def footprint(self, mask, pan, tilt):
         """마스크 아래 윤곽 (열마다 가장 아래 픽셀) → 바닥 (x, y) 로봇 좌표 m. 위에서 본 물건이 바닥에 닿은 모양"""
@@ -328,13 +344,14 @@ class GlanceNode(Node):
         else:
             name, conf, model = "?", 0.0, "-"
         wx, wy = j["cand"]["wx"], j["cand"]["wy"]
-        foot = []
+        foot, outl = [], []
         if best and best[3] is not None:                                # 마스크 → 바닥 발자국 → 위치 = 로봇에 제일 가까운 발자국 점
             fp = self.footprint(best[3], j["pan"], j["tilt"])
             if len(fp):
                 i = int(np.argmin(np.hypot(fp[:, 0], fp[:, 1])))
                 wx, wy = gl.to_world(self.pose, fp[i, 0], fp[i, 1])
-                foot = [[round(v, 3) for v in gl.to_world(self.pose, x, y)] for x, y in fp]
+                foot = self.world(fp)
+            outl = self.world(self.outline(best[3], j["pan"], j["tilt"]))
         elif best:                                                      # 마스크 없음: 가운데에서 본 상자 아래 끝으로 위치 다시
             bx, by, bw, bh = best[2]
             fl = ground.pixels_to_floor([[bx + bw / 2, by + bh]], self.K, self.D, j["pan"], j["tilt"])[0]
@@ -351,7 +368,7 @@ class GlanceNode(Node):
         r = t["req"]
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
-                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "extras": ext, "ms": ms})))
+                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl, "extras": ext, "ms": ms})))
         self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(

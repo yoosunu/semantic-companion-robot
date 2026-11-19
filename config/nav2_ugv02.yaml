@@ -53,7 +53,7 @@ behavior_server:                         # 복구 동작 (spin / backup) 도 기
 local_costmap:
   local_costmap:
     ros__parameters:
-      plugins: ["obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
+      plugins: ["obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "semantic_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
       whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (nodes/navigation/whisker.py) — LiDAR 가 못 보는 것
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
@@ -73,6 +73,21 @@ local_costmap:
       inflation_layer:
         inflation_radius: 0.18           # [m] 시뮬 0.5 → 0.30 → 0.25 → 0.20 → 11-11 0.18 = 최저선: 몸 외접원 0.177 (이보다 작으면 "돌 수 있는 칸"(비용<78)을 비용지도로 못 가림)
         cost_scaling_factor: 4.0
+      semantic_layer:                    # 11-19 비전 바닥 위험물 (nodes/navigation/floor_hazard.py) — 발닦개·양말처럼 LiDAR·ToF 가 못 보는 것.
+        plugin: "nav2_costmap_2d::ObstacleLayer"   # 위스커 층과 같은 설정: LiDAR 가 안 지움 (그 위를 빛이 지나가도 발닦개는 거기 있음). 지우기 = /semantic/clear
+        enabled: true
+        footprint_clearing_enabled: false
+        observation_sources: semantic
+        semantic:
+          topic: /semantic/cloud
+          data_type: "PointCloud2"
+          marking: true
+          clearing: false
+          obstacle_max_range: 50.0
+          obstacle_min_range: 0.0
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          expected_update_rate: 0.0
       whisker_inflation:                 # 11-11 Jasper: 위스커 표시만 얇게 부풀림 (25 cm 로 부풀리면 15 cm 선이 폭 65 cm 덩어리 → 크게 돌아감).
         plugin: "nav2_costmap_2d::InflationLayer"   # 순서: LiDAR → 부풀리기 20 cm → 위스커 → 이것 10 cm. 더 큰 값과 겹치면 큰 값 유지
         inflation_radius: 0.12           #   11-11 10 → 12 cm = 몸 반폭 (표시 옆을 몸이 닿지 않고 긁듯이)
@@ -90,7 +105,7 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      plugins: ["static_layer", "obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
+      plugins: ["static_layer", "obstacle_layer", "voxel_layer", "inflation_layer", "whisker_layer", "semantic_layer", "whisker_inflation"]   # 11-11 위스커는 부풀리기 뒤 + 얇게
       whisker_layer:                     # 11-06 Whisker 2층: 부딪힘·끄덕임 자리 (nodes/navigation/whisker.py) — LiDAR 가 못 보는 것
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
@@ -110,6 +125,21 @@ global_costmap:
       inflation_layer:
         inflation_radius: 0.18           # 11-11 최저선 0.18 (지역과 같게, 몸 외접원 0.177)
         cost_scaling_factor: 4.0
+      semantic_layer:                    # 11-19 비전 바닥 위험물 (nodes/navigation/floor_hazard.py) — 발닦개·양말처럼 LiDAR·ToF 가 못 보는 것.
+        plugin: "nav2_costmap_2d::ObstacleLayer"   # 위스커 층과 같은 설정: LiDAR 가 안 지움 (그 위를 빛이 지나가도 발닦개는 거기 있음). 지우기 = /semantic/clear
+        enabled: true
+        footprint_clearing_enabled: false
+        observation_sources: semantic
+        semantic:
+          topic: /semantic/cloud
+          data_type: "PointCloud2"
+          marking: true
+          clearing: false
+          obstacle_max_range: 50.0
+          obstacle_min_range: 0.0
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          expected_update_rate: 0.0
       whisker_inflation:                 # 11-11 Jasper: 위스커 표시만 얇게 부풀림 (25 cm 로 부풀리면 15 cm 선이 폭 65 cm 덩어리 → 크게 돌아감).
         plugin: "nav2_costmap_2d::InflationLayer"   # 순서: LiDAR → 부풀리기 20 cm → 위스커 → 이것 10 cm. 더 큰 값과 겹치면 큰 값 유지
         inflation_radius: 0.12           #   11-11 10 → 12 cm = 몸 반폭 (표시 옆을 몸이 닿지 않고 긁듯이)

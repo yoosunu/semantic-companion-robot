@@ -599,6 +599,24 @@ Visualization Manager:
     Value: true
   - Class: rviz_default_plugins/PointCloud2
     Enabled: true
+    Name: Semantic hazard (비전 바닥 위험물)
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /semantic/cloud
+    Style: Spheres
+    Size (m): 0.03
+    Color Transformer: FlatColor
+    Color: 255; 60; 60
+    Alpha: 1
+    Decay Time: 0
+    Position Transformer: XYZ
+    Use Fixed Frame: true
+    Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Enabled: true
     Name: Whisker soft (1 min)
     Topic:
       Depth: 5
