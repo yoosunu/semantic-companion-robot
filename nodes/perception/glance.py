@@ -45,18 +45,19 @@ def pick_sharp(shs, n=2, ratio=0.6, extra=3):
 FLOOR_TYPES = ("doormat", "rug", "sock", "towel", "clothes", "plastic bag", "shoe", "slipper")   # = nodes/navigation/hazards.py
 
 
-def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_TYPES):
+def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_TYPES, on_for=None):
     """따라보기 (11-20 Jasper: 확신 못 한 건 고개로 따라가며 하나만 계속 봄, 확신되면 다음) — 끝낼지 판단.
        votes: {이름: [점수, ...]} 이번 물건을 본 횟수만큼 (십자 물건), views: 본 횟수, full: 통째로 본 적 있음,
        hazard: floor_hazard 표시 상태 ({"ground": True/None, "flagged": bool}) 또는 None (표시 없음)
+       on_for(이름) → 그 이름의 문턱 (11-20 Jasper: YOLOE 는 원래 낮게 나옴 — 휴지통 0.45·0.45·0.49 세 번 → YOLOE 단어 0.4, COCO 0.5)
        → (끝?, 결과 이름 또는 "?", 이유)"""
-    good = {n: [c for c in v if c >= on] for n, v in votes.items()}
+    good = {n: [c for c in v if c >= (on_for(n) if on_for else on)] for n, v in votes.items()}
     good = {n: v for n, v in good.items() if v}
     if sum(len(v) for v in good.values()) < need:                   # 11-20: 이름이 갈려도 (선반·수납함·빨래통) 0.5 넘은 게 두 번이면 확신
         if views >= need and not votes:
             return True, "-", "빈 바닥 (두 번 봐도 아무것도 없음)"
         if views >= 3 and not good:
-            return True, "?", f"{views} 번 봐도 {on} 넘는 이름 없음"  # 11-20: shelf 0.23 하나로 17 s 를 다 씀
+            return True, "?", f"{views} 번 봐도 문턱 넘는 이름 없음"  # 11-20: shelf 0.23 하나로 17 s 를 다 씀
         return False, "?", "이름 아직"
     name = max(good, key=lambda n: sum(good[n]) / len(good[n]))
     split = f" (이름 갈림: {', '.join(sorted(good))})" if len(good) > 1 else ""

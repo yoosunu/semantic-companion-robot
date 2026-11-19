@@ -597,6 +597,18 @@ Visualization Manager:
     Position Transformer: XYZ
     Use Fixed Frame: true
     Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Enabled: true
+    Name: Semantic labels (이름표)
+    Namespaces:
+      {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /semantic/markers
+    Value: true
   - Class: rviz_default_plugins/PointCloud2
     Enabled: true
     Name: Semantic hazard (비전 바닥 위험물)

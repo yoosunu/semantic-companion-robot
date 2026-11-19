@@ -17,6 +17,7 @@ tmux new -d -s look "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R
 tmux new -d -s exec "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R/nodes/behavior/executive.py --ros-args ${EXEC_ARGS:--p doze_after:=[3600.0,3600.0]}; exec bash'"
 tmux new -d -s floor "bash -ic 'python3 -u $R/nodes/perception/floor_perception.py --ros-args -p stream_port:=8085 ${FLOOR_ARGS}; exec bash'"
 tmux new -d -s inspect "bash -ic 'source ~/scr_ws/install/setup.bash; ~/yolo_venv/bin/python -u $R/nodes/perception/glance_node.py --ros-args -p stream_port:=8086 -p yoloe_model:=$HOME/models/yoloe-26s-seg-home.onnx ${INSPECT_ARGS}; exec bash'"
+tmux new -d -s labels "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R/nodes/perception/semantic_markers.py; exec bash'"   # 11-20 RViz 이름표
 tmux new -d -s hazard "bash -ic 'source ~/scr_ws/install/setup.bash; python3 -u $R/nodes/navigation/floor_hazard.py --ros-args ${HAZARD_ARGS} 2>&1 | tee -ia $LOGD/hazard_$STAMP.log; exec bash'"
 sleep 10
 n=$(pgrep -fc "nodes/navigation/whisker.py"); echo "Whisker 노드: $n 개 (1 이어야 함)"

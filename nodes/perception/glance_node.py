@@ -79,7 +79,7 @@ class GlanceNode(Node):
         self.create_timer(0.2, self.track)
         self.hazards = []
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
-        self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
+        self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 3.0).value
         self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건 (마스크 없을 때)
         self.mask_px = p("mask_px", 15).value               # 후보 점이 마스크에서 이만큼 안이면 그 물건 (마스크 있을 때)
         self.body_frac = p("body_frac", 0.5).value          # 마스크 (없으면 상자) 가 로봇 몸 자리에 이 비율 이상이면 자기 몸 → 버림
@@ -89,7 +89,10 @@ class GlanceNode(Node):
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
         self.K, self.D, self.size = ground.load_calib()
-        self.cands = gl.Candidates(max_dist=p("max_dist", 1.2).value, memory_s=float("inf"))   # 11-18 Jasper: 켜져 있는 동안 계속 기억
+        self.cands = gl.Candidates(max_dist=p("max_dist", 1.2).value, memory_s=float("inf"), need=p("cand_need", 3).value)
+        #   11-18 Jasper: 켜져 있는 동안 계속 기억. 11-20: 2 → 3 번 봐야 후보, 힐끗 사이 1 → 3 s (8 번 중 빈 바닥 3·코앞 1 = 부산스러움)
+        self.near_edge = p("near_edge_m", 0.45).value       # 11-20: 이 안의 화면 끝 후보는 버림 (켜자마자 (0.2, ±0.34) 매번 = 어안 구석)
+        self.yoloe_on_focus = p("yoloe_focus_on", 0.4).value   # 11-20 Jasper: YOLOE 는 원래 낮게 나옴 → 따라보기 확신 문턱 0.4 (COCO 는 extra_on 0.5)
         self.mode, self.prof_glance = "IDLE", None
         self.pose = (0.0, 0.0, 0.0)
         self.head_cmd, self.head_t = (0.0, 10.0), 0.0
@@ -110,6 +113,7 @@ class GlanceNode(Node):
         self.pub_req = self.create_publisher(String, "neri/request", 10)
         self.pub_ev = self.create_publisher(String, "neri/event", 10)
         self.pub_seen = self.create_publisher(String, "semantic/seen", 10)
+        self.pub_label = self.create_publisher(String, "semantic/label", 10)    # 따라보기 결과 하나 (11-20, 이름표용)
         self.get_logger().info(f"GLANCE 준비: YOLO26 (COCO) 먼저 ≥{self.coco_on} → YOLOE 단어 {len(self.yoloe_words)}개 "
                                f"({', '.join(self.yoloe_words)}) ≥{self.yoloe_on}" + (f", 스트림 {port}" if port else ""))
 
@@ -149,7 +153,8 @@ class GlanceNode(Node):
             return
         now = time.time()
         pan0, tilt0 = d.get("head", [0.0, 10.0])
-        cand = self.cands.step(now, tuple(d["pose"]), [(b["x"], b["y"], b["area"], b.get("edge", False)) for b in d["blobs"]],
+        blobs = [b for b in d["blobs"] if not (b.get("edge") and math.hypot(b["x"], b["y"]) < self.near_edge)]
+        cand = self.cands.step(now, tuple(d["pose"]), [(b["x"], b["y"], b["area"], b.get("edge", False)) for b in blobs],
                                visible=self.visible_fn(pan0, tilt0))
         if not cand:
             return
@@ -488,7 +493,8 @@ class GlanceNode(Node):
                 wx, wy = e["wx"], e["wy"]
                 self.get_logger().info(f"FOCUS #{j['id']} 십자 옆 {e['name']} {e['conf']:.2f} 로 겨냥 옮김 "
                                        f"({math.hypot(e['wx'] - cw, e['wy'] - ch) * 100:.0f} cm)")
-        done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on)
+        on_for = lambda n: self.yoloe_on_focus if n in self.yoloe_words else self.extra_on
+        done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on, on_for=on_for)
         took = now - j["t"]["req"]
         x, y = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
         d = math.hypot(x, y)
@@ -497,6 +503,12 @@ class GlanceNode(Node):
             done, res = True, res if res == "?" else res + "?"
         if done:
             self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
+            if res != "-":                                              # 이름표 (RViz, semantic_markers) — 빈 바닥은 안 띄움
+                base = res.rstrip("?")
+                v = votes.get(base, [])
+                self.pub_label.publish(String(data=json.dumps({
+                    "id": j["id"], "name": res, "conf": round(sum(v) / len(v), 3) if v else 0.0, "why": why, "views": j["views"],
+                    "wx": round(j["cand"]["wx"], 3), "wy": round(j["cand"]["wy"], 3), "floor": base in gl.FLOOR_TYPES})))
             self.get_logger().info(f"FOCUS #{j['id']} 끝 → {res} | {why} | {j['views']} 번 봄, {took:.1f} s | 표 {votes}")
             self.job, self.end_t = None, now
             return

@@ -61,7 +61,7 @@ class FloorHazard(Node):
         p = self.declare_parameter
         self.frame = p("frame", "map").value
         self.remove_floating = p("remove_floating", False).value   # 11-20: 진짜 발닦개를 "떠 있음" 으로 두 번 뺌 → 원인 볼 때까지 관찰 모드
-        self.H = hz.HazardMap(on=p("on", 0.5).value, scan_max=p("scan_max", 2).value)
+        self.H = hz.HazardMap(on=p("on", 0.4).value, scan_max=p("scan_max", 2).value)   # 11-20: 0.5 → 0.4 (바닥형은 전부 YOLOE 단어, 따라보기와 같게)
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.scan = None

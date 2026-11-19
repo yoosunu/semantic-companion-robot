@@ -135,5 +135,11 @@ check("11 따라보기: 의자 1번 = 더 봄 / 2번 = 끝 / 빈 바닥 = 끝 / 
       c11 == [(False, "?"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (True, "doormat"),
               (True, "doormat"), (True, "doormat"), (True, "?"), (True, "shelf")], c11)
 
+on4 = lambda n: 0.4 if n in ("trash can", "doormat") else 0.5
+c12 = [fv({"trash can": [0.445, 0.451, 0.491]}, 3, True, None, on_for=on4)[:2], fv({"trash can": [0.445, 0.451, 0.491]}, 3, True, None)[:2],
+       fv({"chair": [0.45, 0.48, 0.44]}, 3, True, None, on_for=on4)[:2]]
+check("12 YOLOE 단어 문턱 0.4: 휴지통 0.45·0.45·0.49 → 확신 (0.5 면 ?) / COCO 의자 0.45 → ? (0.5 그대로)",
+      c12 == [(True, "trash can"), (True, "?"), (True, "?")], c12)
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)
