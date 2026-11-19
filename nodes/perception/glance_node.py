@@ -75,7 +75,8 @@ class GlanceNode(Node):
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.6).value
         self.extra, self.max_fail = p("frames_extra", 3).value, p("max_fail", 2).value
         self.focus_max, self.focus_min_d = p("focus_max", 15.0).value, p("focus_min_d", 0.45).value   # 따라보기 (11-20)
-        self.focus_deg = p("focus_deg", 3.0).value          # 다시 겨눌 때 이만큼 안 바뀌면 고개 그대로
+        self.track_deg = p("track_deg", 1.5).value          # 따라가기: 물건 각도가 이만큼 바뀌면 고개를 따라 돌림 (초당 5 번 계산)
+        self.create_timer(0.2, self.track)
         self.hazards = []
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
@@ -174,6 +175,25 @@ class GlanceNode(Node):
                 t["mode"] = now
             elif now - t["req"] > 2.0:
                 self.give_up("사령관이 안 받음")
+            return
+        if j.get("views"):                                              # 따라보는 중 (11-20): 고개가 계속 따라가니 "멈추고 기다림" 대신
+            if self.mode != "GLANCE":                                   #   명령이 0.15 s 안 바뀌고 목표와 2° 안이면 찍음 (흔들린 장은 흐림이 거름)
+                self.give_up("힐끗 끝남 (사람·시간)")
+                return
+            a = j.get("aim", (j["pan"], j["tilt"]))
+            if now - self.head_t < 0.15 or max(abs(self.head_cmd[0] - a[0]), abs(self.head_cmd[1] - a[1])) > 2.0:
+                return
+            j["pan"], j["tilt"] = self.head_cmd                         # 이 장의 고개 자세 (바닥 좌표 계산용)
+            bgr = to_bgr(m)
+            j["pool"].append((bgr, sharpness(bgr)))
+            idx = gl.pick_sharp([s for _, s in j["pool"]], self.n_frames, self.sharp_ratio, self.extra)
+            if idx is None:
+                return
+            j["frames"] = [j["pool"][i] for i in idx]
+            j["skipped"] = len(j["pool"]) - len(idx)
+            t["head"] = t["frames"] = now
+            j["settle"] = 0.0
+            self.decide(j, max(s for _, s in j["pool"]))
             return
         if "head" not in t:
             if self.head_cmd == (j["pan"], j["tilt"]):
@@ -418,6 +438,23 @@ class GlanceNode(Node):
             self.push(img)
         self.focus_next(j, best, wx, wy, ext)
 
+    def track(self):
+        """따라가기 (11-20 Jasper): 따라보는 동안 초당 5 번, 지금 로봇 위치로 물건 각도를 다시 계산해 track_deg 넘게 바뀌면 고개를
+           따라 돌림 → 주행 중에도 물건이 화면 안 (가운데 근처) 에 붙어 있음, 보는 사람도 "저걸 보는구나". YOLO 주기 (2.5 s) 와 따로"""
+        j = self.job
+        if not j or not j.get("views") or self.mode != "GLANCE":
+            return
+        x, y = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
+        pan, tilt = gl.head_for(x, y)
+        a = j.get("aim", (j["pan"], j["tilt"]))
+        if max(abs(pan - a[0]), abs(tilt - a[1])) >= self.track_deg:
+            self.aim(j, pan, tilt)
+
+    def aim(self, j, pan, tilt):
+        j["aim"] = (round(pan, 1), round(tilt, 1))
+        self.pub_req.publish(String(data="glance:" + json.dumps({"id": j["id"], "pan": j["aim"][0], "tilt": j["aim"][1],
+                                                                  "hold": self.focus_max + 3.0})))
+
     def hazard_near(self, wx, wy, r=0.4):
         """floor_hazard 표시 중 (odom 좌표) 가장 가까운 것 (r 안) 또는 None"""
         near = [h for h in self.hazards if "ox" in h and math.hypot(h["ox"] - wx, h["oy"] - wy) < r]
@@ -432,14 +469,16 @@ class GlanceNode(Node):
         votes = j.setdefault("votes", {})
         if best and best[1] >= self.maybe:
             votes.setdefault(best[0], []).append(round(float(best[1]), 3))
+        cw, ch = j["cand"]["wx"], j["cand"]["wy"]
         if best and best[3] is not None:
             j["full"] = j.get("full", False) or not self.cut(best[3])
-            if not best[3][-3:].any():                                  # 11-20: 화면 아래 끝에 잘린 마스크의 "가장 가까운 점" = 끝선 (침대 → 0.15 m)
-                j["cand"] = dict(j["cand"], wx=wx, wy=wy)               # 다음엔 물건 앞 끝을 겨눔 (십자도 거기)
+            # 겨냥 옮기기: 아래 끝에 잘린 마스크는 안 됨 ("가장 가까운 점" = 끝선, 침대 → 0.15 m), 지금 목표 30 cm 안만 (11-20 #8: 문으로
+            #   넘어감), 반만 옮김 (같은 물건인데 매번 몇 cm 씩 달라 고개가 꼼지락)
+            if not best[3][-3:].any() and math.hypot(wx - cw, wy - ch) < 0.30:
+                j["cand"] = dict(j["cand"], wx=(cw + wx) / 2, wy=(ch + wy) / 2)
         elif ext:
             # 11-20 실물: 십자가 발닦개 마스크를 살짝 빗나감 (덤으로는 rug 0.73 통째) → 표가 비어 빈 점만 따라봄.
             #   십자 30 cm 안에 덤 물건이 있으면 그걸로 겨냥을 옮김
-            cw, ch = j["cand"]["wx"], j["cand"]["wy"]
             near = [e for e in ext if math.hypot(e["wx"] - cw, e["wy"] - ch) < 0.30 and not e.get("cut_bottom")]
             if near:
                 e = min(near, key=lambda e: math.hypot(e["wx"] - cw, e["wy"] - ch))
@@ -462,16 +501,15 @@ class GlanceNode(Node):
             self.job, self.end_t = None, now
             return
         pan, tilt = gl.head_for(x, y)
-        if max(abs(pan - j["pan"]), abs(tilt - j["tilt"])) < self.focus_deg:   # 11-20: 같은 물건인데 2~9° 씩 꼼지락 → 3° 안이면 그대로
-            pan, tilt = j["pan"], j["tilt"]
-        turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
-        j.update(pan=round(pan, 1), tilt=round(tilt, 1), turn=turn, settle=self.settle_base + self.settle_deg * turn,
-                 frames=[], pool=[], skipped=0)
+        j.update(frames=[], pool=[], skipped=0)
         for k in ("head", "first", "frames", "yolo26", "yoloe"):
             j["t"].pop(k, None)
         j["t"]["mode"] = now          # 11-20 버그: 안 바꾸면 "고개 명령 1 s 안에" 를 첫 보기 시각부터 재서 다시 겨누자마자 포기
-        self.pub_req.publish(String(data="glance:" + json.dumps({"id": j["id"], "pan": j["pan"], "tilt": j["tilt"],
-                                                                  "hold": self.focus_max + 3.0})))
+        a = j.get("aim", (j["pan"], j["tilt"]))
+        if max(abs(pan - a[0]), abs(tilt - a[1])) >= self.track_deg:   # 이후로는 track() 이 초당 5 번 따라감
+            self.aim(j, pan, tilt)
+        else:
+            j.setdefault("aim", (j["pan"], j["tilt"]))
         self.get_logger().info(f"FOCUS #{j['id']} 다시 봄 ({why}) → 고개 ({pan:+.0f}, {tilt:+.0f}), 거리 {d:.2f} m, {took:.1f} s")
 
 

@@ -54,6 +54,7 @@ GLANCE_S = 3.0
 IDLE_EVERY = (5.0, 12.0)             # 딴짓 시선 바꾸는 간격
 IDLE_OFF = (10.0, 20.0)              # 딴짓: 사람에서 이만큼 옆 (11-12: 45° 면 어안 가장자리라 먼 얼굴 놓침 / 11-17: 15~30 → 10~20, 소리)
 CALM_DPS, SCAN_DPS, CALM_ACC = 60.0, 45.0, 10   # 딴짓·두리번 속도 (°/s) 와 가속. 눈맞춤은 SPD 0 (최고)
+TRACK_DPS = 40.0                                 # 따라보기 (11-20): 주행 중 물건을 화면에 붙잡아 두는 작은 걸음 속도
 FINE, FINE_WAIT = 3.0, 1.2           # 눈맞춤 다듬기: 오차 3° 넘고, 마지막 이동 뒤 1.2 s
 SCAN_AFTER = 5.0
 SCAN_EVERY = (6.0, 14.0)            # 11-12 Jasper: 4~7 s 는 너무 두리번거림
@@ -198,8 +199,8 @@ class Brain:
                                 (2.0, ("move", self.pan, TILT_SLEEP, *SLOW, 1.5))])
         if head == self.head:
             if head == "glance" and glance and (float(glance["pan"]), float(glance["tilt"])) != self.glance_aim:
-                self.glance_aim = (float(glance["pan"]), float(glance["tilt"]))   # 11-20 따라보기: 같은 힐끗 중 목표가 바뀜 → 다시 겨눔
-                self.move(out, now, *self.glance_aim)
+                self.glance_aim = (float(glance["pan"]), float(glance["tilt"]))   # 11-20 따라보기: 같은 힐끗 중 목표가 바뀜 → 따라감
+                self.move(out, now, *self.glance_aim, int(TRACK_DPS * STEPS_PER_DEG), CALM_ACC, settle=0.2)   # 작은 걸음은 부드럽게
             return out
         prev, self.head = self.head, head
         if head == "glance" and glance:
