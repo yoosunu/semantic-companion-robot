@@ -60,6 +60,7 @@ class FloorHazard(Node):
         super().__init__("floor_hazard")
         p = self.declare_parameter
         self.frame = p("frame", "map").value
+        self.remove_floating = p("remove_floating", False).value   # 11-20: 진짜 발닦개를 "떠 있음" 으로 두 번 뺌 → 원인 볼 때까지 관찰 모드
         self.H = hz.HazardMap(on=p("on", 0.5).value, scan_max=p("scan_max", 2).value)
         self.tf = Buffer()
         TransformListener(self.tf, self)
@@ -138,19 +139,26 @@ class FloorHazard(Node):
             return
         X, Y, th = j["pose"]
         r = apply(To, [(X, Y)])[0]
+        lag = round(self.get_clock().now().nanoseconds * 1e-9 - float(j.get("t", 0.0)), 2)   # 사진 시각 → 지금 (자세 시각 어긋남 확인용)
         c, s = math.cos(th), math.sin(th)
         for b in j["blobs"]:
             if b.get("edge"):
                 continue        # 11-20 실물: 다가가면 발닦개 앞쪽이 화면 아래로 빠짐 → "가장 가까운 점" = 화면 아래 끝선 = 로봇과 같이 움직임
                                 #   → 진짜 발닦개를 "떠 있음 (25 cm 에 16 cm 끌려옴)" 으로 뺐음. 화면 끝에 걸친 덩어리는 기록 안 함
             p = apply(To, [(X + b["x"] * c - b["y"] * s, Y + b["x"] * s + b["y"] * c)])[0]
-            for res, it in self.H.observe(r[0], r[1], p[0], p[1]):
+            info = {"t": j.get("t"), "lag": lag, "near": b.get("near"), "head": j.get("head"), "area": b.get("area"),
+                    "r": [round(r[0], 3), round(r[1], 3)], "p": [round(p[0], 3), round(p[1], 3)]}
+            for res, it in self.H.observe(r[0], r[1], p[0], p[1], info=info, remove=self.remove_floating):
+                rec = " ; ".join(f"r({o['r'][0]:+.2f},{o['r'][1]:+.2f}) p({o['p'][0]:+.2f},{o['p'][1]:+.2f}) near {o['near']} "
+                                 f"고개 {o['head']} 면적 {o['area']} 늦음 {o['lag']}s" for o in it.get("raw", [])[-8:] if o)
                 if res == "floating":
-                    self.get_logger().warn(f"HAZARD {it['name']} 떠 있음 → 표시 뺌 (다가간 {it['move']:.2f} m 에 {it['pull']:.2f} m 끌려옴) "
-                                           f"| 지금 {len(self.H.items)} 개")
-                    self.clear_costmaps()
+                    act = "표시 뺌" if self.remove_floating else "관찰 모드라 표시 유지"
+                    self.get_logger().warn(f"HAZARD {it['name']} 떠 있음? → {act} (다가간 {it['move']:.2f} m 에 {it['pull']:.2f} m 끌려옴) "
+                                           f"| 지금 {len(self.H.items)} 개 | 기록: {rec}")
+                    if self.remove_floating:
+                        self.clear_costmaps()
                 else:
-                    self.get_logger().info(f"HAZARD {it['name']} 바닥 확인 (다가간 {it['move']:.2f} m 에 {it['pull']:+.2f} m)")
+                    self.get_logger().info(f"HAZARD {it['name']} 바닥 확인 (다가간 {it['move']:.2f} m 에 {it['pull']:+.2f} m) | 기록: {rec}")
 
     def clear_costmaps(self):
         for cl in self.clear_cli:

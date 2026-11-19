@@ -161,18 +161,24 @@ class HazardMap:
                            "obs": [], "ground": None})
         return "new"
 
-    def observe(self, rx, ry, px, py, near=0.20, keep=40):
+    def observe(self, rx, ry, px, py, near=0.20, keep=40, info=None, remove=True):
         """바닥 감지 덩어리 하나 (로봇 위치 + 가장 가까운 점, 표시와 같은 좌표) → 근처 표시에 모으고 떠 있나 판정.
-           → [(결과, 표시)] 결과: "floating" (표시 뺌) / "ground" (바닥 확인, 처음 한 번)"""
+           → [(결과, 표시)] 결과: "floating" (remove 면 표시 뺌, 아니면 처음 한 번만 알림) / "ground" (바닥 확인, 처음 한 번)
+           info = 기록용 (시각·거리 등, 판정엔 안 씀). remove=False = 관찰 모드 (11-20: 진짜 발닦개를 두 번 뺌 → 원인 볼 때까지)"""
         out = []
         for it in list(self.items):
             if not inside(grow(it["poly"], near), [(px, py)])[0]:
                 continue
             it["obs"] = (it["obs"] + [(rx, ry, px, py)])[-keep:]
+            it.setdefault("raw", []).append(info)
+            it["raw"] = it["raw"][-keep:]
             v, pull, mv = floating(it["obs"])
             it["pull"], it["move"] = round(pull, 3), round(mv, 3)
-            if v is True:
+            if v is True and remove:
                 self.items.remove(it)
+                out.append(("floating", it))
+            elif v is True and not it.get("flagged"):
+                it["flagged"] = True
                 out.append(("floating", it))
             elif v is False and it["ground"] is None:
                 it["ground"] = True
