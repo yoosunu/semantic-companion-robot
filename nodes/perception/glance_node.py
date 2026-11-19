@@ -75,6 +75,7 @@ class GlanceNode(Node):
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.6).value
         self.extra, self.max_fail = p("frames_extra", 3).value, p("max_fail", 2).value
         self.focus_max, self.focus_min_d = p("focus_max", 15.0).value, p("focus_min_d", 0.45).value   # 따라보기 (11-20)
+        self.focus_deg = p("focus_deg", 3.0).value          # 다시 겨눌 때 이만큼 안 바뀌면 고개 그대로
         self.hazards = []
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
@@ -291,7 +292,7 @@ class GlanceNode(Node):
                 continue
             wx, wy = gl.to_world(self.pose, x, y)
             out.append({"name": d[0], "conf": round(float(d[1]), 3), "x": round(x, 3), "y": round(y, 3),
-                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": self.cut(d[6]), "box": [int(v) for v in d[2:6]],
+                        "wx": round(wx, 3), "wy": round(wy, 3), "cut": self.cut(d[6]), "cut_bottom": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]],
                         "footprint": self.world(fp), "outline": self.world(self.outline(d[6], j["pan"], j["tilt"]))})
         return out
 
@@ -433,12 +434,13 @@ class GlanceNode(Node):
             votes.setdefault(best[0], []).append(round(float(best[1]), 3))
         if best and best[3] is not None:
             j["full"] = j.get("full", False) or not self.cut(best[3])
-            j["cand"] = dict(j["cand"], wx=wx, wy=wy)                   # 다음엔 물건 앞 끝을 겨눔 (십자도 거기)
+            if not best[3][-3:].any():                                  # 11-20: 화면 아래 끝에 잘린 마스크의 "가장 가까운 점" = 끝선 (침대 → 0.15 m)
+                j["cand"] = dict(j["cand"], wx=wx, wy=wy)               # 다음엔 물건 앞 끝을 겨눔 (십자도 거기)
         elif ext:
             # 11-20 실물: 십자가 발닦개 마스크를 살짝 빗나감 (덤으로는 rug 0.73 통째) → 표가 비어 빈 점만 따라봄.
             #   십자 30 cm 안에 덤 물건이 있으면 그걸로 겨냥을 옮김
             cw, ch = j["cand"]["wx"], j["cand"]["wy"]
-            near = [e for e in ext if math.hypot(e["wx"] - cw, e["wy"] - ch) < 0.30]
+            near = [e for e in ext if math.hypot(e["wx"] - cw, e["wy"] - ch) < 0.30 and not e.get("cut_bottom")]
             if near:
                 e = min(near, key=lambda e: math.hypot(e["wx"] - cw, e["wy"] - ch))
                 votes.setdefault(e["name"], []).append(round(float(e["conf"]), 3))
@@ -460,6 +462,8 @@ class GlanceNode(Node):
             self.job, self.end_t = None, now
             return
         pan, tilt = gl.head_for(x, y)
+        if max(abs(pan - j["pan"]), abs(tilt - j["tilt"])) < self.focus_deg:   # 11-20: 같은 물건인데 2~9° 씩 꼼지락 → 3° 안이면 그대로
+            pan, tilt = j["pan"], j["tilt"]
         turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
         j.update(pan=round(pan, 1), tilt=round(tilt, 1), turn=turn, settle=self.settle_base + self.settle_deg * turn,
                  frames=[], pool=[], skipped=0)

@@ -128,10 +128,12 @@ fv = gl.focus_verdict
 c11 = [fv({"chair": [0.81]}, 1, True, None)[:2], fv({"chair": [0.81, 0.77]}, 2, True, None)[:2],
        fv({}, 2, False, None)[:2], fv({"towel": [0.3, 0.4]}, 2, True, None)[:2],
        fv({"doormat": [0.8, 0.7]}, 2, False, None)[:2], fv({"doormat": [0.8, 0.7]}, 2, True, {"ground": None})[:2],
-       fv({"doormat": [0.8, 0.7]}, 3, True, {"ground": True})[:2], fv({"rug": [0.7, 0.6], "doormat": [0.8, 0.75]}, 3, True, None)[:2]]
-check("11 따라보기: 의자 1번 = 더 봄 / 2번 = 끝 / 빈 바닥 = 끝 / 애매 = 더 봄 / 발닦개 잘림·바닥 확인 전 = 더 봄 / 바닥 확인 = 끝",
-      c11 == [(False, "?"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (False, "doormat"),
-              (True, "doormat"), (True, "doormat")], c11)
+       fv({"doormat": [0.8, 0.7]}, 3, True, {"ground": True})[:2], fv({"rug": [0.7, 0.6], "doormat": [0.8, 0.75]}, 3, True, None)[:2],
+       fv({"shelf": [0.23]}, 3, False, None)[:2], fv({"shelf": [0.51, 0.48], "laundry basket": [0.50]}, 3, False, None)[:2]]
+check("11 따라보기: 의자 1번 = 더 봄 / 2번 = 끝 / 빈 바닥 = 끝 / 애매 2번 = 더 봄 / 발닦개 잘림 = 더 봄 / 통째면 끝 (바닥 확인 안 기다림) "
+      "/ 3번 봐도 0.5 없음 = ? 끝 / 이름 갈려도 0.5 두 번 = 끝",
+      c11 == [(False, "?"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (True, "doormat"),
+              (True, "doormat"), (True, "doormat"), (True, "?"), (True, "shelf")], c11)
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

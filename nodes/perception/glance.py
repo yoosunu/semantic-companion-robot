@@ -50,23 +50,22 @@ def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_
        votes: {이름: [점수, ...]} 이번 물건을 본 횟수만큼 (십자 물건), views: 본 횟수, full: 통째로 본 적 있음,
        hazard: floor_hazard 표시 상태 ({"ground": True/None, "flagged": bool}) 또는 None (표시 없음)
        → (끝?, 결과 이름 또는 "?", 이유)"""
-    sure = {n: v for n, v in votes.items() if sum(c >= on for c in v) >= need}
-    if not sure:
+    good = {n: [c for c in v if c >= on] for n, v in votes.items()}
+    good = {n: v for n, v in good.items() if v}
+    if sum(len(v) for v in good.values()) < need:                   # 11-20: 이름이 갈려도 (선반·수납함·빨래통) 0.5 넘은 게 두 번이면 확신
         if views >= need and not votes:
             return True, "-", "빈 바닥 (두 번 봐도 아무것도 없음)"
+        if views >= 3 and not good:
+            return True, "?", f"{views} 번 봐도 {on} 넘는 이름 없음"  # 11-20: shelf 0.23 하나로 17 s 를 다 씀
         return False, "?", "이름 아직"
-    name = max(sure, key=lambda n: sum(sure[n]) / len(sure[n]))
-    if name not in floor_types:
-        return True, name, "이름 확신"
-    if not full:
+    name = max(good, key=lambda n: sum(good[n]) / len(good[n]))
+    split = f" (이름 갈림: {', '.join(sorted(good))})" if len(good) > 1 else ""
+    if name in floor_types and not full:
         return False, name, "통째로 아직 못 봄"
-    if hazard is None:
-        return True, name, "이름 확신 (표시 안 됨 = 센서가 봄 등)"
-    if hazard.get("flagged"):
-        return True, name, "떠 있음? (관찰 모드)"
-    if hazard.get("ground"):
-        return True, name, "바닥 확인"
-    return False, name, "바닥 확인 아직"
+    # 11-20: 바닥 확인 (2 단계) 은 관찰 모드로 접음 → 끝 조건에서 뺌 (가만히 있으면 원래 안 나와 17 s 기다림). 결과만 덧붙임
+    extra = "" if name not in floor_types or hazard is None else (
+        ", 떠 있음? (관찰)" if hazard.get("flagged") else ", 바닥 확인" if hazard.get("ground") else "")
+    return True, name, "이름 확신" + split + extra
 
 
 def head_for(x, y, tilt_min=-30.0, tilt_max=30.0):
