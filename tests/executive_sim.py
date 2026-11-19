@@ -98,6 +98,9 @@ check("5c 깊은 잠 + 중간 자극 → 뒤척임만", ex.mode == "SLEEP" and e
 ex = sleep_now()
 ex = run(151, ex, t0=1, stim=lambda t: [("touch", 3, -60.0)] if once(150)(t) else [])
 check("5d 깊은 잠 + 톡톡(강) → 번쩍, 맞은 쪽으로", ex.mode == "IDLE" and ex.wake["strength"] == "strong" and ex.wake["dir"] == -60.0, ex.wake)
+ex = sleep_now()
+ex = run(200, ex, t0=1, stim=lambda t: [("lidar", 2, 30.0)] if t >= 150 else [])   # 11-20 실물: 자극이 10 Hz 로 계속 옴
+check("5e 깊은 잠 + 중간 자극 10 Hz 50 s → 뒤척임은 15 s 에 한 번 (4 번)", ex.mode == "SLEEP" and ex.stir == 4, ex.stir)
 
 # 6. 자극으로 깼는데 얼굴 없음 → 10 s 뒤 다시 꾸벅 / 얼굴 봄 → 30~60 s 규칙
 ex = sleep_now()
@@ -165,8 +168,11 @@ while t < 20:
     t += 0.1
 far_hit = [m.step(t + k * 0.1, scan(t, far=True)) for k in range(5)]
 near_hit = [m.step(t + 1 + k * 0.1, scan(t, enter=True)) for k in range(4)]
-check("12 LiDAR: 새로 들어온 사람만 + 방향", not any(fired) and not any(far_hit) and near_hit[-1] and abs(m.last_idx - 125.5) < 1,
+check("12 LiDAR: 새로 들어온 사람만 + 방향 (3 스캔째 한 번 알림)", not any(fired) and not any(far_hit) and near_hit == [False, False, True, False]
+      and abs(m.last_idx - 125.5) < 1,
       f"빔 {m.last}, 가운데 {m.last_idx}")
+stay = [m.step(t + 2 + k * 0.1, scan(t, enter=True)) for k in range(50)]   # 그 사람이 5 s 계속 서 있음
+check("12b LiDAR: 들어온 사람이 계속 있어도 알림은 한 번 (11-20: 10 Hz 로 계속 알려 고개 덜덜)", sum(stay) == 0, sum(stay))
 
 # 13. 톡톡: 기준 잡고 → 톡 0.04 g → 감지 + 방향 / 고개 움직인 직후(quiet=False) 는 무시 / 1 s 안 두 번은 한 번
 G = 9.81
@@ -208,6 +214,17 @@ ex = run(3, events=lambda t: [("contact", 1)] if once(0.5)(t) else [], req=lambd
 check("14d 같이 있는 중엔 힐끗 안 받음", "GLANCE" not in [x[2] for x in ex.log], ex.log)
 ex = run(3, req=lambda t: [G] if once(1)(t) else [], events=lambda t: [("contact", 2)] if once(1.5)(t) else [])
 check("14e 힐끗 중 사람이 봄 → 같이 있기 (사람 우선)", ex.mode == "COMPANION" and [x[2] for x in ex.log] == ["GLANCE", "IDLE", "COMPANION"], ex.log)
+# 14g~i 따라보기 (11-20): 같은 id 로 다시 요청 → 목표만 갱신, hold 만큼 유지, 다른 id 는 무시
+G2 = 'glance:{"id": 7, "pan": -10, "tilt": -20, "hold": 15}'
+G3 = 'glance:{"id": 8, "pan": 30, "tilt": -20}'
+ex = run(12, req=lambda t: [G] if once(1)(t) else ([G2] if once(3)(t) else ([G3] if once(4)(t) else [])))
+p = ex.profile()
+check("14g 같은 id 다시 요청 → GLANCE 그대로, 목표 갱신 (-20 → -10), 다른 id 무시", ex.mode == "GLANCE" and p["glance"]["pan"] == -10
+      and p["glance"]["id"] == 7 and [x[2] for x in ex.log] == ["GLANCE"], (ex.log, p["glance"]))
+ex = run(17, ex, t0=12)
+check("14h hold 15 s → 4 s 넘어도 유지, 15 s 에 복귀", abs(when(ex, "IDLE", 1) - 16.0) < 0.2, ex.log)
+ex = run(3, req=lambda t: [G] if once(1)(t) else ([G2] if once(2)(t) else []), events=lambda t: [("contact", 2)] if once(2.5)(t) else [])
+check("14i 따라보는 중에도 사람 우선", ex.mode == "COMPANION", ex.log)
 check("14f 바닥 감지: IDLE 2 Hz, 잠 0", eb.PROFILE["IDLE"]["floor_hz"] == 2.0 and eb.PROFILE["SLEEP"]["floor_hz"] == 0.0)
 
 print(f"\n{sum(results)}/{len(results)} 통과")

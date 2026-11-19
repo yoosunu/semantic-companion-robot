@@ -42,6 +42,33 @@ def pick_sharp(shs, n=2, ratio=0.6, extra=3):
     return sorted(sorted(pool, key=lambda i: -shs[i])[:n])
 
 
+FLOOR_TYPES = ("doormat", "rug", "sock", "towel", "clothes", "plastic bag", "shoe", "slipper")   # = nodes/navigation/hazards.py
+
+
+def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_TYPES):
+    """따라보기 (11-20 Jasper: 확신 못 한 건 고개로 따라가며 하나만 계속 봄, 확신되면 다음) — 끝낼지 판단.
+       votes: {이름: [점수, ...]} 이번 물건을 본 횟수만큼 (십자 물건), views: 본 횟수, full: 통째로 본 적 있음,
+       hazard: floor_hazard 표시 상태 ({"ground": True/None, "flagged": bool}) 또는 None (표시 없음)
+       → (끝?, 결과 이름 또는 "?", 이유)"""
+    sure = {n: v for n, v in votes.items() if sum(c >= on for c in v) >= need}
+    if not sure:
+        if views >= need and not votes:
+            return True, "-", "빈 바닥 (두 번 봐도 아무것도 없음)"
+        return False, "?", "이름 아직"
+    name = max(sure, key=lambda n: sum(sure[n]) / len(sure[n]))
+    if name not in floor_types:
+        return True, name, "이름 확신"
+    if not full:
+        return False, name, "통째로 아직 못 봄"
+    if hazard is None:
+        return True, name, "이름 확신 (표시 안 됨 = 센서가 봄 등)"
+    if hazard.get("flagged"):
+        return True, name, "떠 있음? (관찰 모드)"
+    if hazard.get("ground"):
+        return True, name, "바닥 확인"
+    return False, name, "바닥 확인 아직"
+
+
 def head_for(x, y, tilt_min=-30.0, tilt_max=30.0):
     """로봇 좌표 바닥 점 (m) → (팬°, 틸트°) 명령. 팬 + = 오른쪽 (/pantilt/cmd)"""
     dx = x - ground.PAN_X

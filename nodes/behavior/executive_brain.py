@@ -12,6 +12,8 @@
     TASK:<이름> 예약 작업 (v1 은 틀만). 요청 done:<이름> 이면 IDLE
     GLANCE     힐끗 (11-18 "안경 쓰기"): 바닥 후보 쪽으로 고개 → YOLOE 잠깐. IDLE·TASK 에서만 받음, 끝나면 원래 모드로.
                요청 glance:{"id","pan","tilt"} (inspect 노드) → 이벤트 glanced (같은 id) 또는 glance_max 지나면 복귀.
+               11-20 따라보기 (focus): 힐끗 중 같은 id 로 다시 요청 → 고개 목표만 갱신 (모드 그대로). "hold": s 를 주면
+               glance_max 대신 그만큼 유지 (확신될 때까지 한 물건을 따라봄, glance_node focus_max 15 s)
                작업 중이면 바퀴 slow (11-18 Jasper: 걸으면서 보면 매력적 → 멈추지 않고 절반 속도)
   이벤트 (look 이 보냄): contact 눈맞춤 · approach 다가옴 · arrive 새 사람 · glance 두리번 · peekaboo 까꿍 ·
                        follow_gaze 시선 따라감 · nod 따라 끄덕  = 상호작용 / bored 쳐다보기 끝 / asleep 꾸벅 다 함
@@ -31,6 +33,7 @@ DUR = {
     "companion_max": (40.0, 40.0),    # bored 가 안 와도 마지막 상호작용 뒤 이만큼이면 IDLE (look 쳐다보기 최대 30 s + 여유)
     "asleep_timeout": (90.0, 90.0),   # DOZE 에서 asleep 이 안 오면 이만큼 뒤 SLEEP
     "shallow": (120.0, 120.0),        # 잠든 뒤 얕은 잠
+    "stir_gap": (15.0, 15.0),         # 뒤척임 사이 최소 (11-20: LiDAR 자극이 10 Hz 로 와서 뒤척임 10 Hz = 고개 덜덜)
     "defer_max": (600.0, 600.0),      # 예약 작업: 같이 있는 중이면 최대 이만큼 미룸 (11-14 Jasper: 10분)
     "lidar_look": (10.0, 10.0),       # 자극으로 깼는데 얼굴이 없으면 이만큼 둘러보고 다시 꾸벅
     "glance_max": (4.0, 4.0),         # 힐끗 최대 (11-18 v2: 고개 + 멈춤(각도 비례) + 선명한 2 장 + YOLO26·YOLOE). 넘으면 그냥 돌아옴
@@ -60,6 +63,7 @@ class Executive:
         self.pending = None                # 미룬 예약 작업 (이름, 늦어도 이때까지)
         self.wake = None                   # 마지막 깨움 {"id","strength","dir"} — look 이 깨는 모양에 씀
         self.stir = 0                      # 뒤척임 횟수 (바뀌면 look 이 살짝 움직임)
+        self.stir_t = -1e9                 # 마지막 뒤척임 시각
         self.log = []                      # [(시각, 이전, 다음, 이유)]
         self.glance = None                 # 힐끗 중이면 {"id","pan","tilt"}
         self.glance_prev = None            # 힐끗 끝나면 돌아갈 모드
@@ -112,12 +116,17 @@ class Executive:
                     self.go(now, "TASK:" + r[5:], "task")
             elif r.startswith("done:") and self.mode == "TASK:" + r[5:]:
                 self.go(now, "IDLE", "task done")
-            elif r.startswith("glance:") and (self.mode == "IDLE" or self.mode.startswith("TASK:")):
+            elif r.startswith("glance:") and (self.mode in ("IDLE", "GLANCE") or self.mode.startswith("TASK:")):
                 try:
                     g = json.loads(r[7:])
-                    self.glance = {"id": g["id"], "pan": float(g["pan"]), "tilt": float(g["tilt"])}
+                    new = {"id": g["id"], "pan": float(g["pan"]), "tilt": float(g["tilt"]), "hold": float(g.get("hold", 0.0))}
                 except (ValueError, KeyError, TypeError):
                     continue
+                if self.mode == "GLANCE":
+                    if self.glance and new["id"] == self.glance["id"]:     # 따라보기: 같은 물건 → 고개 목표만 갱신
+                        self.glance = dict(new, hold=max(new["hold"], self.glance.get("hold", 0.0)))
+                    continue
+                self.glance = new
                 self.glance_prev = self.mode
                 self.go(now, "GLANCE", f"glance #{self.glance['id']}")
 
@@ -128,8 +137,10 @@ class Executive:
                     self.wake_up(now, f"{kind} ({'얕은' if shallow else '깊은'} 잠)", s, d)
                     break
                 if s == 2:
-                    self.stir += 1                           # 깊은 잠 + 중간 자극 = 뒤척임
-                    self.log.append((round(now, 1), "SLEEP", "SLEEP", f"stir: {kind}"))
+                    if now - self.stir_t >= self.dur("stir_gap"):
+                        self.stir += 1                       # 깊은 잠 + 중간 자극 = 뒤척임
+                        self.stir_t = now
+                        self.log.append((round(now, 1), "SLEEP", "SLEEP", f"stir: {kind}"))
                     break
             return self.profile()
 
@@ -146,7 +157,7 @@ class Executive:
             elif done:
                 self.end_glance(now, "glanced")
                 return self.profile()
-            elif now - self.since > self.dur("glance_max"):
+            elif now - self.since > max(self.dur("glance_max"), (self.glance or {}).get("hold", 0.0)):
                 self.end_glance(now, "glance timeout")
                 return self.profile()
             else:

@@ -74,6 +74,8 @@ class GlanceNode(Node):
         self.settle_base, self.settle_deg = p("settle_base", 0.35).value, p("settle_per_deg", 0.005).value
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.6).value
         self.extra, self.max_fail = p("frames_extra", 3).value, p("max_fail", 2).value
+        self.focus_max, self.focus_min_d = p("focus_max", 15.0).value, p("focus_min_d", 0.45).value   # 따라보기 (11-20)
+        self.hazards = []
         self.coco_on, self.yoloe_on, self.maybe = p("coco_on", 0.35).value, p("yoloe_on", 0.25).value, p("maybe", 0.15).value
         self.margin, self.gap = p("margin_px", 20).value, p("gap_s", 1.0).value
         self.bottom = p("bottom_frac", 0.35).value         # 후보 점이 상자 아래 이 비율 안이어야 그 물건 (마스크 없을 때)
@@ -98,6 +100,7 @@ class GlanceNode(Node):
             self.push = serve(port)
         os.makedirs(OUT, exist_ok=True)
         self.create_subscription(String, "floor/blobs", self.on_blobs, 10)
+        self.create_subscription(String, "/semantic/hazards", lambda m: setattr(self, "hazards", json.loads(m.data)), 10)
         self.create_subscription(String, "neri/profile", self.on_profile, 10)
         self.create_subscription(Float32MultiArray, "pantilt/cmd", self.on_head, 10)
         self.create_subscription(Image, "camera/image_raw", self.on_img, qos_profile_sensor_data)
@@ -154,7 +157,8 @@ class GlanceNode(Node):
         turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
         self.job = {"id": gid, "cand": cand, "pan": round(pan, 1), "tilt": round(tilt, 1), "turn": turn,
                     "settle": self.settle_base + self.settle_deg * turn, "t": {"req": now}, "frames": [], "pool": [], "skipped": 0}
-        self.pub_req.publish(String(data="glance:" + json.dumps({"id": gid, "pan": round(pan, 1), "tilt": round(tilt, 1)})))
+        self.pub_req.publish(String(data="glance:" + json.dumps({"id": gid, "pan": round(pan, 1), "tilt": round(tilt, 1),
+                                                                  "hold": self.focus_max + 3.0})))
         self.get_logger().info(f"GLANCE #{gid} 요청: 후보 {cand['dist'] * 100:.0f} cm ({x:+.2f}, {y:+.2f}) {cand['hits']} 번 봄"
                                f"{' (가장자리)' if cand['edge'] else ''} → 고개 ({pan:+.0f}, {tilt:+.0f}), 돌 각도 {turn:.0f}°")
 
@@ -203,8 +207,9 @@ class GlanceNode(Node):
     def give_up(self, why):
         j = self.job
         gone = self.cands.fail(j["cand"]["wx"], j["cand"]["wy"], time.time(), pose=self.pose, limit=self.max_fail)
-        self.get_logger().warn(f"GLANCE #{j['id']} 포기: {why} (받은 장 {len(j['pool'])})"
+        self.get_logger().warn(f"GLANCE #{j['id']} 포기: {why} (받은 장 {len(j['pool'])}, 본 {j.get('views', 0)} 번)"
                                + (f" → 같은 자리 {self.max_fail} 번째: '?' 로 기억, 다시 안 봄" if gone else ""))
+        self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))   # 사령관이 hold 동안 붙잡지 않게
         self.job, self.end_t = None, time.time()
 
     # ---------- 이름 정하기 ----------
@@ -375,7 +380,6 @@ class GlanceNode(Node):
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
                                                       "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl,
                                                       "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms})))
-        self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(
             f"GLANCE #{j['id']} → {name} {conf:.2f} ({model}) | ms 사령관 {ms.get('mode')} 고개 {ms.get('head')} "
@@ -411,7 +415,46 @@ class GlanceNode(Node):
         cv2.imwrite(os.path.join(OUT, stem + f"_{name.replace(' ', '_').replace('?', 'q')}.jpg"), img)
         if self.push:
             self.push(img)
-        self.job, self.end_t = None, time.time()
+        self.focus_next(j, best, wx, wy)
+
+    def hazard_near(self, wx, wy, r=0.4):
+        """floor_hazard 표시 중 (odom 좌표) 가장 가까운 것 (r 안) 또는 None"""
+        near = [h for h in self.hazards if "ox" in h and math.hypot(h["ox"] - wx, h["oy"] - wy) < r]
+        return min(near, key=lambda h: math.hypot(h["ox"] - wx, h["oy"] - wy)) if near else None
+
+    def focus_next(self, j, best, wx, wy):
+        """따라보기 (11-20 Jasper): 확신 못 한 건 고개로 그 물건만 따라가며 다시 봄 → 확신되면 끝 (glanced) → 다음 후보.
+           확신 = glance.focus_verdict (이름 0.5 이상 두 번, 바닥형이면 통째 + 바닥 확인). 끝: 확신 / 빈 바닥 / focus_max 초과 /
+           너무 가깝거나 멀어 못 봄 (고개 −30 이 바닥 ~0.45 m 까지)"""
+        now = time.time()
+        j["views"] = j.get("views", 0) + 1
+        votes = j.setdefault("votes", {})
+        if best and best[1] >= self.maybe:
+            votes.setdefault(best[0], []).append(round(float(best[1]), 3))
+        if best and best[3] is not None:
+            j["full"] = j.get("full", False) or not self.cut(best[3])
+            j["cand"] = dict(j["cand"], wx=wx, wy=wy)                   # 다음엔 물건 앞 끝을 겨눔 (십자도 거기)
+        done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on)
+        took = now - j["t"]["req"]
+        x, y = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
+        d = math.hypot(x, y)
+        if not done and (took > self.focus_max or not self.focus_min_d <= d <= 1.5):
+            why = (f"시간 초과 {took:.0f} s" if took > self.focus_max else f"못 봄 (거리 {d:.2f} m)") + f" — {why}"
+            done, res = True, res if res == "?" else res + "?"
+        if done:
+            self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
+            self.get_logger().info(f"FOCUS #{j['id']} 끝 → {res} | {why} | {j['views']} 번 봄, {took:.1f} s | 표 {votes}")
+            self.job, self.end_t = None, now
+            return
+        pan, tilt = gl.head_for(x, y)
+        turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
+        j.update(pan=round(pan, 1), tilt=round(tilt, 1), turn=turn, settle=self.settle_base + self.settle_deg * turn,
+                 frames=[], pool=[], skipped=0)
+        for k in ("head", "first", "frames", "yolo26", "yoloe"):
+            j["t"].pop(k, None)
+        self.pub_req.publish(String(data="glance:" + json.dumps({"id": j["id"], "pan": j["pan"], "tilt": j["tilt"],
+                                                                  "hold": self.focus_max + 3.0})))
+        self.get_logger().info(f"FOCUS #{j['id']} 다시 봄 ({why}) → 고개 ({pan:+.0f}, {tilt:+.0f}), 거리 {d:.2f} m, {took:.1f} s")
 
 
 def main():

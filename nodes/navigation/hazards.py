@@ -234,4 +234,4 @@ class HazardMap:
         return [{"name": it["name"], "conf": round(it["conf"], 3), "n": it["n"],
                  "cx": round(float(it["poly"][:, 0].mean()), 3), "cy": round(float(it["poly"][:, 1].mean()), 3),
                  "area": round(area(it["poly"]), 3), "full": it["full"],
-                 "ground": it["ground"]} for it in self.items]
+                 "ground": it["ground"], "flagged": bool(it.get("flagged"))} for it in self.items]

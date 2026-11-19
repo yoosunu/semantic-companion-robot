@@ -123,5 +123,15 @@ a10 = ground.pixels_to_floor(pts[::3], K, D, 8, -26)
 b10 = ground.pixels_to_floor(np.ascontiguousarray(pts[::3]), K, D, 8, -26)
 check("10 건너뛴 배열 = 연속 배열 (바닥 좌표 같음)", np.allclose(a10, b10, equal_nan=True), round(float(np.nanmax(np.abs(a10 - b10))), 4))
 
+# 11. 따라보기 판단 (11-20)
+fv = gl.focus_verdict
+c11 = [fv({"chair": [0.81]}, 1, True, None)[:2], fv({"chair": [0.81, 0.77]}, 2, True, None)[:2],
+       fv({}, 2, False, None)[:2], fv({"towel": [0.3, 0.4]}, 2, True, None)[:2],
+       fv({"doormat": [0.8, 0.7]}, 2, False, None)[:2], fv({"doormat": [0.8, 0.7]}, 2, True, {"ground": None})[:2],
+       fv({"doormat": [0.8, 0.7]}, 3, True, {"ground": True})[:2], fv({"rug": [0.7, 0.6], "doormat": [0.8, 0.75]}, 3, True, None)[:2]]
+check("11 따라보기: 의자 1번 = 더 봄 / 2번 = 끝 / 빈 바닥 = 끝 / 애매 = 더 봄 / 발닦개 잘림·바닥 확인 전 = 더 봄 / 바닥 확인 = 끝",
+      c11 == [(False, "?"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (False, "doormat"),
+              (True, "doormat"), (True, "doormat")], c11)
+
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

@@ -279,6 +279,18 @@ check("24b 힐끗 중 사람 트리거는 알림 (contact)", any(20 <= tt < 22 a
 check("24c 끝나면 힐끗 전 자세로", back and abs(back[0][1][1] - before[1]) < 0.01 and abs(back[0][1][2] - before[2]) < 0.01,
       (before, back))
 
+# 24d. 따라보기 (11-20): 힐끗 중 같은 id 의 목표가 바뀌면 다시 겨눔
+G2 = {"id": 3, "pan": -15.0, "tilt": -22.0}
+b = lb.Brain(random.Random(1))
+log, t = [], 0.0
+while t < 24:
+    g = G if t < 21 else G2
+    acts = b.set_head(head(t), t, glance=g if head(t) == "glance" else None) + b.tick(t, [], False)
+    log.append((round(t, 1), acts))
+    t = round(t + DT, 6)
+mv = [(tt, x[1:3]) for tt, a in log if 20 <= tt < 22 for x in a if x[0] == "move"]
+check("24d 따라보기: 목표 바뀌면 한 번 더 겨눔", [m for _, m in mv] == [(-25.0, -28.0), (-15.0, -22.0)], mv)
+
 # 25. 두리번 끄기 (시험용): 아무도 없어도 안 움직임 (시작 정면 이동만)
 lb.SCAN_ON = False
 b, log = run(lambda t: [], 40)

@@ -111,6 +111,7 @@ class Brain:
         self.approach0 = None                # 움찔: (다가옴 시각, 다가오기 전 얼굴 px, 트랙)
         self.follow_done = None              # 시선 따라가기: 이번 고개 돌림에 이미 했나 (away_t)
         self.pre_glance = None               # 힐끗 전 (모드, 이유, 팬, 틸트) — 끝나면 돌아감
+        self.glance_aim = None               # 지금 힐끗 목표 (팬, 틸트). 따라보기 (11-20) 로 바뀌면 다시 겨눔
 
     # ---------- 작은 도구 ----------
     def move(self, out, now, pan, tilt, spd=0, acc=0, settle=SETTLE):
@@ -196,13 +197,17 @@ class Brain:
                 self.play(now, [(0.0, ("move", pn, TILT_SLEEP + 4.0, *SLOW, 1.5)),
                                 (2.0, ("move", self.pan, TILT_SLEEP, *SLOW, 1.5))])
         if head == self.head:
+            if head == "glance" and glance and (float(glance["pan"]), float(glance["tilt"])) != self.glance_aim:
+                self.glance_aim = (float(glance["pan"]), float(glance["tilt"]))   # 11-20 따라보기: 같은 힐끗 중 목표가 바뀜 → 다시 겨눔
+                self.move(out, now, *self.glance_aim)
             return out
         prev, self.head = self.head, head
         if head == "glance" and glance:
             self.pre_glance = (self.mode, self.reason, self.pan, self.tilt)
             self.clip = []
             self.set_mode("glance", f"glance #{glance.get('id')}", now)
-            self.move(out, now, float(glance["pan"]), float(glance["tilt"]))      # 빠르게 (최고 속도) → 멈춤 SETTLE
+            self.glance_aim = (float(glance["pan"]), float(glance["tilt"]))
+            self.move(out, now, *self.glance_aim)                                  # 빠르게 (최고 속도) → 멈춤 SETTLE
             return out
         if prev == "glance" and self.pre_glance:
             mode, reason, pn, tl = self.pre_glance

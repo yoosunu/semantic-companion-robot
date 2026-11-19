@@ -184,7 +184,15 @@ class FloorHazard(Node):
         m.row_step = 12 * len(pts)
         m.data = b"".join(struct.pack("<fff", float(x), float(y), MARK_Z) for x, y in pts)
         self.pub_cloud.publish(m)
-        self.pub_state.publish(String(data=json.dumps(self.H.state())))
+        st = self.H.state()
+        To = self.lookup("odom") if st else None
+        if To is not None:                                              # 11-20 따라보기용: glance_node 는 odom 좌표 → 같이 실어 줌
+            x0, y0, th = To
+            c, s = math.cos(-th), math.sin(-th)
+            for h in st:
+                dx, dy = h["cx"] - x0, h["cy"] - y0
+                h["ox"], h["oy"] = round(dx * c - dy * s, 3), round(dx * s + dy * c, 3)
+        self.pub_state.publish(String(data=json.dumps(st)))
 
 
 def main():

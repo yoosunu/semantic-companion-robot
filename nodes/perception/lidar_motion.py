@@ -44,4 +44,7 @@ class Motion:
             sy = sum(math.sin(2 * math.pi * i / n) for i in idx)
             self.last_idx = (math.atan2(sy, sx) / (2 * math.pi) * n) % n
         self.hits = self.hits + 1 if came >= self.n else 0
-        return self.hits >= 3
+        if self.hits >= 3:                                   # 11-20: 알린 뒤 그대로 두면 그 사람이 서 있는 동안 매 스캔 (10 Hz) "들어옴"
+            self.t0, self.lo, self.hi, self.hits = None, None, None, 0   #   → 잠 중 뒤척임 10 Hz = 고개 덜덜. 알렸으면 지금을 새 배경으로 다시 배움
+            return True
+        return False
