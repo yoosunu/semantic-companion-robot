@@ -51,7 +51,9 @@ def generate_launch_description():
 
         # 11-19: 팬틸트 달고 무거워져 회전이 힘 제한 55 에 붙음 (crawl_test: 제자리·호 PWM 55 천장, gyro 못 따라감) → 재보려고 밖으로 뺌
         DeclareLaunchArgument("push_cap_straight", default_value="40.0", description="브리지 v8.1 힘 제한: 직진 PWM 상한"),
-        DeclareLaunchArgument("push_cap_turn", default_value="55.0", description="브리지 v8.1 힘 제한: 회전 PWM 상한"),
+        DeclareLaunchArgument("push_cap_turn", default_value="75.0", description="브리지 v8.1 힘 제한: 회전 PWM 상한. "
+                              "11-19 crawl_test (팬틸트 무게): 호 (0.06, ±0.3) 왼쪽 ~60 / 오른쪽 65~70 필요, 55 면 오른쪽 안 돎. 소리 차이 없음. "
+                              "브리지는 '회전 마찰' 과 '막힘' 을 구별 못 함 (둘 다 바퀴 안 돎) → 회전은 너그럽게 75, 안전은 직진 40 이 맡음"),
 
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"robot_description": description}]),

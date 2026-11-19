@@ -29,6 +29,10 @@
 //      PWM as before → a freed robot does not shoot off. Whisker quiet → normal limits again (Jasper 11-10: 탈출 모듈).
 // v8.5 (11-12): /pantilt/cmd may carry [pan, tilt, SPD, ACC] — servo's own speed/accel profile (0 = fastest, units per
 //      Waveshare json_cmd.h, not documented). Fastest + 20 Hz small steps looked shaky ("덜덜") → let the servo smooth.
+// v8.6 (11-19): pan-tilt weight → turning saturated at push_cap_turn 55 (crawl_test: arc right didn't turn at 55, needs 65-70).
+//      The bridge can't tell "heavy floor friction while turning" from "blocked" (both = wheel not turning) → the turn cap
+//      limits normal turning too. Turn cap 75 via launch (straight stays 40 = the real safety: pushing into things is
+//      mostly straight). Turning tap PWM constexpr 55 → param pulse_turn_pwm (65).
 // v8.4 PAN-TILT (11-12): at start {"T":4,"cmd":2} (module = pan-tilt). /pantilt/cmd (Float32MultiArray [pan°, tilt°]) →
 //      {"T":133,"X":pan,"Y":tilt,"SPD":0,"ACC":0}, pan clamped −180..180 (never wraps past — cables), tilt −30..90,
 //      sent only when it changed ≥ 0.5° and at most every 50 ms. /pantilt/led (Float32 0..255) → {"T":132,"IO4":0,"IO5":v}.
@@ -93,6 +97,7 @@ public:
     // break-away 35-40, an on-the-spot turn 40-50 → cap there. Too low = can't climb a rug edge → Whisker feels the stall.
     push_cap_straight_ = declare_parameter<double>("push_cap_straight", 40.0);
     push_cap_turn_ = declare_parameter<double>("push_cap_turn", 55.0);
+    pulse_turn_pwm_ = declare_parameter<double>("pulse_turn_pwm", 65.0);    // v8.6 (11-19): was constexpr 55 → param
     if (drive_mode_ != "pid" && drive_mode_ != "pwm") {
       throw std::runtime_error("drive_mode must be 'pid' or 'pwm'");
     }
@@ -423,7 +428,7 @@ private:
       if (std::abs(tap_x_) / kXFloor >= std::abs(tap_z_) / kZFloor) {
         l = r = (tap_x_ > 0 ? 1 : -1) * kPulseFwdPwm;
       } else {
-        const double d = (tap_z_ > 0 ? 1 : -1) * kPulseTurnPwm;
+        const double d = (tap_z_ > 0 ? 1 : -1) * pulse_turn_pwm_;
         l = -d; r = d;
       }
     }
@@ -694,7 +699,8 @@ private:
   static constexpr double kPulsePeriod = 0.5;       // s, one tap cycle
   static constexpr double kPulseMinOn = 0.10;       // s, shortest push that still moves the wheels
   static constexpr double kPulseFwdPwm = 35.0;      // PWM of a forward/backward tap
-  static constexpr double kPulseTurnPwm = 55.0;     // PWM of a turning tap (sideways scrub needs more)
+  double pulse_turn_pwm_{65.0};                     // PWM of a turning tap (sideways scrub needs more). v8.6 (11-19): param, 55 → 65
+                                                    //   (pan-tilt weight: turning needs ~60 left / 65-70 right, crawl_test)
   static constexpr double kTapMinDuty = 0.2;        // average ask below 20% of the floor → no tap (noise / undecided)
   double tap_t_{0.0};                               // s, position inside the current tap cycle
   double tap_sum_x_{0.0}, tap_sum_z_{0.0};          // asks collected during this cycle
