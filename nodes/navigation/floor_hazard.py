@@ -140,6 +140,9 @@ class FloorHazard(Node):
         r = apply(To, [(X, Y)])[0]
         c, s = math.cos(th), math.sin(th)
         for b in j["blobs"]:
+            if b.get("edge"):
+                continue        # 11-20 실물: 다가가면 발닦개 앞쪽이 화면 아래로 빠짐 → "가장 가까운 점" = 화면 아래 끝선 = 로봇과 같이 움직임
+                                #   → 진짜 발닦개를 "떠 있음 (25 cm 에 16 cm 끌려옴)" 으로 뺐음. 화면 끝에 걸친 덩어리는 기록 안 함
             p = apply(To, [(X + b["x"] * c - b["y"] * s, Y + b["x"] * s + b["y"] * c)])[0]
             for res, it in self.H.observe(r[0], r[1], p[0], p[1]):
                 if res == "floating":

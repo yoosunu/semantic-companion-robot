@@ -110,4 +110,6 @@ for r, (rx, ry, px, py) in zip(range(3), seen(0.05, [0.0, 0.25, 0.5])):
     ev += Q.observe(rx, ry, px, py)
 check("18 표시 + 다가가며 본 덩어리 → 떠 있음 → 표시 뺌", [e[0] for e in ev] == ["floating"] and len(Q.items) == 0, [e[0] for e in ev])
 
+check("19 기록 2 개로는 판정 안 함 (3 개부터)", hz.floating(seen(0.05, [0.0, 0.5]))[0] is None)
+
 print(f"\n{sum(results)}/{len(results)} 통과")

@@ -82,12 +82,12 @@ def area(poly):
     return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
 
 
-def floating(obs, min_move=0.25, thr=0.06, rel=0.12):
+def floating(obs, min_move=0.25, thr=0.06, rel=0.12, min_obs=3):
     """obs: [(rx, ry, px, py)] 같은 좌표계 — 로봇 위치, 그때 바닥 감지가 본 덩어리의 가장 가까운 점.
        → (판정, 끌려온 m, 로봇 이동 m). 판정 None = 근거 부족 (로봇이 min_move 만큼 안 다가감, 제자리 회전은 정보 없음),
          True = 떠 있음 (로봇 쪽으로 max(thr, rel×이동) 넘게 끌려옴), False = 바닥.
        기준: 바닥 물체 잡음 ~5 cm (1 m 에서 1 px ≈ 1.3 cm + 마스크·odom) → 6 cm. 12 % = h ≈ 3 cm 이하는 사실상 바닥으로 침"""
-    if len(obs) < 2:
+    if len(obs) < min_obs:                               # 11-20: 2 개로 판정하면 한 번 튄 값에 흔들림
         return None, 0.0, 0.0
     o = np.asarray(obs, float)
     d = np.hypot(o[:, 2] - o[:, 0], o[:, 3] - o[:, 1])
