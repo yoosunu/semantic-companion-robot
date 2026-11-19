@@ -29,6 +29,7 @@
 //      PWM as before → a freed robot does not shoot off. Whisker quiet → normal limits again (Jasper 11-10: 탈출 모듈).
 // v8.5 (11-12): /pantilt/cmd may carry [pan, tilt, SPD, ACC] — servo's own speed/accel profile (0 = fastest, units per
 //      Waveshare json_cmd.h, not documented). Fastest + 20 Hz small steps looked shaky ("덜덜") → let the servo smooth.
+// v8.7 (11-20): breakaway ramp kPushStep 3 → 6 PWM per tick (60 → 120 PWM/s) — start hesitation with the heavier robot.
 // v8.6 (11-19): pan-tilt weight → turning saturated at push_cap_turn 55 (crawl_test: arc right didn't turn at 55, needs 65-70).
 //      The bridge can't tell "heavy floor friction while turning" from "blocked" (both = wheel not turning) → the turn cap
 //      limits normal turning too. Turn cap 75 via launch (straight stays 40 = the real safety: pushing into things is
@@ -689,7 +690,8 @@ private:
   static constexpr double kZDeadzone = 0.01;        // rad/s, below → no turn part
   static constexpr double kPwmDeadzone = 5.0;       // PWM, below → wheel off
   static constexpr double kNoPushBelow = 18.0;      // PWM, below the rolling floor (21) → no breakaway push (arc inner wheel)
-  static constexpr double kPushStep = 3.0;          // PWM per 50 ms tick while breaking away (= 60 PWM/s)
+  static constexpr double kPushStep = 6.0;          // PWM per 50 ms tick while breaking away (= 120 PWM/s). v8.7 (11-20): 3 → 6
+                                                    //   (pan-tilt weight: breakaway now ~60-65 PWM → 60 PWM/s took ~0.4 s = visible "멈칫" at start)
   static constexpr double kStallTime = 0.5;         // s without wheel motion while "rolling" → push again
   static constexpr double kTurnGain = 60.0;         // PWM per rad of turn-rate error (0.1 rad/s short → +6 PWM/s)
   static constexpr double kTurnTrimMax = 40.0;      // PWM, how much the gyro loop may add/remove
