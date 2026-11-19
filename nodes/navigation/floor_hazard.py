@@ -10,7 +10,9 @@
         지우기: ros2 topic pub --once /semantic/clear std_msgs/msg/String "{data: all}"
   출력: /semantic/cloud (PointCloud2, frame), /semantic/hazards (String JSON 목록, 1 Hz — 나중에 탐색기가 봄)
   파라미터: frame (map; SLAM 없이 시험할 땐 odom), on 0.5, scan_max 2, rate_hz 1.0
-  지금 안 하는 것 (다음 단계): 떠 있나 확인 (바닥 감지 기록), 자동 지우기, 탐색기 연결
+  2단계 (11-20): floor/blobs (바닥 감지, 초당 2 번) 의 가장 가까운 점을 표시 근처에서 모아 "다가갈수록 끌려오나" →
+        끌려오면 떠 있는 것 (발자국이 엉뚱) → 표시 빼고 비용지도 초기화. 안 끌려오면 "바닥 확인" (hazards.floating)
+  지금 안 하는 것: 자동 지우기 (치운 발닦개), 탐색기 연결 (3단계)
 """
 import json
 import math
@@ -65,6 +67,7 @@ class FloorHazard(Node):
         self.create_subscription(String, "semantic/seen", self.on_seen, 10)
         self.create_subscription(LaserScan, "/scan", lambda m: setattr(self, "scan", m), qos_profile_sensor_data)
         self.create_subscription(String, "/semantic/clear", self.on_clear, 10)
+        self.create_subscription(String, "floor/blobs", self.on_blobs, 10)
         self.pub_cloud = self.create_publisher(PointCloud2, "/semantic/cloud", 1)
         self.pub_state = self.create_publisher(String, "/semantic/hazards", 1)
         self.create_timer(1.0 / p("rate_hz", 1.0).value, self.tick)
@@ -125,12 +128,36 @@ class FloorHazard(Node):
             else:
                 self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} → 안 찍음 | {why}")
 
+    def on_blobs(self, msg):
+        """바닥 감지 덩어리 → 표시 근처면 모아서 떠 있나 판정 (2단계)"""
+        if not self.H.items:
+            return
+        j = json.loads(msg.data)
+        To = self.lookup("odom")
+        if To is None or not j.get("blobs"):
+            return
+        X, Y, th = j["pose"]
+        r = apply(To, [(X, Y)])[0]
+        c, s = math.cos(th), math.sin(th)
+        for b in j["blobs"]:
+            p = apply(To, [(X + b["x"] * c - b["y"] * s, Y + b["x"] * s + b["y"] * c)])[0]
+            for res, it in self.H.observe(r[0], r[1], p[0], p[1]):
+                if res == "floating":
+                    self.get_logger().warn(f"HAZARD {it['name']} 떠 있음 → 표시 뺌 (다가간 {it['move']:.2f} m 에 {it['pull']:.2f} m 끌려옴) "
+                                           f"| 지금 {len(self.H.items)} 개")
+                    self.clear_costmaps()
+                else:
+                    self.get_logger().info(f"HAZARD {it['name']} 바닥 확인 (다가간 {it['move']:.2f} m 에 {it['pull']:+.2f} m)")
+
+    def clear_costmaps(self):
+        for cl in self.clear_cli:
+            if cl.service_is_ready():
+                cl.call_async(ClearEntireCostmap.Request())
+
     def on_clear(self, _):
         self.get_logger().info(f"HAZARD 지움: {self.H.clear()} 개 + 비용지도 초기화")
         self.tick()
-        for c in self.clear_cli:
-            if c.service_is_ready():
-                c.call_async(ClearEntireCostmap.Request())
+        self.clear_costmaps()
 
     def tick(self):
         pts = self.H.cloud_points()

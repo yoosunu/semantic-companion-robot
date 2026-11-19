@@ -90,4 +90,24 @@ check("12 통째가 있는데 잘린 조각 → 모양 그대로 (확인만)", r
       and len(G.items) == 1, r12)
 check("13 rug 도 바닥형·납작 (발닦개와 같게)", G.judge("rug", 0.67, whole, wall)[0] == "mark")
 
+# 14~17. 2단계: 떠 있나 (바닥 감지 기록). 카메라 높이 H 0.24, 물체 실제 앞 끝 X = 1.0 m
+def seen(h, rxs, noise=0.0, seed=0):
+    rng = np.random.default_rng(seed)
+    k = 0.24 / (0.24 - h)
+    return [(r, 0.0, r + k * (1.0 - r) + rng.normal(0, noise), rng.normal(0, noise)) for r in rxs]
+v0 = hz.floating(seen(0.0, [0.0, 0.2, 0.45], noise=0.015))
+v5 = hz.floating(seen(0.05, [0.0, 0.2, 0.45]))
+v2 = hz.floating(seen(0.02, [0.0, 0.2, 0.45]))
+vr = hz.floating([(0.0, 0.0, 1.0, 0.0), (0.01, 0.0, 1.0, 0.02)])
+check("14 바닥 물체 (잡음 1.5 cm) → 바닥", v0[0] is False, tuple(round(x, 3) for x in v0[1:]))
+check("15 5 cm 떠 있음, 45 cm 다가감 → 떠 있음 (끌려옴 ~12 cm)", v5[0] is True and 0.10 < v5[1] < 0.14, tuple(round(x, 3) for x in v5[1:]))
+check("16 2 cm 떠 있음 → 바닥으로 침 (오차 10 % 미만)", v2[0] is False, tuple(round(x, 3) for x in v2[1:]))
+check("17 거의 안 움직임 (제자리) → 판단 안 함", vr[0] is None)
+Q = hz.HazardMap()
+Q.add("towel", 0.7, hz.shape_for("towel", rect(1.3, 0.0, 0.4, 0.3), []), 0.0, 1.3)       # 떠 있는 것의 멀리 찍힌 발자국
+ev = []
+for r, (rx, ry, px, py) in zip(range(3), seen(0.05, [0.0, 0.25, 0.5])):
+    ev += Q.observe(rx, ry, px, py)
+check("18 표시 + 다가가며 본 덩어리 → 떠 있음 → 표시 뺌", [e[0] for e in ev] == ["floating"] and len(Q.items) == 0, [e[0] for e in ev])
+
 print(f"\n{sum(results)}/{len(results)} 통과")

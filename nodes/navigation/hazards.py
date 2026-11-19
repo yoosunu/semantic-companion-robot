@@ -6,7 +6,9 @@
     - 기본은 "안 밟기". 밀고 갈지는 나중 (길이 전혀 없을 때만).
   판단:
     ① 이름이 바닥형 (floor_types) — 임시 안전장치. 낮게 떠 있는 물체는 발자국이 멀리 엉뚱하게 찍힘 (11-19 그림)
-       → 다음 단계: 바닥 감지 기록으로 "다가갈수록 끌려오나" (떠 있나) 를 재서 목록 의존을 줄임
+    ③ (2단계, 11-20) 떠 있나: 표시 근처 바닥 감지 덩어리 (가장 가까운 점) 를 로봇이 다가가며 모음 → floating().
+       바닥에 닿은 것 = 같은 자리. 떠 있는 것 (아래 끝 h) = 찍히는 점 P = R + k(X−R), k = H/(H−h) > 1 →
+       로봇이 Δ 다가가면 P 가 (k−1)Δ 만큼 로봇 쪽으로 끌려옴 (h 5 cm·Δ 40 cm → 11 cm). 끌려오면 표시를 뺌
     ② 그 모양 안 (+pad) 에 LiDAR 점이 scan_max 개 이하 → 센서가 못 봄 → 표시. 많으면 센서가 봄 → 이름표만
   모양: 납작한 것 (flat) = 마스크 윤곽 전체를 바닥에 내린 것의 볼록 껍질 (바닥에 깔려 있으니 윤곽 전체가 바닥 위)
         나머지 바닥형 (신발류) = 아래 발자국의 볼록 껍질 + min_w 두께
@@ -80,6 +82,24 @@ def area(poly):
     return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
 
 
+def floating(obs, min_move=0.25, thr=0.06, rel=0.12):
+    """obs: [(rx, ry, px, py)] 같은 좌표계 — 로봇 위치, 그때 바닥 감지가 본 덩어리의 가장 가까운 점.
+       → (판정, 끌려온 m, 로봇 이동 m). 판정 None = 근거 부족 (로봇이 min_move 만큼 안 다가감, 제자리 회전은 정보 없음),
+         True = 떠 있음 (로봇 쪽으로 max(thr, rel×이동) 넘게 끌려옴), False = 바닥.
+       기준: 바닥 물체 잡음 ~5 cm (1 m 에서 1 px ≈ 1.3 cm + 마스크·odom) → 6 cm. 12 % = h ≈ 3 cm 이하는 사실상 바닥으로 침"""
+    if len(obs) < 2:
+        return None, 0.0, 0.0
+    o = np.asarray(obs, float)
+    d = np.hypot(o[:, 2] - o[:, 0], o[:, 3] - o[:, 1])
+    i, j = int(np.argmin(d)), int(np.argmax(d))          # 가까이서 본 것, 멀리서 본 것
+    move = o[i, :2] - o[j, :2]                           # 그 사이 로봇이 움직인 것 (물체 쪽으로)
+    mv = float(np.hypot(*move))
+    if mv < min_move:
+        return None, 0.0, mv
+    pull = -float((o[i, 2:] - o[j, 2:]) @ (move / mv))   # + = 점이 로봇 쪽 (움직임 반대) 으로 끌려옴
+    return pull > max(thr, rel * mv), pull, mv
+
+
 def shape_for(name, outline, footprint, flat=FLAT, min_w=0.06):
     """이름 + (odom 이든 map 이든 같은 좌표의) 윤곽·발자국 → 볼록 다각형 또는 None"""
     if name in flat and len(outline) >= 3:
@@ -137,8 +157,27 @@ class HazardMap:
                 it["name"], it["conf"] = name, conf
             it["t"], it["n"] = now, it["n"] + 1
             return how
-        self.items.append({"name": name, "conf": conf, "poly": poly, "t": now, "n": 1, "dist": dist, "full": full})
+        self.items.append({"name": name, "conf": conf, "poly": poly, "t": now, "n": 1, "dist": dist, "full": full,
+                           "obs": [], "ground": None})
         return "new"
+
+    def observe(self, rx, ry, px, py, near=0.20, keep=40):
+        """바닥 감지 덩어리 하나 (로봇 위치 + 가장 가까운 점, 표시와 같은 좌표) → 근처 표시에 모으고 떠 있나 판정.
+           → [(결과, 표시)] 결과: "floating" (표시 뺌) / "ground" (바닥 확인, 처음 한 번)"""
+        out = []
+        for it in list(self.items):
+            if not inside(grow(it["poly"], near), [(px, py)])[0]:
+                continue
+            it["obs"] = (it["obs"] + [(rx, ry, px, py)])[-keep:]
+            v, pull, mv = floating(it["obs"])
+            it["pull"], it["move"] = round(pull, 3), round(mv, 3)
+            if v is True:
+                self.items.remove(it)
+                out.append(("floating", it))
+            elif v is False and it["ground"] is None:
+                it["ground"] = True
+                out.append(("ground", it))
+        return out
 
     def clear(self):
         n = len(self.items)
@@ -160,4 +199,5 @@ class HazardMap:
     def state(self):
         return [{"name": it["name"], "conf": round(it["conf"], 3), "n": it["n"],
                  "cx": round(float(it["poly"][:, 0].mean()), 3), "cy": round(float(it["poly"][:, 1].mean()), 3),
-                 "area": round(area(it["poly"]), 3), "full": it["full"]} for it in self.items]
+                 "area": round(area(it["poly"]), 3), "full": it["full"],
+                 "ground": it["ground"]} for it in self.items]
