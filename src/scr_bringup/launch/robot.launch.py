@@ -49,12 +49,18 @@ def generate_launch_description():
                               description="pwm = 저속용 우리 제어(T:11, v5, 힘 제한·/motor_out — Whisker 필수) / pid = 펌웨어 속도 제어(T:1). "
                                           "11-08: 기본이 pid 라 Whisker 시험이 명령을 못 보고 힘 제한도 꺼졌었음 → pwm"),
 
+        # 11-19: 팬틸트 달고 무거워져 회전이 힘 제한 55 에 붙음 (crawl_test: 제자리·호 PWM 55 천장, gyro 못 따라감) → 재보려고 밖으로 뺌
+        DeclareLaunchArgument("push_cap_straight", default_value="40.0", description="브리지 v8.1 힘 제한: 직진 PWM 상한"),
+        DeclareLaunchArgument("push_cap_turn", default_value="55.0", description="브리지 v8.1 힘 제한: 회전 PWM 상한"),
+
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"robot_description": description}]),
 
         Node(package="scr_ugv02", executable="ugv02_bridge", output="screen",
              parameters=[{"port": ugv_port, "baud": 115200, "track_width": track_width,
-                          "drive_mode": LaunchConfiguration("drive_mode")}]),
+                          "drive_mode": LaunchConfiguration("drive_mode"),
+                          "push_cap_straight": ParameterValue(LaunchConfiguration("push_cap_straight"), value_type=float),
+                          "push_cap_turn": ParameterValue(LaunchConfiguration("push_cap_turn"), value_type=float)}]),
 
         # RPLIDAR C1: Slamtec sllidar_ros2 (src/sllidar_ros2 submodule). 10-28 실측: Standard, 5 kHz, 10.0 Hz, 720 beams.
         #   apt rplidar_ros 2.1.0 (SDK 1.12) 는 C1 에서 "Cannot start scan: 80008002" → 사용 안 함
