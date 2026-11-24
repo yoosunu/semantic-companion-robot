@@ -11,6 +11,7 @@
     - LiDAR 점 (회색), 작고 떨어진 덩어리 = 다리 후보 (초록 원, 지름 ≤ 8 cm)
     - 다리 후보마다 빨강 (마스크 아래) 까지 가장 가까운 거리 → 출력
   결과: snap_<자세>.png (사진 + 마스크), top_<자세>.png (위에서 본 그림, 로봇 기준 m), report.txt
+  11-25: + 다리 잇기 (nodes/navigation/furniture.py) — 5 자세의 YOLO26 bed (≥ 0.5) 를 모아 사각형 → furniture.png + report 끝 줄
 """
 import json
 import math
@@ -23,6 +24,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "nodes", "perception"))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "nodes", "navigation"))
+import furniture as fu  # noqa: E402
 import ground  # noqa: E402
 from yolo_onnx import Yolo  # noqa: E402
 
@@ -80,6 +83,7 @@ def analyze(d):
     m26 = Yolo(os.path.expanduser("~/models/yolo26s-seg.onnx"), size=320, conf=0.2)
     mE = Yolo(os.path.expanduser("~/models/yoloe-26s-seg-home.onnx"), size=320, conf=0.1)
     rep = []
+    F, last = fu.Furniture(), None
     for p in meta["poses"]:
         bgr = cv2.imread(os.path.join(d, p["file"]))
         pan, tilt = p["pan"], p["tilt"]
@@ -116,6 +120,8 @@ def analyze(d):
             # 광선 방향 범위 (거리 없이): 마스크 좌우 끝 열 → 각도
             cols = np.where(mask.any(0))[0]
             bear = [ray_bearing([c, mask[:, c].nonzero()[0].max()], K, D, pan, tilt) for c in (cols.min(), cols.max())]
+            if mdl == "26" and name in fu.FURNITURE and conf >= 0.5:      # 다리 잇기 (로봇 안 움직임 → odom = 로봇 좌표)
+                F.add_view(ground.cam_pose(pan, tilt)[1][:2], [math.radians(b) for b in bear], mb_fl, pts, (0.0, 0.0))
             cut = "잘림 " + "".join(s for s, c in (("왼", cols.min() <= 3), ("오", cols.max() >= mask.shape[1] - 4), ("아래", mask[-3:].any())) if c)
             near = []
             for cx, cy, _, _ in legs:
@@ -130,6 +136,23 @@ def analyze(d):
         stem = p["file"].rsplit(".", 1)[0]
         cv2.imwrite(os.path.join(d, f"snap_{stem}.png"), snap)
         cv2.imwrite(os.path.join(d, f"top_{stem}.png"), top)
+        last = pts
+    r = F.shape()
+    if r is None:
+        rep.append(f"다리 잇기: 영역 없음 (확정 다리 {len(F.legs)} 개 — 앞줄 2 개 필요)")
+    else:
+        rep.append(f"다리 잇기: 다리 {[(round(l[0], 2), round(l[1], 2)) for l in F.legs]} 간격 {r['spacing']:.2f} | 길이 {r['hi'] - r['lo']:.2f} "
+                   f"깊이 {r['depth']:.2f} | 꼭짓점 {np.round(r['corners'], 2).tolist()} | 끝 오른쪽: {r['why']['lo']} / 왼쪽: {r['why']['hi']} | 깊이: {r['why']['depth']}")
+        S, img = 150, np.full((420, 640, 3), 255, np.uint8)
+        to = lambda q: (int(400 - q[1] * S), int(380 - q[0] * S))
+        for x, y in (last if last is not None else []):
+            cv2.circle(img, to((x, y)), 1, (150, 150, 150), -1)
+        cv2.polylines(img, [np.array([to(q) for q in r["corners"]], np.int32)], True, (0, 0, 220), 2)
+        for l in F.legs:
+            cv2.circle(img, to(l[:2]), 6, (0, 150, 0), -1)
+        cv2.rectangle(img, to((0.126, 0.13)), to((-0.14, -0.13)), (90, 90, 90), 1)
+        cv2.putText(img, "red = blocked (furniture.py), green = legs", (8, 18), 0, 0.45, (0, 0, 0), 1)
+        cv2.imwrite(os.path.join(d, "furniture.png"), img)
     open(os.path.join(d, "report.txt"), "w").write("\n".join(rep) + "\n")
     print("\n".join(rep))
     print(f"끝: {d}  (snap_*.png 사진+마스크, top_*.png 위에서 본 그림: 파랑 = 상자 아래, 빨강 = YOLO26 마스크 아래, 보라 = YOLOE, 초록 원 = LiDAR 다리 후보)")
