@@ -37,6 +37,9 @@ import whisker
 np.random.seed(1)
 B, ROOM = 0.085, (-1.5, 2.5, -1.5, 1.5)
 HL = 0.13
+PWM = 65   # 11-25: 보통 모터 힘 (팬틸트 달고 출발에 65~75, 11-19 crawl_test). 전엔 30 (가벼울 때)
+
+
 def stamp(t): return types.SimpleNamespace(sec=int(t), nanosec=int((t % 1) * 1e9))
 
 class Sim:
@@ -85,7 +88,7 @@ class Sim:
         s.true = [nx, y + v * math.sin(th) * dt, th + w * dt]
         ov = 0.0 if block else (vl + vr) / 2
         s.odo = [s.odo[0] + ov * math.cos(s.true[2]) * dt, s.odo[1] + ov * math.sin(s.true[2]) * dt, s.true[2]]
-        pwm = 0 if off or (abs(cx) < 1e-3 and abs(cz) < 1e-3) else (max(30, s.force) if forced else 30)
+        pwm = 0 if off or (abs(cx) < 1e-3 and abs(cz) < 1e-3) else (max(PWM, s.force) if forced else PWM)
         dp = 0 if pwm == 0 else 60 * cz * B / max(abs(cx) + abs(cz) * B, 1e-3)   # 회전만큼 좌우 PWM 차이
         s.W.on_motor(types.SimpleNamespace(data=[pwm - dp / 2, pwm + dp / 2, ncx, ncz, 1.0 if mine else 0.0]))
         q = types.SimpleNamespace(x=0, y=0, z=math.sin(s.odo[2] / 2), w=math.cos(s.odo[2] / 2))
@@ -133,7 +136,7 @@ def scenes():
     for i in range(4): s.step(nav=(0.08 - 0.02 * i, 0))
     s.step(ax=-0.08); s.step(ax=0.04); s.run(20)
     R.append(check("5 굴러가다 서기 → 아무 일 없음", s, "drive", no_ev=["bump", "lift", "stuck"]))
-    s = Sim(); s.run(70, nav=(0.03, 0.15)); s.run(40, nav=(0.03, 0.15), trac=(0.05, 0.0)); s.run(200, trac=(1.0, 0.3))
+    s = Sim(); s.run(70, nav=(0.03, 0.15)); s.run(70, nav=(0.03, 0.15), trac=(0.05, 0.0)); s.run(200, trac=(1.0, 0.3))   # 11-25 창 3 s → 막힘 3.5 s
     R.append(check("6 카펫 한쪽 헛돎 → 안 움직임 → 되감기", s, None, ["stuck"]))
     s = Sim(); s.run(70, nav=(0.05, 0), block=True); s.run(20)
     R.append(check("8 출발하자마자 막힘 → 빼지 않음", s, "drive", ["stuck"]))
@@ -169,11 +172,11 @@ def scenes():
     tl = next((t for t, *_r, st in s.trace if st == "help"), None)
     R.append(check("21 양말 끼임 (힘 70 도 안 됨) → 사다리 4칸 다 → 구조 요청, 기다림 없이", s, None, ["stuck"])
              and "help" in s.states and s.force >= 70 and tl is not None and tl - t0 < 60)
-    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(40, nav=(0.05, 0), trac=(0.03, 0.03)); s.run(10)
+    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(70, nav=(0.05, 0), trac=(0.03, 0.03)); s.run(10)
     e = next((e for e in s.ev if e["ev"] == "stuck"), {})
     R.append(check("22 헛돎 (바퀴는 도는데 세상 그대로) → 미확인: 장애물 안 긋고 흉터만", s, None, ["stuck"])
              and e.get("wheels") == "헛돎" and e.get("feel") == "unsure" and not e.get("marked") and len(s.W.scars) >= 1)
-    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(40, nav=(0.05, 0), block=True); s.run(10)
+    s = Sim(); s.run(70, nav=(0.05, 0)); s.run(70, nav=(0.05, 0), block=True); s.run(10)
     e = next((e for e in s.ev if e["ev"] == "stuck"), {})
     R.append(check("23 막힘 (바퀴도 안 돎, 힘 충분) → 1분짜리 장애물", s, None, ["stuck"])
              and e.get("wheels") == "막힘" and e.get("feel") == "soft" and e.get("marked"))
@@ -189,6 +192,16 @@ def scenes():
     logs = " / ".join(s.W.logs)
     R.append(check("26 뒤 3 cm 벽 (LiDAR 로 보임) → 뒤로 빼는 칸 다 건너뜀, 앞으로만 → 구조 요청", s, None, ["stuck"])
              and not backs and "건너뜀" in logs and "help" in s.states)
+    global PWM
+    # 27·28 (11-25 실기 시작 자리 고스트): 팬틸트 무게로 출발이 늦음 — 첫 곡선 명령 (x 0.034, z −0.22) 에 PWM 58 로 1.5 s 넘게 안 움직임
+    PWM = 58
+    s = Sim(); s.run(10); s.run(44, nav=(0.034, -0.22), block=True); s.run(60, nav=(0.034, -0.22))   # 2.2 s 망설이다 출발
+    R.append(check("27 출발 망설임 2.2 s (PWM 58) 뒤 굴러감 → 막힘 아님 (11-25 시작 자리 고스트)", s, None, None, ["stuck"]))
+    s = Sim(); s.run(10); s.run(80, nav=(0.05, 0), block=True); s.run(10)                              # 4 s 진짜 막힘, 힘 58
+    e = next((e for e in s.ev if e["ev"] == "stuck"), {})
+    R.append(check("28 막힘 4 s 인데 힘 58 (< 60, 다 안 씀) → 감지·반응은 하되 미확인 (장애물 안 그음)", s, None, ["stuck"])
+             and e.get("feel") == "unsure" and not e.get("marked"))
+    PWM = 65
     print(f"\n{sum(R)}/{len(R)} 통과")
 
 def replay(burst=False):
