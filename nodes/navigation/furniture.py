@@ -18,13 +18,22 @@
          (프레임은 모서리 다리보다 튀어나옴 — 11-25 bed1 실물 오른쪽 11 cm. 10 cm 고정이면 오버행을 가림으로 봄 → 1 m 더 막음)
        - 더 나가 있음 = 가려진 다리 (11-24: 서랍장) → 다리는 같은 간격 (격자) 가정 → max(비전 끝, 끝 다리 + 간격 + 다리 두께) + pad
          (다리 두께 = LiDAR 가 잰 덩어리 지름 중 최대. 숨은 다리 자리는 중심이라 두께만큼 더 — 11-25 sim: pad 만으론 1.5 cm 여유)
-       - 그쪽 비전 없음 → 끝 다리 + 간격 + pad (넉넉하게)
+       - 그쪽 비전 없음 → 끝 다리 + 간격 + 두께 + pad (넉넉하게)
+       - 카메라가 그쪽 끝 다리보다 바깥 = 옆면이 보임 (11-25 bed2) → 그쪽 마스크 끝은 옆면 먼 모서리 → 앞면 끝 = 다리 + pad,
+         그 마스크 끝은 옆면 선에 대서 깊이 증거로 (비스듬히 한 장 = 앞면 + 옆면). 전엔 앞줄 선에 대서 "31 cm 더 감 → 가려진 다리"
+         → 양쪽 늘어 상한에서 반씩 잘림 → 반대쪽 숨은 다리가 빠짐 (위험 쪽 오류)
        - 전체가 max_len (2.2 m, 큰 가구 기준) 넘으면 가려진 쪽부터 자름
     4. 깊이 (d):
-       - 확정: 옆에서 본 장면 (카메라가 양 끝 바깥) 의 마스크 방향 끝을 옆면 선에 댐 + 깊은 줄 다리 → 가장 깊은 것 + pad
+       - 확정: 옆에서 본 장면 (카메라가 앞줄 선 뒤쪽 = 옆, 또는 비스듬히 끝 바깥) 의 마스크 방향 끝을 옆면 선에 댐 + 깊은 줄 다리
+         → 가장 깊은 것 + pad. 옆면 마스크 깊이가 row_gap (50 cm) 보다 작으면 버림 (앞 모서리를 옆면 끝으로 착각 → 깊이 9 cm 사고 방지)
+       - 벽이 있으면 깊이는 벽을 넘지 않음 (확정값이 더 멀면 벽에서 자름)
        - 가정 (확정 없을 때): 앞줄 여러 점에서 깊이 방향으로 LiDAR 벽에 닿을 때까지 (이 가구 다리 점은 뺌) — 가장 먼 것,
-         벽 없으면 max_len. 벽에 붙은 가구면 벽까지라 손해 없음 (Jasper). 벽과 떨어져 있으면 옆에서 볼 때 줄어듦.
+         (보인 샘플 중 최대) 벽 없으면 max_len. 벽에 붙은 가구면 벽까지라 손해 없음 (Jasper). 벽과 떨어져 있으면 옆에서 볼 때 줄어듦.
     5. → 사각형 4 점 (odom) + 근거 (why). 깊이는 "가정"/"확정" 표시.
+    교차 각도 (11-25): 비전 방향은 믿고, 거리는 광선이 선을 min_cross (30°) 넘게 가로지를 때만 믿음.
+       선 위치 오차 e 는 만나는 점을 e / sin(각도) 만큼 밀어냄 (GPS DOP·스테레오 시차와 같은 이야기).
+       11-25 bed2: 옆면 먼 모서리 방향 −8° = 정답 −7.5° (방향 맞음) 인데 옆면 선과 8° 로 스쳐 깊이 1.87 (실제 1.085).
+       → 스치는 앞면 끝은 "비전 없음 (스침)" 으로 (넉넉하게), 스치는 옆면 깊이는 버림 (벽까지 가정).
     pad 는 근거에 따라 (11-25, Jasper: 튀어나온 만큼 통로가 좁아질 걱정):
        LiDAR 로 잰 선 (앞줄, 확정된 깊은 다리) = 0 (다리 중심 + 두께 반) / 비전으로 잰 끝 (마스크) = pad / 추론 (숨은 다리) = pad + 두께.
        벽까지 가정은 벽 자체가 장애물이라 pad 없음. 부풀리기 (whisker_inflation 12 cm) 는 Nav2 가 따로 함.
@@ -82,15 +91,17 @@ def ray_to_line(cam, ang, p0, n):
 
 
 class Furniture:
-    def __init__(self, name="bed", match=0.10, merge=0.08, row_gap=0.5, spacing=1.0, max_len=2.2, pad=0.05, overhang=0.3):
+    def __init__(self, name="bed", match=0.10, merge=0.08, row_gap=0.5, spacing=1.0, max_len=2.2, pad=0.05, overhang=0.3,
+                 min_cross=30.0):
         self.name, self.match, self.merge, self.row_gap, self.overhang = name, match, merge, row_gap, overhang
-        self.spacing, self.max_len, self.pad = spacing, max_len, pad
+        self.spacing, self.max_len, self.pad, self.min_cross = spacing, max_len, pad, min_cross
         self.legs = []          # [[x, y, 본 횟수, 지름]] odom
         self.views = []         # [(cam_xy, 왼쪽 각, 오른쪽 각 (rad, odom), 그 순간 스캔 odom N×2)]
         self.frame = None       # (a, u, n): 앞줄 한 점, 축, 깊이 방향 (로봇 반대쪽)
 
     def add_view(self, cam_xy, bearing, mask_floor, scan, robot_xy):
-        """한 장: cam_xy 렌즈 위치, bearing (왼쪽 끝, 오른쪽 끝) rad (odom, 왼쪽 +), mask_floor 마스크 아래점 바닥 (odom, nan 은 뺌),
+        """한 장: cam_xy 렌즈 위치, bearing (왼쪽 끝, 오른쪽 끝) rad (odom, 왼쪽 +; 마스크가 화면 끝에 잘린 쪽은 None —
+           잘린 끝은 가구 끝이 아니라 화면 끝, 11-25 bed2 에서 그걸 끝으로 믿어 숨은 다리가 빠짐), mask_floor 마스크 아래점 바닥 (odom, nan 은 뺌),
            scan 그 순간 스캔 점 (odom, 스캔 순서), robot_xy 로봇 위치. → 이번에 다리로 확정한 것 [(x, y)]"""
         mf = np.asarray(mask_floor, float).reshape(-1, 2)
         mf = mf[np.isfinite(mf).all(1)]
@@ -135,22 +146,39 @@ class Furniture:
         s_lo, s_hi = float(min(s)), float(max(s))                    # 옆에서 본 깊은 다리도 포함
         # 3. 양 끝: 앞에서 본 장면 (카메라 깊이 < 0, 앞줄 범위 근처) 의 방향 끝 → 앞줄 선
         vis = {-1: [], +1: []}
-        side_views = []
+        side_views, side_rays, side_seen = [], [], set()
+        grazed = {-1: 0, +1: 0, "side": 0}
+        cross = lambda ang, normal: math.degrees(math.asin(min(1.0, abs(np.array([math.cos(ang), math.sin(ang)]) @ normal))))
         for cam, al, ar, scan in self.views:
             sc, dc = float((cam - a) @ u), float((cam - a) @ n)
-            if dc < 0 and sf[0] - 0.3 <= sc <= sf[-1] + 0.3:
+            if dc < 0:                                               # 앞줄 선 앞에 있으면 앞면을 봄 (11-25 bed2: 비스듬히 끝 바깥에서 봐도 앞면.
+                #   전엔 카메라가 다리 범위 ±0.3 m 밖이면 옆으로 쳐서 비전 끝을 다 버림 → 양쪽 "비전 없음" → 1 m 씩 늘어 상한)
                 for ang in (al, ar):
+                    if ang is None:
+                        continue
                     q = ray_to_line(cam, ang, a, n)
-                    if q is not None:
-                        sv = float((q - a) @ u)
-                        vis[+1 if sv > (sf[0] + sf[-1]) / 2 else -1].append(sv)
+                    if q is None:
+                        continue
+                    sv = float((q - a) @ u)
+                    sign = +1 if sv > (sf[0] + sf[-1]) / 2 else -1
+                    if (sc - (s_hi if sign > 0 else s_lo)) * sign > 0:   # 카메라가 그쪽 끝 다리보다 바깥 → 옆면 보임
+                        side_seen.add(sign)
+                        side_rays.append((cam, ang, sign))
+                    elif cross(ang, n) < self.min_cross:                # 앞줄 선을 스침 → 거리 못 믿음
+                        grazed[sign] += 1
+                    else:
+                        vis[sign].append(sv)
             else:
                 side_views.append((cam, al, ar, sc))
         ends, why = {}, {}
         for sign, s_leg in ((-1, s_lo), (+1, s_hi)):
             k = "lo" if sign < 0 else "hi"
+            if sign in side_seen and not vis[sign]:
+                ends[k], why[k] = s_leg + sign * (leg_w / 2 + self.pad), "옆면 보임 → 끝 = 다리 + pad"
+                continue
             if not vis[sign]:
-                ends[k], why[k] = s_leg + sign * (spacing + leg_w + self.pad), "비전 없음 → 다리 + 간격 + 두께 + pad"
+                tag = f"비전 없음 (스침 {grazed[sign]})" if grazed[sign] else "비전 없음"
+                ends[k], why[k] = s_leg + sign * (spacing + leg_w + self.pad), tag + " → 다리 + 간격 + 두께 + pad"
                 continue
             sv = max(v * sign for v in vis[sign]) * sign
             beyond = (sv - s_leg) * sign
@@ -173,23 +201,42 @@ class Furniture:
         # 4. 깊이: 확정 (옆에서 본 마스크 끝 + 깊은 다리) 아니면 가정 (벽까지)
         deep = d[d >= self.row_gap / 2]
         conf = [float(v) for v in deep]
+        for cam, ang, sign in side_rays:                             # 비스듬히 본 옆면 먼 모서리
+            if cross(ang, u) < self.min_cross:                       # 옆면 선 (방향 n, 법선 u) 을 스침 → 버림
+                grazed["side"] += 1
+                continue
+            q = ray_to_line(cam, ang, a + (s_hi if sign > 0 else s_lo) * u, u)   # 옆면 선 = 끝 다리 자리 (pad 밖 선에 대면 비스듬한 광선이 일찍 만나 깊이가 짧아짐)
+            if q is not None:
+                dv = float((q - a) @ n)
+                if self.row_gap <= dv <= self.max_len:
+                    conf.append(dv)
         for cam, al, ar, sc in side_views:
             edge = a + (hi if sc > (lo + hi) / 2 else lo) * u            # 카메라 쪽 옆면 선 (u 가 법선)
             for ang in (al, ar):
+                if ang is None:
+                    continue
+                if cross(ang, u) < self.min_cross:
+                    grazed["side"] += 1
+                    continue
                 q = ray_to_line(cam, ang, edge, u)
                 if q is not None:
                     dv = float((q - a) @ n)
-                    if 0 < dv <= self.max_len:
+                    if self.row_gap <= dv <= self.max_len:
                         conf.append(dv)
+        allscan = np.vstack([v[3] for v in self.views])
+        hits = [ray_hit(a + sv * u, n, allscan, skip=L, t_min=self.row_gap / 2) for sv in np.linspace(lo + self.pad, hi - self.pad, 9)]
+        seen = [h for h in hits if h < self.max_len]
+        wall = max(seen) if seen else self.max_len                  # 벽이 한 군데라도 보이면 그 벽까지 (가려져 안 보인 샘플 하나로 상한까지 가지 않게, sim 10)
         if conf:
             cand = [float(v) + leg_w / 2 for v in deep] + [v + self.pad for v in conf[len(deep):]]   # 다리 = LiDAR (pad 0), 옆면 마스크 = 비전 (pad)
             depth, why_d = max(cand), f"확정 (옆면 마스크·깊은 다리 {len(deep)} 개)"
+            if wall < self.max_len and depth > wall:
+                depth, why_d = wall, why_d + f" → 벽에서 자름 ({max(cand):.2f} > 벽 {wall:.2f})"
         else:
-            allscan = np.vstack([v[3] for v in self.views])
-            hits = [min(ray_hit(a + sv * u, n, allscan, skip=L, t_min=self.row_gap / 2), self.max_len)
-                    for sv in np.linspace(lo + self.pad, hi - self.pad, 9)]
-            depth = max(hits)
+            depth = wall
             why_d = "가정 (벽까지)" if depth < self.max_len else "가정 (벽 없음 → 상한)"
+            if grazed["side"]:
+                why_d += f" (옆면 스침 {grazed['side']} 버림)"
         base = a - n * (leg_w / 2)                                   # 앞줄 = LiDAR 다리 선 → pad 없이 다리 두께 반만
         corners = np.array([base + lo * u, base + hi * u, a + hi * u + n * depth, a + lo * u + n * depth])
         return {"corners": corners, "axis_u": u, "origin": a, "normal": n, "lo": lo, "hi": hi, "depth": depth,

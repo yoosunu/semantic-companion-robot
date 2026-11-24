@@ -121,7 +121,8 @@ def analyze(d):
             cols = np.where(mask.any(0))[0]
             bear = [ray_bearing([c, mask[:, c].nonzero()[0].max()], K, D, pan, tilt) for c in (cols.min(), cols.max())]
             if mdl == "26" and name in fu.FURNITURE and conf >= 0.5:      # 다리 잇기 (로봇 안 움직임 → odom = 로봇 좌표)
-                F.add_view(ground.cam_pose(pan, tilt)[1][:2], [math.radians(b) for b in bear], mb_fl, pts, (0.0, 0.0))
+                edge_cut = (cols.min() <= 3, cols.max() >= mask.shape[1] - 4)   # 화면 끝에 잘린 쪽은 방향 증거 아님 (None)
+                F.add_view(ground.cam_pose(pan, tilt)[1][:2], [None if c else math.radians(v) for v, c in zip(bear, edge_cut)], mb_fl, pts, (0.0, 0.0))
             cut = "잘림 " + "".join(s for s, c in (("왼", cols.min() <= 3), ("오", cols.max() >= mask.shape[1] - 4), ("아래", mask[-3:].any())) if c)
             near = []
             for cx, cy, _, _ in legs:
