@@ -180,7 +180,8 @@ check("11 가파른 옆면 (54°) → 확정 유지", r3 and r3["confirmed"] and
 
 def real(set_name="bed1"):
     """실물 기록 (11-24 bed1 정면, 11-25 bed2 오른쪽으로 옮겨 비스듬히·옆면 보임): 마스크 다시 돌림 → Furniture → 실측과 비교.
-       정답: 둘 다 본 두 다리 = 오른쪽 모서리 + 가운데 (같은 침대, 줄자 간격 97.5 · 폭 108.5) → 왼쪽 모서리 다리는 서랍장 뒤"""
+       bed3 (11-25 03:19): 더 오른쪽·안쪽, 오른쪽 짧은 면을 최대한 정면으로. 알고리즘 안 고치고 검증용.
+       정답: 셋 다 본 두 다리 = 오른쪽 모서리 + 가운데 (같은 침대, 줄자 간격 97.5 · 폭 108.5) → 왼쪽 모서리 다리는 서랍장 뒤"""
     import cv2
     sys.path.insert(0, os.path.join(ROOT, "nodes", "perception"))
     sys.path.insert(0, os.path.join(ROOT, "tools", "lab"))
@@ -239,7 +240,7 @@ def real(set_name="bed1"):
 
 
 if "--real" in sys.argv:
-    for name in ("bed1", "bed2"):
+    for name in ("bed1", "bed2", "bed3"):
         if os.path.isdir(os.path.join(ROOT, "logs", "bed_set", name)):
             real(name)
 print(f"\n{sum(results)}/{len(results)} 통과")
