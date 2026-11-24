@@ -49,6 +49,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import glance as gl  # noqa: E402
 import ground  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "navigation"))
+import furniture as fu  # noqa: E402  (11-25 밑이 뜬 가구 이름 목록만)
 from yolo_onnx import NAMES as COCO, Yolo  # noqa: E402
 
 cv2.setNumThreads(1)
@@ -85,6 +87,7 @@ class GlanceNode(Node):
         self.body_frac = p("body_frac", 0.5).value          # 마스크 (없으면 상자) 가 로봇 몸 자리에 이 비율 이상이면 자기 몸 → 버림
         self.body_cache = {}
         self.extra_on, self.extra_dist = p("extra_on", 0.5).value, p("extra_dist", 2.0).value   # 덤 보기 (11-19)
+        self.furn_keep_on = p("furn_keep_on", 0.3).value     # 11-25 밑이 뜬 가구 (bed) 는 덤 보기 0.3 부터 보냄 — 각도에 따라 점수가 떨어짐 (bed2 0.37)
         self.yolo26 = Yolo(os.path.expanduser(p("coco_model", "~/models/yolo26s-seg.onnx").value), size=320, conf=0.2)
         self.yoloe = Yolo(os.path.expanduser(p("yoloe_model", "~/models/yoloe-26s-seg.onnx").value), size=320, conf=self.maybe)
         self.yoloe_words = [n for n in self.yoloe.names if n not in COCO_SET]
@@ -302,9 +305,10 @@ class GlanceNode(Node):
            같은 화면의 다른 물건 중 extra_on (0.5, Jasper: 0.5 못 넘으면 못 본 것) 이상 + 모든 장에서 같은 이름 → 각자 마스크 발자국의
            가장 가까운 점 (extra_dist 2 m 안). 화면 아래 끝에 잘린 마스크는 cut (바닥 닿은 점이 안 보여 위치를 덜 믿음 → 기억은 안 함)"""
         out = []
-        prev = [{d[0] for d in ds if d[1] >= self.extra_on} for ds in dets_all[:-1]]
+        on = lambda n: self.furn_keep_on if n in fu.FURNITURE else self.extra_on   # 11-25 가구는 0.3 부터 보냄 (받을지는 floor_hazard 이중 문턱)
+        prev = [{d[0] for d in ds if d[1] >= on(d[0])} for ds in dets_all[:-1]]
         for d in dets_all[-1]:
-            if d[1] < self.extra_on or len(d) <= 6 or (chosen is not None and d[6] is chosen):
+            if d[1] < on(d[0]) or len(d) <= 6 or (chosen is not None and d[6] is chosen):
                 continue
             if any(d[0] not in s for s in prev):
                 continue                                                # 한 장에서만 → 버림
@@ -319,7 +323,31 @@ class GlanceNode(Node):
             out.append({"name": d[0], "conf": round(float(d[1]), 3), "x": round(x, 3), "y": round(y, 3),
                         "wx": round(wx, 3), "wy": round(wy, 3), "cut": self.cut(d[6]), "cut_bottom": bool(d[6][-3:].any()), "box": [int(v) for v in d[2:6]],
                         "footprint": self.world(fp), "outline": self.world(self.outline(d[6], j["pan"], j["tilt"]))})
+            if d[0] in fu.FURNITURE:
+                out[-1].update(self.furn_view(d[6], j["pan"], j["tilt"]))
         return out
+
+    def furn_view(self, mask, pan, tilt):
+        """밑이 뜬 가구 (침대) 다리 잇기용 (11-25) → floor_hazard 의 FurnitureMap. 전부 odom.
+           bearing = 마스크 좌우 끝 열 (가장 아래 픽셀) 의 광선 방향 [왼쪽, 오른쪽] rad — 화면 좌우 끝에 잘린 쪽은 None (화면 끝 ≠ 가구 끝).
+           cam = 렌즈 위치 (방향의 원점), robot = 로봇 위치.
+           foot_dense = 마스크 아래점 3 열마다 (원래 footprint 는 24 열만 → 300 열 마스크면 13 열마다 → 가는 침대 다리 (10~15 열) 를
+           건너뜀 → 11-25 bed2 가운데 다리가 발자국에서 16~41 cm → 다리 확정 안 됨)"""
+        cols = np.nonzero(mask.any(0))[0]
+        if not len(cols):
+            return {}
+        px = [[c + 0.5, np.nonzero(mask[:, c])[0].max() + 0.5] for c in (cols.min(), cols.max())]
+        b = ground.pixel_bearing(px, self.K, self.D, pan, tilt)
+        cut = (cols.min() <= 3, cols.max() >= mask.shape[1] - 4)
+        th = self.pose[2]
+        _, t = ground.cam_pose(pan, tilt)
+        cc = cols[::3]
+        fl = ground.pixels_to_floor([(c + 0.5, np.nonzero(mask[:, c])[0].max() + 0.5) for c in cc], self.K, self.D, pan, tilt)
+        fl = fl[np.isfinite(fl).all(1)]
+        fl = fl[np.hypot(fl[:, 0], fl[:, 1]) < 3.0]
+        return {"bearing": [None if c else round(float(v + th), 4) for v, c in zip(b, cut)], "foot_dense": self.world(fl),
+                "cam": [round(v, 3) for v in gl.to_world(self.pose, t[0], t[1])],
+                "robot": [round(self.pose[0], 3), round(self.pose[1], 3)]}
 
     @staticmethod
     def cut(mask, edge=3):
@@ -403,9 +431,12 @@ class GlanceNode(Node):
                 self.cands.remember(e["wx"], e["wy"], now, e["name"], e["conf"], pose=self.pose)   # 이름 아는 자리 → 바닥 후보로 또 안 봄
         r = t["req"]
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
-        self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
-                                                      "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl,
-                                                      "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms})))
+        seen = {"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
+                "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl,
+                "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms}
+        if best and best[3] is not None and name in fu.FURNITURE:
+            seen.update(self.furn_view(best[3], j["pan"], j["tilt"]))
+        self.pub_seen.publish(String(data=json.dumps(seen)))
         top = lambda ds: ", ".join(f"{d[0]} {d[1]:.2f}" for d in sorted(ds, key=lambda d: -d[1])[:3]) or "-"
         self.get_logger().info(
             f"GLANCE #{j['id']} → {name} {conf:.2f} ({model}) | ms 사령관 {ms.get('mode')} 고개 {ms.get('head')} "

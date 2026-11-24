@@ -177,6 +177,49 @@ check("12 왼쪽 잘림 → 비전 없음 → 넉넉하게 (숨은 다리 +1.645
 # 11. 교차 각도: 옆에서 가파르게 (54°) 보면 그대로 확정 (시험 3 과 같은 장면, 스침 규칙이 좋은 증거는 안 버림)
 check("11 가파른 옆면 (54°) → 확정 유지", r3 and r3["confirmed"] and "스침" not in r3["why"]["depth"], r3 and r3["why"]["depth"])
 
+# 13~16. FurnitureMap (floor_hazard 가 씀): 같은 침대 여러 번 → 하나, 멀리 다른 침대 → 둘, 점수 낮음 → 안 씀, costmap 점이 사각형을 채움
+M = fu.FurnitureMap()
+scan1 = fake_scan(FRONT + BACK, DRAWER + wall_at(2.03))
+M.observe("bed", 0.76, CAM, B, MASK, scan1, (0, 0))
+M.observe("bed", 0.79, CAM, B, MASK, scan1, (0, 0))
+check("13 같은 침대 두 번 → 하나", len(M.items) == 1 and len(M.items[0].views) == 2, len(M.items))
+far_legs = [(4.0, 3.0), (4.0, 4.0)]
+_, _, how = M.observe("bed", 0.7, CAM, (math.atan2(4.05, 3.94), math.atan2(2.95, 3.94)), np.array([[4.0, y] for y in np.linspace(2.95, 4.05, 20)]),
+                      fake_scan(far_legs, wall_at(5.0)), (0, 0))
+check("14 멀리 다른 침대 → 새로 (둘)", how == "new" and len(M.items) == 2, (how, len(M.items)))
+F_, _, how = M.observe("bed", 0.25, CAM, B, MASK, scan1, (0, 0))
+check("15 점수 0.25 (< 0.3) → 안 씀", F_ is None and how.startswith("skip"), how)
+F_, _, how = M.observe("bed", 0.37, CAM, B, MASK, scan1, (0, 0))
+check("15b 점수 0.37 + 기존 침대 자리 → 받음 (이중 문턱)", F_ is M.items[0] and how.startswith("same") and "낮은 점수" in how and len(M.items) == 2, how)
+F_, _, how = M.observe("bed", 0.37, CAM, (math.atan2(-2.95, 3.94), math.atan2(-4.05, 3.94)), np.array([[4.0, -y] for y in np.linspace(2.95, 4.05, 20)]),
+                       fake_scan([(4.0, -3.0), (4.0, -4.0)], wall_at(5.0)), (0, 0))
+check("15c 점수 0.37 + 처음 보는 자리 → 안 씀 (새 가구는 0.5)", F_ is None and "새 가구" in how and len(M.items) == 2, how)
+cp = M.cloud_points()
+r0 = M.items[0].shape()
+check("16 costmap 점: 첫 침대 다리 6 개 자리 둘레 3 cm 안에 점 있음, 사각형 밖 점 없음",
+      all(np.hypot(*(cp - p).T).min() < 0.03 for p in FRONT + BACK)
+      and all(inside(r0["corners"], q, tol=1e-6) or inside(M.items[1].shape()["corners"], q, tol=1e-6) for q in cp if M.items[1].shape() is not None),
+      len(cp))
+M.clear()
+check("16 지우기 → 0", not M.items and len(M.cloud_points()) == 0)
+
+# 17. ground.pixel_bearing: 바닥 점을 픽셀로 보낸 뒤 방향으로 되돌리면 렌즈에서 그 점 방향과 같음 (렌즈 값은 가짜, 식 검증용)
+try:
+    sys.path.insert(0, os.path.join(ROOT, "nodes", "perception"))
+    import ground as gr
+    K = np.array([[260.0, 0, 320], [0, 260.0, 240], [0, 0, 1]]); D = np.zeros((4, 1))
+    errs = []
+    for pan, tilt in ((0, -15), (-40, -15), (30, -5)):
+        pts = np.array([[0.9, 0.3], [1.2, -0.5], [0.7, 0.0]])
+        px = gr.floor_to_pixels(pts, K, D, pan, tilt)
+        ok = np.isfinite(px).all(1)
+        _, t = gr.cam_pose(pan, tilt)
+        want = np.arctan2(pts[ok, 1] - t[1], pts[ok, 0] - t[0])
+        errs += list(np.degrees(np.abs(gr.pixel_bearing(px[ok], K, D, pan, tilt) - want)))
+    check("17 pixel_bearing 되돌리기 오차 < 0.1°", errs and max(errs) < 0.1, round(max(errs), 4) if errs else "점 없음")
+except ImportError as e:
+    print(f"건너뜀 17 (ground 못 불러옴: {e})")
+
 
 def real(set_name="bed1"):
     """실물 기록 (11-24 bed1 정면, 11-25 bed2 오른쪽으로 옮겨 비스듬히·옆면 보임): 마스크 다시 돌림 → Furniture → 실측과 비교.

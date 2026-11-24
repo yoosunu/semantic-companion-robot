@@ -13,6 +13,9 @@
   2단계 (11-20): floor/blobs (바닥 감지, 초당 2 번) 의 가장 가까운 점을 표시 근처에서 모아 "다가갈수록 끌려오나" →
         끌려오면 떠 있는 것 (발자국이 엉뚱) → 표시 빼고 비용지도 초기화. 안 끌려오면 "바닥 확인" (hazards.floating)
   지금 안 하는 것: 자동 지우기 (치운 발닦개), 탐색기 연결 (3단계)
+  밑이 뜬 가구 (11-25, furniture.py, tests/furniture_sim.py): semantic/seen 의 bed (새 가구 ≥ furn_on 0.5, 이미 있는 자리 ≥ furn_keep_on 0.3;
+        glance 가 bearing·cam·robot·foot_dense 실어 줌)
+        + 그 순간 /scan → FurnitureMap (다리 잇기) → 사각형을 같은 /semantic/cloud 에. 로그 FURN
 """
 import json
 import math
@@ -36,6 +39,7 @@ except ImportError:                                                     # Nav2 �
     ClearEntireCostmap = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import furniture as fu  # noqa: E402
 import hazards as hz  # noqa: E402
 
 MARK_Z = 0.05
@@ -62,6 +66,7 @@ class FloorHazard(Node):
         self.frame = p("frame", "map").value
         self.remove_floating = p("remove_floating", False).value   # 11-20: 진짜 발닦개를 "떠 있음" 으로 두 번 뺌 → 원인 볼 때까지 관찰 모드
         self.H = hz.HazardMap(on=p("on", 0.4).value, scan_max=p("scan_max", 2).value)   # 11-20: 0.5 → 0.4 (바닥형은 전부 YOLOE 단어, 따라보기와 같게)
+        self.F = fu.FurnitureMap(on=p("furn_on", 0.5).value, keep_on=p("furn_keep_on", 0.3).value)   # 이중 문턱: 새 가구 0.5, 기존 자리 0.3
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.scan = None
@@ -102,16 +107,19 @@ class FloorHazard(Node):
         if j.get("name") and not j["name"].endswith("?"):
             objs.append(j)
         objs += j.get("extras", [])
-        other = sorted({o["name"] for o in objs if o["name"] not in self.H.types})
+        furn = [o for o in objs if o["name"] in fu.FURNITURE and o.get("bearing") is not None]
+        other = sorted({o["name"] for o in objs if o["name"] not in self.H.types and o["name"] not in fu.FURNITURE})
         if other:                                                       # 11-20: rug 를 조용히 버려서 원인 찾기 어려웠음 → 남김
             self.get_logger().info(f"HAZARD #{j.get('id')} 바닥형 아님 (이름표만): {', '.join(other)}")
         objs = [o for o in objs if o["name"] in self.H.types]
-        if not objs:
+        if not objs and not furn:
             return
         To, Tb, pts = self.lookup("odom"), self.lookup("base_footprint"), self.scan_points()
         if To is None or Tb is None or pts is None:
             self.get_logger().warn(f"HAZARD #{j.get('id')} 건너뜀: TF·스캔 없음")
             return
+        for o in furn:
+            self.on_furniture(j.get("id"), o, To, Tb, pts)
         now = time.time()
         for o in objs:
             out = apply(To, o.get("outline") or np.zeros((0, 2)))
@@ -128,6 +136,28 @@ class FloorHazard(Node):
                                        f"중심 ({c[0]:+.2f}, {c[1]:+.2f}) 넓이 {hz.area(poly):.2f} m² 거리 {dist:.2f} m | {why} | 지금 {len(self.H.items)} 개")
             else:
                 self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} → 안 찍음 | {why}")
+
+    def on_furniture(self, jid, o, To, Tb, pts):
+        """밑이 뜬 가구 한 장 → FurnitureMap (odom 값을 map 으로, 방향엔 odom→map 회전만 더함)"""
+        foot = apply(To, o.get("foot_dense") or o.get("footprint") or np.zeros((0, 2)))   # 촘촘한 발자국 (가는 다리 안 놓침)
+        cam = apply(To, [o["cam"]])[0]
+        bear = [None if b is None else b + To[2] for b in o["bearing"]]
+        F, found, how = self.F.observe(o["name"], o["conf"], cam, bear, foot, pts, np.array(Tb[:2]))
+        if F is None:
+            self.get_logger().info(f"FURN #{jid} {o['name']} {o['conf']:.2f} → {how}")
+            return
+        r = F.shape()
+        legs = ", ".join(f"({l[0]:+.2f},{l[1]:+.2f})x{l[2]}" for l in F.legs)
+        cutw = "".join(w for w, b in zip(("왼", "오"), o["bearing"]) if b is None)
+        word = "새 가구" if how == "new" else ("같은 가구" + (" (낮은 점수라 기존 자리로 받음)" if "낮은" in how else ""))
+        head = (f"FURN #{jid} {o['name']} {o['conf']:.2f} {word} | 이번 다리 {len(found)} 개"
+                + (f" | 잘림 {cutw}" if cutw else "") + f" | 다리 {len(F.legs)}: {legs}")
+        if r is None:
+            self.get_logger().info(head + " | 영역 없음 (앞줄 다리 2 개를 한 장에서 같이 봐야 함)")
+        else:
+            self.get_logger().info(head + f" | 길이 {r['hi'] - r['lo']:.2f} 깊이 {r['depth']:.2f} 간격 {r['spacing']:.2f} | "
+                                   f"끝: {r['why']['lo']} / {r['why']['hi']} | 깊이: {r['why']['depth']} | "
+                                   f"꼭짓점 {np.round(r['corners'], 2).tolist()}")
 
     def on_blobs(self, msg):
         """바닥 감지 덩어리 → 표시 근처면 모아서 떠 있나 판정 (2단계)"""
@@ -169,12 +199,12 @@ class FloorHazard(Node):
                 cl.call_async(ClearEntireCostmap.Request())
 
     def on_clear(self, _):
-        self.get_logger().info(f"HAZARD 지움: {self.H.clear()} 개 + 비용지도 초기화")
+        self.get_logger().info(f"HAZARD 지움: {self.H.clear()} 개, 가구 {self.F.clear()} 개 + 비용지도 초기화")
         self.tick()
         self.clear_costmaps()
 
     def tick(self):
-        pts = self.H.cloud_points()
+        pts = np.vstack([self.H.cloud_points().reshape(-1, 2), self.F.cloud_points().reshape(-1, 2)])
         m = PointCloud2()
         m.header.stamp = self.get_clock().now().to_msg()
         m.header.frame_id = self.frame

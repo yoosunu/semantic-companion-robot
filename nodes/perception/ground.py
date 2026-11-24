@@ -65,6 +65,17 @@ def pixels_to_floor(px, K, D, pan_deg, tilt_deg):
     return out
 
 
+def pixel_bearing(px, K, D, pan_deg, tilt_deg):
+    """px: N×2 픽셀 → 그 광선의 방향 (로봇 기준 각도 rad, 왼쪽 +). 바닥에 안 닿는 (수평 위) 광선도 됨 — 거리는 안 씀.
+       11-25 다리 잇기: 마스크 좌우 끝 방향 (bed1 줄자 대조 0.5~3° 안). 방향의 원점은 렌즈 (cam_pose 의 t)"""
+    import cv2
+    px = np.ascontiguousarray(np.asarray(px, float).reshape(-1, 2)).reshape(-1, 1, 2)
+    und = cv2.fisheye.undistortPoints(px, K, D).reshape(-1, 2)
+    R, _ = cam_pose(pan_deg, tilt_deg)
+    w = np.column_stack([und, np.ones(len(und))]) @ R.T
+    return np.arctan2(w[:, 1], w[:, 0])
+
+
 def floor_to_pixels(pts, K, D, pan_deg, tilt_deg):
     """pts: N×2 바닥 (x, y) m → N×2 픽셀 (카메라 뒤면 nan)"""
     pts = np.asarray(pts, float).reshape(-1, 2)

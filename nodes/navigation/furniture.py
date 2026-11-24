@@ -241,3 +241,75 @@ class Furniture:
         corners = np.array([base + lo * u, base + hi * u, a + hi * u + n * depth, a + lo * u + n * depth])
         return {"corners": corners, "axis_u": u, "origin": a, "normal": n, "lo": lo, "hi": hi, "depth": depth,
                 "spacing": spacing, "confirmed": bool(conf), "why": {"lo": why["lo"], "hi": why["hi"], "depth": why_d}}
+
+
+def fill(poly, step=0.03):
+    """볼록 다각형 안을 step 격자로 채운 점 + 꼭짓점 (costmap 용, hazards.cloud_points 와 같은 방식)"""
+    poly = np.asarray(poly, float)
+    (x0, y0), (x1, y1) = poly.min(0), poly.max(0)
+    xs, ys = np.meshgrid(np.arange(x0, x1 + step, step), np.arange(y0, y1 + step, step))
+    g = np.column_stack([xs.ravel(), ys.ravel()])
+    sides = [(poly[(i + 1) % len(poly)] - poly[i])[0] * (g - poly[i])[:, 1] - (poly[(i + 1) % len(poly)] - poly[i])[1] * (g - poly[i])[:, 0]
+             for i in range(len(poly))]
+    S = np.array(sides)
+    ok = (S >= -1e-9).all(0) | (S <= 1e-9).all(0)
+    return np.vstack([g[ok], poly])
+
+
+class FurnitureMap:
+    """여러 가구 (11-25, floor_hazard 가 씀). 같은 이름 + 새 발자국이 기존 다리 assoc (0.5 m) 안이거나 기존 사각형 안 → 같은 가구, 아니면 새로.
+       좌표는 부르는 쪽이 하나로 (floor_hazard = map).
+       이중 문턱 (11-25 Jasper: 각도에 따라 YOLO 점수가 떨어짐 — bed2 pan +40 0.37, bed1 잘린 조각 0.23):
+         새 가구는 on (0.5) 이상, 이미 있는 가구 자리면 keep_on (0.3) 이상 → 받음 (추적의 시작 엄격·유지 너그러움).
+         낮춰도 다리는 LiDAR 덩어리가 마스크 발자국 10 cm 안일 때만 → 엉뚱한 걸 받아도 다리가 안 맞으면 영향 없음."""
+
+    def __init__(self, on=0.5, keep_on=0.3, assoc=0.5, **kw):
+        self.on, self.keep_on, self.assoc, self.kw = on, keep_on, assoc, kw
+        self.items = []
+
+    def observe(self, name, conf, cam, bearing, foot, scan, robot):
+        """→ (Furniture 또는 None, 이번에 확정한 다리, "new"/"same..."/"skip: 이유")"""
+        if name not in FURNITURE:
+            return None, [], "skip: 밑이 뜬 가구 아님"
+        if conf < self.keep_on:
+            return None, [], f"skip: 점수 {conf:.2f} < {self.keep_on}"
+        foot = np.asarray(foot, float).reshape(-1, 2)
+        foot = foot[np.isfinite(foot).all(1)]
+        if not len(foot):
+            return None, [], "skip: 발자국 없음"
+        F, how = None, "new"
+        for it in self.items:
+            if it.name != name:
+                continue
+            near = any(np.hypot(*(foot - l[:2]).T).min() < self.assoc for l in it.legs)
+            r = it.shape()
+            inside = r is not None and any(_inside(r["corners"], q) for q in foot)
+            if near or inside:
+                F, how = it, "same"
+                break
+        if F is None and conf < self.on:
+            return None, [], f"skip: 점수 {conf:.2f} < {self.on} (새 가구) — 기존 가구 자리면 {self.keep_on} 부터 받음"
+        if F is not None and conf < self.on:
+            how = f"same (낮은 점수 {conf:.2f}, 기존 가구 자리라 받음)"
+        if F is None:
+            F = Furniture(name=name, **self.kw)
+            self.items.append(F)
+        found = F.add_view(cam, bearing, foot, scan, robot)
+        return F, found, how
+
+    def shapes(self):
+        return [(it, it.shape()) for it in self.items]
+
+    def cloud_points(self, step=0.03):
+        pts = [fill(r["corners"], step) for _, r in self.shapes() if r is not None]
+        return np.vstack(pts) if pts else np.zeros((0, 2))
+
+    def clear(self):
+        n = len(self.items)
+        self.items = []
+        return n
+
+
+def _inside(poly, p):
+    s = [(poly[(i + 1) % 4] - poly[i])[0] * (p - poly[i])[1] - (poly[(i + 1) % 4] - poly[i])[1] * (p - poly[i])[0] for i in range(4)]
+    return all(v >= -1e-9 for v in s) or all(v <= 1e-9 for v in s)
