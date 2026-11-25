@@ -92,10 +92,12 @@ def ray_to_line(cam, ang, p0, n):
 
 
 class Furniture:
-    def __init__(self, name="bed", match=0.10, merge=0.08, row_gap=0.5, spacing=1.0, max_len=2.2, pad=0.05, overhang=0.3,
-                 min_cross=30.0):
+    def __init__(self, name="bed", match=0.10, merge=0.15, row_gap=0.5, spacing=1.0, max_len=2.2, pad=0.05, overhang=0.3,
+                 min_cross=30.0, min_spacing=0.30):
+        # merge 0.08 → 0.15 (11-25 20:00 실기: 초기화로 90° 씩 돌며 같은 다리를 여러 각도에서 → 각진 다리 다른 면·SLAM 어긋남으로
+        #   10 cm 떨어진 다리 둘로 → 간격 0.10 으로 계산됨). min_spacing: 이보다 가까운 쌍은 간격 계산에서 뺌
         self.name, self.match, self.merge, self.row_gap, self.overhang = name, match, merge, row_gap, overhang
-        self.spacing, self.max_len, self.pad, self.min_cross = spacing, max_len, pad, min_cross
+        self.spacing, self.max_len, self.pad, self.min_cross, self.min_spacing = spacing, max_len, pad, min_cross, min_spacing
         self.legs = []          # [[x, y, 본 횟수, 지름]] odom
         self.views = []         # [(cam_xy, 왼쪽 각, 오른쪽 각 (rad, odom), 그 순간 스캔 odom N×2)]
         self.frame = None       # (a, u, n): 앞줄 한 점, 축, 깊이 방향 (로봇 반대쪽)
@@ -142,6 +144,7 @@ class Furniture:
             d = (L - a) @ n
         sf = np.sort(s[front])
         gaps = np.diff(sf)
+        gaps = gaps[gaps >= self.min_spacing]                           # 30 cm 안 쌍 = 같은 다리를 두 번 본 것
         spacing = float(np.median(gaps)) if len(gaps) else self.spacing
         leg_w = max(l[3] for l in self.legs)                         # 다리 두께 (LiDAR 덩어리 지름 최대)
         s_lo, s_hi = float(min(s)), float(max(s))                    # 옆에서 본 깊은 다리도 포함

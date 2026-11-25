@@ -76,6 +76,7 @@ class FloorHazard(Node):
         self.create_subscription(String, "floor/blobs", self.on_blobs, 10)
         self.pub_cloud = self.create_publisher(PointCloud2, "/semantic/cloud", 1)
         self.pub_state = self.create_publisher(String, "/semantic/hazards", 1)
+        self.pub_furn = self.create_publisher(String, "/semantic/furniture", 1)   # 11-25 가구 도형 (map) → 탐색기 "가구 밑" 경계
         self.create_timer(1.0 / p("rate_hz", 1.0).value, self.tick)
         # 지우기: 점 구름만 비우면 costmap 층 (clearing: false) 에 칸이 남음 → 비용지도 전체 초기화 (LiDAR·위스커는 다음 주기에 다시 채움)
         self.clear_cli = [self.create_client(ClearEntireCostmap, s) for s in (
@@ -216,6 +217,8 @@ class FloorHazard(Node):
         m.row_step = 12 * len(pts)
         m.data = b"".join(struct.pack("<fff", float(x), float(y), MARK_Z) for x, y in pts)
         self.pub_cloud.publish(m)
+        self.pub_furn.publish(String(data=json.dumps([{"name": F.name, "corners": np.round(r["corners"], 3).tolist()}
+                                                      for F, r in self.F.shapes() if r is not None])))
         st = self.H.state()
         To = self.lookup("odom") if st else None
         if To is not None:                                              # 11-20 따라보기용: glance_node 는 odom 좌표 → 같이 실어 줌

@@ -351,9 +351,13 @@ pubs = survey_log(X); sent.clear(); tick(X, 1); done(X, pubs); n0 = len(sent); t
 ok("I9 좁고 넓은 곳도 없음 → 초기화 이동·돌기 없이 바로 탐색", n0 == 0 and X.phase in ("explore", "home")
    and any("넓은 곳 없음" in l for l in X.logs))
 E.INIT_LOOK = False
-# K) 11-25 가구 밑 경계: 경계 칸 반 이상이 가구 영역 (비용 ≥ 99) → 보러 가지 않고 바로 포기 "furniture"
+# FU) 11-25 가구 밑 경계: 경계 칸 반 이상이 가구 영역 (비용 ≥ 99) → 보러 가지 않고 바로 포기 "furniture"
 fr = [[{"x": 1.8, "y": 1.4, "size": 0.45, "cells": [(1.8, 1.3), (1.8, 1.4), (1.8, 1.5)], "vx": 1.0, "vy": 1.4},
        {"x": -1.0, "y": 0.3, "size": 0.4, "cells": [(-1.0, 0.3)], "vx": -0.7, "vy": 0.3}]]
-X = make(fr); X.cost_at = lambda x, y: 100 if x > 1.5 else 10; sent.clear(); tick(X, 2)
-ok("K 침대 밑 경계 → 바로 furniture 포기, 다른 경계로 감", reasons(X) == ["furniture"] and sent and goal_xy() == (-0.7, 0.3))
+X = make(fr); X.furniture = [{"name": "bed", "corners": [[1.5, -0.5], [1.5, 1.6], [2.6, 1.6], [2.6, -0.5]]}]; sent.clear(); tick(X, 2)
+ok("FU1 침대 밑 경계 (가구 도형 안) → 바로 furniture 포기, 다른 경계로 감", reasons(X) == ["furniture"] and sent and goal_xy() == (-0.7, 0.3))
+X = make(fr); X.furniture = [{"name": "bed", "corners": [[1.5, -0.5], [1.5, 1.6], [2.6, 1.6], [2.6, -0.5]]}]
+X.cost_at = lambda x, y: 99 if x < -0.9 else 10; sent.clear(); tick(X, 2)
+ok("FU2 벽 옆 경계 (비용 99 부풀림, 가구 도형 밖) → 버리지 않음 (20:00 실기: 정상 경계 3 곳을 버림)", reasons(X) == ["furniture"]
+   and sent and goal_xy() == (-0.7, 0.3))
 print(f"\n{sum(R)}/{len(R)} 통과")

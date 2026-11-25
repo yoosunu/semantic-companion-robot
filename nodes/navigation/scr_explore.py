@@ -100,8 +100,22 @@ OPEN_SEARCH = 1.5        # m, 좁을 때 넓은 곳 찾는 반경
 LETHAL_C = 99            # 비용지도 99 (몸 닿음) 이상 = 막힘. 모르는 칸 (−1) 은 막힘으로 안 봄 (시작 땐 거의 모름)
 SURVEY_PANS, SURVEY_TILT = (-60, -30, 0, 30, 60), -15   # 처음 (좁은 자리, 고개만) — 5 자세
 SURVEY_PANS_TURN = (-60, 0, 60)   # 11-25 돌면서 하는 둘러보기는 3 자세 (어안 화각 넓음, 몸이 90° 씩 도니 겹침. 5 자세 = 18 s → 3 자세 ≈ 11 s)
-FURN_COST = 99           # 11-25 경계 칸의 반 이상이 이 비용 이상 (가구 영역 = semantic_layer) → "가구 밑" 바로 포기
-                         #   (침대 밑은 SLAM 엔 모르는 곳 → 경계 → 보러 갔다 unseen. Jasper: 들어갈 수 있나는 Nav2·ToF 때 다시)
+# 11-25 "가구 밑" 경계: 경계 칸의 반 이상이 가구 도형 (/semantic/furniture, floor_hazard) 안 → 바로 포기
+#   (침대 밑은 SLAM 엔 모르는 곳 → 경계 → 보러 갔다 unseen. Jasper: 들어갈 수 있나는 Nav2·ToF 때 다시)
+#   처음엔 비용 ≥ 99 로 봤는데 벽 옆 부풀림도 99 → 20:00 실기에서 정상 경계 3 곳을 버리고 바로 집으로 → 도형으로
+FURN_PAD = 0.05          # m, 도형 둘레 여유
+
+
+def in_poly(poly, x, y, pad=0.0):
+    """볼록 다각형 안 (pad 만큼 넓게: 중심에서 바깥으로 민 꼭짓점)"""
+    P = np.asarray(poly, float)
+    if pad:
+        c = P.mean(0)
+        d = P - c
+        P = c + d * (1 + pad / np.maximum(np.hypot(d[:, 0], d[:, 1]), 1e-6))[:, None]
+    n = len(P)
+    s = [(P[(i + 1) % n, 0] - P[i, 0]) * (y - P[i, 1]) - (P[(i + 1) % n, 1] - P[i, 1]) * (x - P[i, 0]) for i in range(n)]
+    return all(v >= -1e-9 for v in s) or all(v <= 1e-9 for v in s)
 SURVEY_TIMEOUT = 30.0    # s, glance 가 답 없으면 (꺼져 있음 등) 그냥 다음으로
 INIT_TURNS = 3           # 넓은 곳에서 90° 씩 몇 번 돌며 둘러볼지 (3 번 → 4 방향)
 INIT_NAV_S = 40.0        # s, 초기화 이동·회전 한 번 시간 제한
@@ -246,6 +260,8 @@ class Explorer(Node):
         self.marker_pub = self.create_publisher(MarkerArray, "scr_explore/markers", 1)
         self.survey_pub = self.create_publisher(String, "semantic/survey", 10)          # 11-25 둘러보기 요청 (glance_node)
         self.create_subscription(String, "semantic/survey_done", self.on_survey_done, 10)
+        self.furniture = []                      # [{"name", "corners"}] map
+        self.create_subscription(String, "/semantic/furniture", lambda m: setattr(self, "furniture", json.loads(m.data)), 1)
         self.state_pub = self.create_publisher(String, "robot/state", 10)   # 11-10 상태 (화면·말하기가 같은 걸 봄)
         self.n_open = 0
         self.nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
@@ -515,8 +531,9 @@ class Explorer(Node):
         for f in self.frontiers:
             if self.near(f["x"], f["y"], given):
                 continue
-            if f.get("cells") and sum(self.cost_at(x, y) >= FURN_COST for x, y in f["cells"]) * 2 >= len(f["cells"]):
-                self.give_up(f["x"], f["y"], "furniture")     # 가구 영역 안 (침대 밑 등) → 볼 수도 갈 수도 없음
+            if f.get("cells") and self.furniture and sum(
+                    any(in_poly(F["corners"], x, y, FURN_PAD) for F in self.furniture) for x, y in f["cells"]) * 2 >= len(f["cells"]):
+                self.give_up(f["x"], f["y"], "furniture")     # 가구 도형 안 (침대 밑 등) → 볼 수도 갈 수도 없음
                 given.append((f["x"], f["y"]))
                 continue
             if self.near(f["x"], f["y"], self.whisker):

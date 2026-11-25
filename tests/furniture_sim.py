@@ -220,6 +220,14 @@ try:
 except ImportError as e:
     print(f"건너뜀 17 (ground 못 불러옴: {e})")
 
+# 22. 같은 다리를 다른 각도에서 10 cm 어긋나게 (11-25 20:00 실기: 다리 4 개, 간격 0.10) → 합쳐지고 간격 0.96
+F22 = fu.Furniture()
+front_view(F22, FRONT + BACK, DRAWER + wall_at(2.03))
+F22.add_view(CAM, B, MASK + [0.0, 0.10], fake_scan([(0.9, -0.19), (0.9, 0.77)] + BACK, DRAWER + wall_at(2.03)), (0, 0))
+r22 = F22.shape()
+check("22 같은 다리 10 cm 어긋남 → 다리 2 개로 합침, 간격 0.9~1.0", len(F22.legs) == 2 and r22 and 0.9 < r22["spacing"] < 1.0,
+      (len(F22.legs), r22 and round(r22["spacing"], 2)))
+
 # 18~21. 회전의자 (11-25 chair1: 기둥 = LiDAR 작은 덩어리, 반지름 = 장면 중간값들의 중간값, 줄자 별 다리 지름 68 cm)
 COL = (1.0, 0.15)
 def chair_foot(rng, r_wheel=0.32, frac_float=0.35, n=60, arc=(-1.2, 1.2)):
