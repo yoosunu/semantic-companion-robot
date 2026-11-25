@@ -50,7 +50,7 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, PoseStamped, PoseWithCovarianceStamped, TwistStamped
-from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.action import ComputePathToPose, NavigateToPose, Spin
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -98,7 +98,10 @@ INIT_LOOK = True         # False = 바로 탐색 (시뮬·옛 방식)
 OPEN_R = 0.50            # m, 이 반경 안에 막힌 칸 (비용 ≥ LETHAL_C) 이 없으면 "넓다" — 제자리에서 돌아도 됨
 OPEN_SEARCH = 1.5        # m, 좁을 때 넓은 곳 찾는 반경
 LETHAL_C = 99            # 비용지도 99 (몸 닿음) 이상 = 막힘. 모르는 칸 (−1) 은 막힘으로 안 봄 (시작 땐 거의 모름)
-SURVEY_PANS, SURVEY_TILT = (-60, -30, 0, 30, 60), -15
+SURVEY_PANS, SURVEY_TILT = (-60, -30, 0, 30, 60), -15   # 처음 (좁은 자리, 고개만) — 5 자세
+SURVEY_PANS_TURN = (-60, 0, 60)   # 11-25 돌면서 하는 둘러보기는 3 자세 (어안 화각 넓음, 몸이 90° 씩 도니 겹침. 5 자세 = 18 s → 3 자세 ≈ 11 s)
+FURN_COST = 99           # 11-25 경계 칸의 반 이상이 이 비용 이상 (가구 영역 = semantic_layer) → "가구 밑" 바로 포기
+                         #   (침대 밑은 SLAM 엔 모르는 곳 → 경계 → 보러 갔다 unseen. Jasper: 들어갈 수 있나는 Nav2·ToF 때 다시)
 SURVEY_TIMEOUT = 30.0    # s, glance 가 답 없으면 (꺼져 있음 등) 그냥 다음으로
 INIT_TURNS = 3           # 넓은 곳에서 90° 씩 몇 번 돌며 둘러볼지 (3 번 → 4 방향)
 INIT_NAV_S = 40.0        # s, 초기화 이동·회전 한 번 시간 제한
@@ -247,6 +250,7 @@ class Explorer(Node):
         self.n_open = 0
         self.nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.planner = ActionClient(self, ComputePathToPose, "compute_path_to_pose")   # 더듬기: 길만 받음
+        self.spinner = ActionClient(self, Spin, "spin")             # 11-25 초기화 90° 돌기 (같은 자리 NavigateToPose 는 0.02 s 만에 "도착" → 안 돎)
         self.create_timer(1.0, self.step)
         self.say("시작 — Nav2 기다리는 중")
 
@@ -511,6 +515,10 @@ class Explorer(Node):
         for f in self.frontiers:
             if self.near(f["x"], f["y"], given):
                 continue
+            if f.get("cells") and sum(self.cost_at(x, y) >= FURN_COST for x, y in f["cells"]) * 2 >= len(f["cells"]):
+                self.give_up(f["x"], f["y"], "furniture")     # 가구 영역 안 (침대 밑 등) → 볼 수도 갈 수도 없음
+                given.append((f["x"], f["y"]))
+                continue
             if self.near(f["x"], f["y"], self.whisker):
                 self.give_up(f["x"], f["y"], "whisker")       # 닿아서 확인한 곳 → 처음부터 제외
                 given.append((f["x"], f["y"]))
@@ -661,10 +669,10 @@ class Explorer(Node):
         cm = self.cmap
         return (cm.data, cm.info.width, cm.info.height, cm.info.resolution, cm.info.origin.position.x, cm.info.origin.position.y)
 
-    def start_survey(self, why):
+    def start_survey(self, why, pans=SURVEY_PANS):
         self.survey_sid += 1
         self.init.update(sid=self.survey_sid, t=time.time(), done=False)
-        self.survey_pub.publish(String(data=json.dumps({"sid": self.survey_sid, "pans": list(SURVEY_PANS), "tilt": SURVEY_TILT})))
+        self.survey_pub.publish(String(data=json.dumps({"sid": self.survey_sid, "pans": list(pans), "tilt": SURVEY_TILT})))
         self.say(f"초기화: 둘러보기 {self.survey_sid} ({why})")
 
     def on_survey_done(self, m):
@@ -697,6 +705,23 @@ class Explorer(Node):
             h.get_result_async().add_done_callback(lambda r: s.update(nav=r.result().status))
         self.nav.send_goal_async(goal).add_done_callback(accepted)
 
+    def init_spin(self, yaw, why):
+        """제자리 돌기 = Nav2 Spin (behavior_server, 0.15~0.25 rad/s — 브리지 톡톡 문턱 0.13 위라 이어서 돎)"""
+        goal = Spin.Goal()
+        goal.target_yaw = float(yaw)
+        self.init.update(nav=None, t=time.time())
+        self.set_owner("nav2", why)
+        s = self.init
+
+        def accepted(f):
+            h = f.result()
+            if not h.accepted:
+                s["nav"] = 6
+                return
+            s["handle"] = h
+            h.get_result_async().add_done_callback(lambda r: s.update(nav=r.result().status))
+        self.spinner.send_goal_async(goal).add_done_callback(accepted)
+
     def finish_init(self, why):
         self.phase = "explore"
         if self.owner == "nav2":
@@ -712,7 +737,7 @@ class Explorer(Node):
             if c >= OPEN_R:
                 s.update(st="look", k=0)
                 self.say(f"초기화: 넓음 (막힌 칸까지 {c:.2f} m ≥ {OPEN_R}) → 이 자리에서 한 바퀴 둘러보기")
-                self.start_survey("넓은 자리, 방향 1/4")
+                self.start_survey("넓은 자리, 방향 1/4", SURVEY_PANS_TURN)
             else:
                 s.update(st="survey0")
                 self.say(f"초기화: 좁음 (막힌 칸까지 {c:.2f} m < {OPEN_R}) → 바퀴 안 쓰고 고개만 먼저")
@@ -737,9 +762,8 @@ class Explorer(Node):
             if s["k"] > INIT_TURNS:
                 self.finish_init(f"4 방향 둘러봄")
                 return
-            p = self.robot_pose()
             s.update(st="turn")
-            self.init_nav(rx, ry, wrap((p[2] if p else 0.0) + math.pi / 2), f"초기화: 90° 돌기 {s['k']}/{INIT_TURNS}")
+            self.init_spin(math.pi / 2, f"초기화: 90° 돌기 {s['k']}/{INIT_TURNS}")
             return
         if st in ("move", "turn"):
             if s.get("nav") is None:
@@ -759,7 +783,7 @@ class Explorer(Node):
                 s.update(k=0)
                 self.say(f"초기화: 넓은 곳 도착 (막힌 칸까지 {c:.2f} m)")
             s["st"] = "look"
-            self.start_survey(f"방향 {s.get('k', 0) + 1}/{INIT_TURNS + 1}")
+            self.start_survey(f"방향 {s.get('k', 0) + 1}/{INIT_TURNS + 1}", SURVEY_PANS_TURN)
             return
 
     def send(self, x, y, rx, ry, home=False, view=None, stage=1, contacts=0, crawled=False):

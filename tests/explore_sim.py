@@ -55,7 +55,8 @@ mod("rclpy"); mod("rclpy.node", Node=Node); mod("rclpy.action", ActionClient=AC)
 mod("rclpy.qos", DurabilityPolicy=types.SimpleNamespace(TRANSIENT_LOCAL=0), QoSProfile=lambda **k: None,
     ReliabilityPolicy=types.SimpleNamespace(RELIABLE=0))
 mod("rclpy.signals", SignalHandlerOptions=types.SimpleNamespace(NO=0))
-mod("nav2_msgs"); mod("nav2_msgs.action", NavigateToPose=types.SimpleNamespace(Goal=M), ComputePathToPose=types.SimpleNamespace(Goal=M))
+mod("nav2_msgs"); mod("nav2_msgs.action", NavigateToPose=types.SimpleNamespace(Goal=M), ComputePathToPose=types.SimpleNamespace(Goal=M),
+    Spin=types.SimpleNamespace(Goal=M))
 class TW:
     def __init__(s): s.header = types.SimpleNamespace(); s.twist = types.SimpleNamespace(linear=types.SimpleNamespace(), angular=types.SimpleNamespace())
 for n, it in {"geometry_msgs.msg": ["Point", "PoseStamped", "PoseWithCovarianceStamped"], "nav_msgs.msg": ["OccupancyGrid", "Odometry"],
@@ -323,15 +324,15 @@ def done(X, pubs, found=("bed",)):
     X.on_survey_done(types.SimpleNamespace(data=_json.dumps({"sid": pubs[-1]["sid"], "found": list(found)})))
 E.INIT_LOOK = True
 X = make([[]]); X.cmap = cmap(); pubs = survey_log(X); sent.clear(); tick(X, 1)
-ok("I2 넓은 시작 → 바퀴 쓰기 전에 둘러보기 먼저 (Nav2 목표 없음)", X.phase == "init" and len(pubs) == 1 and not sent
-   and pubs[0]["pans"] == [-60, -30, 0, 30, 60])
+ok("I2 넓은 시작 → 바퀴 쓰기 전에 둘러보기 먼저 (Nav2 목표 없음), 돌면서 하는 둘러보기는 3 자세", X.phase == "init" and len(pubs) == 1 and not sent
+   and pubs[0]["pans"] == [-60, 0, 60])
 turns = []
 for k in range(3):
     done(X, pubs); tick(X, 1)
-    p = sent[-1][0].pose.pose; turns.append(round(2 * math.atan2(p.orientation.z, p.orientation.w), 2))
+    turns.append(getattr(sent[-1][0], "target_yaw", None))     # 11-25: Spin 동작 (같은 자리 NavigateToPose 는 안 돌았음)
     answer(4); tick(X, 1)
 done(X, pubs); tick(X, 2)
-ok("I3 넓은 곳: 둘러보기 4 번 + 90° 돌기 3 번 → 탐색", len(pubs) == 4 and len(turns) == 3 and all(abs(t - math.pi / 2) < 0.01 for t in turns)
+ok("I3 넓은 곳: 둘러보기 4 번 + Spin 90° 3 번 → 탐색", len(pubs) == 4 and len(turns) == 3 and all(t is not None and abs(t - math.pi / 2) < 0.01 for t in turns)
    and X.phase in ("explore", "home"))
 X = make([[]]); X.cmap = wall; pubs = survey_log(X); sent.clear(); tick(X, 1)
 ok("I4 좁은 시작 (침대 30 cm) → 고개만 둘러보기, 바퀴 안 씀", X.init["st"] == "survey0" and len(pubs) == 1 and not sent)
@@ -341,7 +342,8 @@ done(X, pubs); tick(X, 1)
 g = sent[-1][0].pose.pose.position
 ok("I6 둘러본 뒤 → 넓은 곳 (막힘 반대쪽) 으로 이동", X.init["st"] == "move" and g.x < 0)
 answer(4); tick(X, 1)
-ok("I7 도착 → 거기서 둘러보기 (돌기는 그 다음)", X.init["st"] == "look" and len(pubs) == 2)
+ok("I7 도착 → 거기서 둘러보기 3 자세 (돌기는 그 다음), 처음 고개만은 5 자세", X.init["st"] == "look" and len(pubs) == 2
+   and pubs[0]["pans"] == [-60, -30, 0, 30, 60] and pubs[1]["pans"] == [-60, 0, 60])
 X = make([[]]); X.cmap = cmap(); pubs = survey_log(X); sent.clear(); tick(X, 1); tick(X, 31)
 ok("I8 glance 답 없음 30 s → 멈추지 않고 다음 (돌기)", len(sent) == 1 and X.init["st"] == "turn")
 X = make([[]]); X.cmap = cmap([(-2.0, -2.0, 2.0, -0.2), (-2.0, 0.2, 2.0, 2.0), (-2.0, -2.0, -0.2, 2.0), (0.2, -2.0, 2.0, 2.0)])
@@ -349,4 +351,9 @@ pubs = survey_log(X); sent.clear(); tick(X, 1); done(X, pubs); n0 = len(sent); t
 ok("I9 좁고 넓은 곳도 없음 → 초기화 이동·돌기 없이 바로 탐색", n0 == 0 and X.phase in ("explore", "home")
    and any("넓은 곳 없음" in l for l in X.logs))
 E.INIT_LOOK = False
+# K) 11-25 가구 밑 경계: 경계 칸 반 이상이 가구 영역 (비용 ≥ 99) → 보러 가지 않고 바로 포기 "furniture"
+fr = [[{"x": 1.8, "y": 1.4, "size": 0.45, "cells": [(1.8, 1.3), (1.8, 1.4), (1.8, 1.5)], "vx": 1.0, "vy": 1.4},
+       {"x": -1.0, "y": 0.3, "size": 0.4, "cells": [(-1.0, 0.3)], "vx": -0.7, "vy": 0.3}]]
+X = make(fr); X.cost_at = lambda x, y: 100 if x > 1.5 else 10; sent.clear(); tick(X, 2)
+ok("K 침대 밑 경계 → 바로 furniture 포기, 다른 경계로 감", reasons(X) == ["furniture"] and sent and goal_xy() == (-0.7, 0.3))
 print(f"\n{sum(R)}/{len(R)} 통과")
