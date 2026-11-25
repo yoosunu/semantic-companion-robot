@@ -317,6 +317,39 @@ class FurnitureMap:
         return n
 
 
+def convex(pts):
+    """볼록 껍질 (반시계, monotone chain)"""
+    p = sorted(set(map(tuple, np.round(np.asarray(pts, float).reshape(-1, 2), 4))))
+    if len(p) < 3:
+        return np.array(p, float)
+    def half(seq):
+        h = []
+        for q in seq:
+            while len(h) >= 2 and (h[-1][0] - h[-2][0]) * (q[1] - h[-2][1]) - (h[-1][1] - h[-2][1]) * (q[0] - h[-2][0]) <= 0:
+                h.pop()
+            h.append(q)
+        return h
+    lo, up = half(p), half(p[::-1])
+    return np.array(lo[:-1] + up[:-1], float)
+
+
+def in_wedge(cam, bearing, pts):
+    """cam 에서 본 방향이 bearing (왼쪽 끝, 오른쪽 끝) 사이인 점 (bool). 한쪽이 None 이면 그쪽은 열어 둠"""
+    p = np.asarray(pts, float).reshape(-1, 2)
+    a = np.arctan2(p[:, 1] - cam[1], p[:, 0] - cam[0])
+    L, R = bearing
+    if L is None and R is None:
+        return np.ones(len(p), bool)
+    mid = (L + R) / 2 if L is not None and R is not None and abs(L - R) < math.pi else (L if R is None else R)
+    d = np.arctan2(np.sin(a - mid), np.cos(a - mid))
+    ok = np.ones(len(p), bool)
+    if L is not None:
+        ok &= d <= math.atan2(math.sin(L - mid), math.cos(L - mid)) + 1e-9
+    if R is not None:
+        ok &= d >= math.atan2(math.sin(R - mid), math.cos(R - mid)) - 1e-9
+    return ok
+
+
 def _inside(poly, p):
     n = len(poly)
     s = [(poly[(i + 1) % n] - poly[i])[0] * (p - poly[i])[1] - (poly[(i + 1) % n] - poly[i])[1] * (p - poly[i])[0] for i in range(n)]
@@ -324,7 +357,8 @@ def _inside(poly, p):
 
 
 class Chair:
-    """회전의자 (11-25, Jasper: 별 모양 다리는 LiDAR 아래라 위스커가 요리조리 피하다 포기 → 원기둥처럼 그려 비켜 가면 그만).
+    """의자. 1차 = 기둥 (아래), 2차 = 접점 + 끝 방향 (11-25 밤, 아래 add_view 의 contact 설명).
+    1차: 회전의자 (11-25, Jasper: 별 모양 다리는 LiDAR 아래라 위스커가 요리조리 피하다 포기 → 원기둥처럼 그려 비켜 가면 그만).
        chair1 실측 (bed_snap): LiDAR 가 가스 기둥을 작은 덩어리 (1~3 cm) 로 5 장 모두 같은 자리, 마스크 아래점에서 8~13 cm.
        마스크 아래점 = 바퀴 (바닥, 정확) + 좌석 옆·등받이 아래 (떠 있어 멀리 찍힘 0.45~0.56) → 기둥까지 거리의 장면별 중간값 →
        그 중간값들의 중간값 = 0.34 (줄자 별 다리 지름 68 cm → 0.34). 한 장만 보면 0.22 까지 작게 나옴 → 최소 min_r.
@@ -337,15 +371,27 @@ class Chair:
         self.radii = []          # 장면별 중간값
         self.legs = []           # FurnitureMap 의 연관 판단용 (= 기둥)
         self.views = []
+        self.c2 = []             # 2차: 장면마다 (접점 N×2, 끝 점 M×2, 카메라→물체 단위 방향, 벽까지 거리)
+        self.miss = ""           # 1차 실패 이유 (마지막 장면) — 11-25 run_1125d 의자 6 번 보고 "다리 0 개" 원인 찾기
 
     def add_view(self, cam, bearing, mask_floor, scan, robot):
         mf = np.asarray(mask_floor, float).reshape(-1, 2)
         mf = mf[np.isfinite(mf).all(1)]
         if not len(mf):
             return []
+        self.contact(cam, bearing, mf, scan)
         cand = [(cx, cy) for cx, cy, _ in leg_clusters(scan) if np.hypot(*(mf - [cx, cy]).T).min() <= self.match]
+        if len(cand) >= 2:                                              # 11-25: 다리 여럿 = 4 다리 의자 → 기둥 하나 (회전의자) 규칙이 아님
+            self.miss = f"작은 덩어리 {len(cand)} 개 (기둥 하나가 아님 → 2차)"
+            cand = []
+        elif not cand:
+            self.miss = self.why_miss(mf, scan)
         if not cand:
+            if self.c2:                                                 # 2차만으로도 연관 판단 (FurnitureMap) 되게 접점 대표점
+                allc = np.vstack([v[0] for v in self.c2])
+                self.legs = [[float(allc[:, 0].mean()), float(allc[:, 1].mean()), len(self.c2), 0.03]] if not self.cols else self.legs
             return []
+        self.miss = ""
         mid = np.median(mf, axis=0)                                     # 발자국 가운데에 가장 가까운 덩어리 = 기둥
         cx, cy = min(cand, key=lambda c: math.hypot(c[0] - mid[0], c[1] - mid[1]))
         for c in self.cols:
@@ -362,7 +408,80 @@ class Chair:
         self.views.append((np.asarray(cam, float), bearing[0], bearing[1], np.asarray(scan, float).reshape(-1, 2)))
         return [(cx, cy)]
 
+    def why_miss(self, mf, scan):
+        """1차 (기둥) 실패 이유: 떨어짐 조건 없이 다시 찾아 보고, 그래도 없으면 가장 가까운 작은 덩어리까지 거리"""
+        loose = leg_clusters(scan, clear=0.0)
+        if not loose:
+            return "작은 덩어리 없음"
+        dist = [(float(np.hypot(*(mf - [cx, cy]).T).min()), cx, cy) for cx, cy, _ in loose]
+        d, cx, cy = min(dist)
+        if d <= self.match:
+            return f"후보 ({cx:+.2f},{cy:+.2f}) 가 있지만 15 cm 안에 다른 점 (붙어 있음)"
+        return f"가장 가까운 작은 덩어리 ({cx:+.2f},{cy:+.2f}) 가 마스크에서 {d * 100:.0f} cm (> {self.match * 100:.0f})"
+
+    def contact(self, cam, bearing, mf, scan):
+        """2차 (11-25 Jasper: 기둥을 LiDAR 로 봐야만 그리면, 가려지거나 4 다리 의자면 영영 못 그림. 떠 있는 가구는 다리가 있고,
+           LiDAR 가 보는 건 크기와 상관없이 '접점' → 가구 디자인에 상관없는 규칙 하나):
+           접점 = 카메라가 본 좌우 끝 방향 사이 + 마스크 아래점 match 안의 LiDAR 점 (다리·기둥·통판 다 됨)
+           거리 = 접점 중 가까운 쪽 (10 % 분위), 폭 = 끝 방향을 그 거리에 놓은 끝 점 (방향은 믿음)"""
+        cam = np.asarray(cam, float)
+        p = np.asarray(scan, float).reshape(-1, 2)
+        if not len(p):
+            return
+        ok = in_wedge(cam, bearing, p) & (np.hypot(*(p[:, None, :] - mf[None, :, :]).transpose(2, 0, 1)).min(1) <= self.match)
+        c = p[ok]
+        if not len(c):
+            return
+        rng = np.hypot(*(c - cam).T)
+        r0 = float(np.quantile(rng, 0.1))
+        ends = [cam + r0 * np.array([math.cos(b), math.sin(b)]) for b in bearing if b is not None]
+        near = mf[np.hypot(*(mf - cam).T) < r0]                         # 바닥에 내린 마스크 점은 실제보다 멀리 찍힐 수는 있어도
+        if len(near):                                                   #   가깝게 찍히진 않음 → 접점보다 가까운 마스크 점 = 가구가 거기까지는 옴
+            c = np.vstack([c, near])                                    #   (회전의자: 기둥은 가운데, 바퀴는 34 cm 앞)
+        u = c.mean(0) - cam
+        u = u / max(np.linalg.norm(u), 1e-6)
+        legs = [(x, y) for x, y, _ in leg_clusters(p, clear=0.0)]       # 벽 찾기에선 작은 덩어리 (다리·기둥) 만 뺌 — 접점이 벽에 붙어 있으면
+        wall = ray_hit(c.mean(0), u, p, width=0.05, skip=legs, skip_r=0.05)   #   벽 점도 접점에 섞임 → 그걸 빼면 벽을 뚫고 지나감 (sim 25)
+        self.c2.append((c, np.array(ends).reshape(-1, 2), u, wall))
+
+    def shape2(self):
+        """2차 모양: 모든 장면의 접점 + 끝 점의 볼록 껍질. 안 보인 뒤쪽 = 보인 폭만큼은 있다고 가정 (정사각형 가정, 벽에서 멈춤).
+           옆에서 본 장면이 쌓이면 껍질 자체가 깊어져 가정이 줄어듦. 여유 pad (비전 근거)."""
+        if not self.c2:
+            return None
+        pts = np.vstack([np.vstack([c, e]) for c, e, _, _ in self.c2])
+        c0 = np.vstack([v[0] for v in self.c2]).mean(0)
+        grow, w, e, ext, src = [pts], 0.0, 0.0, 0.0, "가정"
+        for c, en, u, wall in self.c2:                                  # 장면마다 그 장면의 시선 방향 u 로, 그 장면 점들을 뒤로 밀어 채움:
+            own = np.vstack([c, en])                                    #   다른 장면이 그 방향 깊이를 봤으면 (전체 깊이 > 이 장면 + 10 cm) 그 깊이까지,
+            n = np.array([-u[1], u[0]])                                 #   아니면 보인 폭만큼 있다고 가정 (정사각형). 벽에서 멈춤.
+            wv, ev, Ev = float(np.ptp(own @ n)), float(np.ptp(own @ u)), float(np.ptp(pts @ u))
+            seen = Ev > ev + 0.10                                       #   (11-25 sim 24: 앞 + 옆 = ㄱ 자 → 합친 깊이만 보면 삼각형, 뒤 모서리 다리가 빠짐)
+            xv = max(0.0, (Ev if seen else wv) - ev)
+            if math.isfinite(wall):                                     # 벽 거리는 접점 가운데에서 잼 → 이미 뒤로 나간 만큼 빼고 남은 만큼만
+                xv = max(0.0, min(xv, wall - float(np.max((own - c0) @ u))))
+            grow.append(own + xv * u)
+            if xv >= ext:
+                w, e, ext, src = wv, ev, xv, ("다른 장면 깊이" if seen else "가정")
+        allp = np.vstack(grow)
+        a = np.linspace(0, 2 * math.pi, 8, endpoint=False)
+        ring = np.column_stack([np.cos(a), np.sin(a)]) * self.pad
+        poly = convex((allp[:, None, :] + ring[None, :, :]).reshape(-1, 2))
+        ncon = sum(len(v[0]) for v in self.c2)
+        return {"corners": poly, "center": poly.mean(0), "radius": float(max(w, e + ext) / 2 + self.pad), "round": True,
+                "confirmed": False, "lo": 0.0, "hi": w, "depth": e + ext, "spacing": 0.0, "method": 2,
+                "why": {"lo": f"2차 접점 {ncon} 점 / 장면 {len(self.c2)}, 폭 {w:.2f} 보인 깊이 {e:.2f} + {src} {ext:.2f}", "hi": "", "depth": ""}}
+
     def shape(self):
+        """1차 (기둥) 가 있으면 1차, 없으면 2차. 둘 다 계산해서 'alt' 에 다른 쪽을 실음 (로그로 비교, 줄자와 맞춰 보고 합치는 규칙은 그다음)"""
+        r1, r2 = self.shape1(), self.shape2()
+        r = r1 or r2
+        if r is not None:
+            r["alt"] = r2 if r is r1 else None
+            r["miss"] = self.miss
+        return r
+
+    def shape1(self):
         if not self.cols or not self.radii:
             return None
         c = max(self.cols, key=lambda k: k[2])                         # 가장 많이 본 기둥
@@ -371,8 +490,8 @@ class Chair:
         a = np.linspace(0, 2 * math.pi, self.sides, endpoint=False)
         poly = np.column_stack([c[0] + r * np.cos(a), c[1] + r * np.sin(a)])
         why = f"기둥 x{c[2]}, 장면 {len(self.radii)} 개 중간값 {r0:.2f}" + (" (최소로 올림)" if r0 < self.min_r else " (최대로 내림)" if r0 > self.max_r else "")
-        return {"corners": poly, "center": np.array(c[:2]), "radius": r, "round": True, "confirmed": False,
-                "lo": 0.0, "hi": 2 * r, "depth": 2 * r, "spacing": 0.0, "why": {"lo": why, "hi": "", "depth": ""}}
+        return {"corners": poly, "center": np.array(c[:2]), "radius": r, "round": True, "confirmed": False, "method": 1,
+                "lo": 0.0, "hi": 2 * r, "depth": 2 * r, "spacing": 0.0, "why": {"lo": "1차 " + why, "hi": "", "depth": ""}}
 
     def gone(self, scan, cam, bearing):
         """카메라 방향 범위 안 (2 m 안) 인데 기둥 자리에 LiDAR 덩어리가 없음 = 의자를 옮김"""

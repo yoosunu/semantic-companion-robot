@@ -154,10 +154,17 @@ class FloorHazard(Node):
         word = "새 가구" if how == "new" else ("같은 가구" + (" (낮은 점수라 기존 자리로 받음)" if "낮은" in how else ""))
         head = (f"FURN #{jid} {o['name']} {o['conf']:.2f} {word} | 이번 다리 {len(found)} 개"
                 + (f" | 잘림 {cutw}" if cutw else "") + f" | 다리 {len(F.legs)}: {legs}")
+        miss = getattr(F, "miss", "")                                   # 11-25 의자 1차 (기둥) 실패 이유
         if r is None:
-            self.get_logger().info(head + " | 영역 없음 (앞줄 다리 2 개를 한 장에서 같이 봐야 함 / 의자는 기둥 1 개)")
-        elif r.get("round"):                                            # 11-25 회전의자 = 원
-            self.get_logger().info(head + f" | 원 중심 ({r['center'][0]:+.2f}, {r['center'][1]:+.2f}) 반지름 {r['radius']:.2f} | {r['why']['lo']}")
+            self.get_logger().info(head + " | 영역 없음 (앞줄 다리 2 개를 한 장에서 같이 봐야 함 / 의자는 기둥 1 개 또는 접점)"
+                                   + (f" | 1차 실패: {miss}" if miss else ""))
+        elif r.get("round"):                                            # 11-25 의자: 1차 = 기둥 원, 2차 = 접점 + 끝 방향
+            P, a = r["corners"], r.get("alt")
+            alt = (f" | 2차 비교: {a['why']['lo']} x {a['corners'][:, 0].min():+.2f}~{a['corners'][:, 0].max():+.2f} "
+                   f"y {a['corners'][:, 1].min():+.2f}~{a['corners'][:, 1].max():+.2f}") if a else ""
+            self.get_logger().info(head + f" | {r.get('method', 1)}차 중심 ({r['center'][0]:+.2f}, {r['center'][1]:+.2f}) "
+                                   f"크기 {r['radius']:.2f} | x {P[:, 0].min():+.2f}~{P[:, 0].max():+.2f} y {P[:, 1].min():+.2f}~{P[:, 1].max():+.2f}"
+                                   f" | {r['why']['lo']}" + (f" | 1차 실패: {miss}" if miss and r.get("method") == 2 else "") + alt)
         else:
             self.get_logger().info(head + f" | 길이 {r['hi'] - r['lo']:.2f} 깊이 {r['depth']:.2f} 간격 {r['spacing']:.2f} | "
                                    f"끝: {r['why']['lo']} / {r['why']['hi']} | 깊이: {r['why']['depth']} | "

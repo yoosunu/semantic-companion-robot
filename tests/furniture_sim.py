@@ -264,6 +264,57 @@ check("21 침대 + 의자 → 둘 다 있음 (사각형 + 원), costmap 점에 �
       sorted(i.name for i in Mb.items) == ["bed", "chair"] and len(Mb.cloud_points()) > 1000, [i.name for i in Mb.items])
 
 
+# 23~26. 11-25 밤 의자 2차 (Jasper: 기둥을 LiDAR 로 봐야만 그리면 4 다리 의자·가려진 기둥은 영영 못 그림)
+#   접점 = 끝 방향 사이 + 마스크 아래점 15 cm 안 LiDAR 점, 폭 = 끝 방향을 접점 거리에, 뒤쪽 = 보인 폭만큼 가정 (벽에서 멈춤)
+def bearings(cam, pts):
+    a = np.arctan2(np.asarray(pts)[:, 1] - cam[1], np.asarray(pts)[:, 0] - cam[0])
+    return (float(a.max()), float(a.min()))
+def covers(poly, pts, r=0.02):
+    return all(fu._inside(poly, np.array(p) + r * np.array(d)) for p in pts for d in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+LEG4 = [(0.85, 0.20), (0.85, -0.20), (1.25, 0.20), (1.25, -0.20)]
+SEAT = [(0.82, 0.23), (0.82, -0.23), (1.28, 0.23), (1.28, -0.23)]
+rng4 = np.random.default_rng(4)
+foot4 = np.vstack([[(0.85 + rng4.normal(0, 0.01), 0.20 + rng4.normal(0, 0.01)) for _ in range(4)],
+                   [(0.85 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) for _ in range(4)],
+                   np.column_stack([rng4.uniform(1.5, 2.0, 12), rng4.uniform(-0.18, 0.18, 12)])])   # 앞 가로대 (떠 있어 멀리)
+M4 = fu.FurnitureMap()
+_, got, how = M4.observe("chair", 0.7, CAM, bearings(CAM, SEAT), foot4, fake_scan(LEG4, wall_at(2.5)), (0, 0))
+r4 = M4.items[0].shape() if M4.items else None
+check("23 4 다리 의자 앞에서 (앞다리 2 개만 마스크와 맞음) → 2차, 다리 4 개 다 덮음, 폭 < 0.65 깊이 < 0.65",
+      r4 is not None and r4.get("method") == 2 and covers(r4["corners"], LEG4) and r4["hi"] < 0.65 and r4["depth"] < 0.65,
+      r4 and (r4["why"]["lo"], round(r4["hi"], 2), round(r4["depth"], 2), r4["miss"]))
+CAMS = np.array([1.05, -0.95])                                       # 옆 (오른쪽) 에서
+footS = np.vstack([[(0.85 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) for _ in range(4)],
+                   [(1.25 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) for _ in range(4)]])
+M4.observe("chair", 0.7, CAMS, bearings(CAMS, SEAT), footS, fake_scan(LEG4, wall_at(2.5), origin=CAMS), (1.05, -1.0))
+r4b = M4.items[0].shape()
+check("24 옆에서 한 번 더 → 같은 의자, 여전히 4 다리 덮음, 깊이 0.40~0.60 (보인 깊이가 늘고 가정은 줄어듦)",
+      len(M4.items) == 1 and covers(r4b["corners"], LEG4) and 0.40 <= r4b["depth"] <= 0.60,
+      (len(M4.items), r4b["why"]["lo"], round(r4b["depth"], 2)))
+rng5 = np.random.default_rng(5)
+NEARWALL = [((1.10, -0.6), (1.10, 0.9))]                             # 기둥 뒤 8 cm 에 벽·책상 옆판 → 떨어짐 조건 실패
+B5 = (math.radians(30), math.radians(-12))
+M5 = fu.FurnitureMap()
+def chair_foot2(rng, n=60):
+    """물리적으로 맞는 발자국: 바퀴 (바닥, 로봇 쪽 반원 0.28~0.34) + 허브 + 떠 있는 좌석 가장자리 (실제보다 멀리 찍힘 → 기둥 뒤쪽)"""
+    a = rng.uniform(-1.2, 1.2, n)
+    u = rng.random(n)
+    side = np.where(u < 0.35, 0.0, math.pi)                          # 떠 있는 점은 뒤 (+x 쪽), 나머지는 앞 (로봇 쪽)
+    rr = np.where(u < 0.35, rng.uniform(0.10, 0.30, n), np.where(u < 0.42, rng.uniform(0.08, 0.12, n), rng.uniform(0.28, 0.34, n)))
+    return np.column_stack([COL[0] + rr * np.cos(a + side), COL[1] + rr * np.sin(a + side)])
+for _ in range(2):
+    M5.observe("chair", 0.8, CAM, B5, chair_foot2(rng5), fake_scan([COL], NEARWALL), (0, 0))
+r5 = M5.items[0].shape() if M5.items else None
+check("25 회전의자 기둥이 벽에 붙음 (1차 실패, 이유 '붙어 있음') → 2차로 그림, 기둥·앞쪽 바퀴 덮음, 벽 안 넘음",
+      r5 is not None and r5.get("method") == 2 and "붙어" in r5["miss"] and covers(r5["corners"], [COL, (COL[0] - 0.30, COL[1])])
+      and r5["corners"][:, 0].max() <= 1.10 + 0.06, r5 and (r5["why"]["lo"], r5["miss"], round(float(r5["corners"][:, 0].max()), 2)))
+M6 = fu.FurnitureMap()
+M6.observe("chair", 0.6, CAM, B5, chair_foot2(rng5), fake_scan([COL], wall_at(2.5)), (0, 0))
+r6 = M6.items[0].shape()
+check("26 기둥 보이면 그대로 1차 (원), 2차는 alt 로 같이 (비교용)", r6["method"] == 1 and r6["alt"] is not None and r6["alt"]["method"] == 2,
+      (r6["why"]["lo"], r6["alt"] and r6["alt"]["why"]["lo"]))
+
+
 def real_chair(set_name="chair1"):
     """11-25 chair1 실물 (glance 와 같은 발자국: 3 열마다, 3 m 안) → 기둥 (+1.02, +0.15), 줄자 반지름 0.34"""
     import cv2
@@ -297,6 +348,12 @@ def real_chair(set_name="chair1"):
           and np.hypot(*(r["center"] - [1.02, 0.15])) < 0.03, r and (np.round(r["center"], 3).tolist(), len(chairs)))
     check(f"R2 {set_name}: 반지름 = 줄자 0.34 + pad 5 cm (±4 cm)", r is not None and abs(r["radius"] - 0.39) <= 0.04,
           r and (round(r["radius"], 3), r["why"]["lo"]))
+    a2 = chairs[0].shape2() if chairs else None
+    if a2 is not None:                                               # 11-25 밤 2차를 같은 장면으로 (기둥 안 쓰고): 줄자 별 다리 지름 0.68, 기둥 (1.02, 0.15)
+        P = a2["corners"]
+        print(f"   2차: {a2['why']['lo']} | x {P[:, 0].min():+.2f}~{P[:, 0].max():+.2f} y {P[:, 1].min():+.2f}~{P[:, 1].max():+.2f}")
+    check(f"R4 {set_name}: 2차만으로도 기둥 + 앞쪽 바퀴 (기둥 − 0.34) 덮음", a2 is not None and covers(a2["corners"], [(1.02, 0.15), (0.70, 0.15)]),
+          a2 and np.round(a2["corners"], 2).tolist())
 
 
 def real(set_name="bed1"):
