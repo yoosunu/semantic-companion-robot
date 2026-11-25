@@ -66,7 +66,9 @@ class FloorHazard(Node):
         self.frame = p("frame", "map").value
         self.remove_floating = p("remove_floating", False).value   # 11-20: 진짜 발닦개를 "떠 있음" 으로 두 번 뺌 → 원인 볼 때까지 관찰 모드
         self.H = hz.HazardMap(on=p("on", 0.4).value, scan_max=p("scan_max", 2).value)   # 11-20: 0.5 → 0.4 (바닥형은 전부 YOLOE 단어, 따라보기와 같게)
-        self.F = fu.FurnitureMap(on=p("furn_on", 0.5).value, keep_on=p("furn_keep_on", 0.3).value)   # 이중 문턱: 새 가구 0.5, 기존 자리 0.3
+        self.chair_method = p("chair_method", "auto").value              # 11-26 "contact" = 의자 1차 (기둥) 끄고 2차 (접점) 만 — 실물 비교 시험 (숫자 "2" 는 ROS 가 정수로 읽어 타입 오류)
+        self.F = fu.FurnitureMap(on=p("furn_on", 0.5).value, keep_on=p("furn_keep_on", 0.3).value,   # 이중 문턱: 새 가구 0.5, 기존 자리 0.3
+                                 chair_kw={"use1": self.chair_method != "contact"})
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.scan = None
@@ -82,7 +84,7 @@ class FloorHazard(Node):
         self.clear_cli = [self.create_client(ClearEntireCostmap, s) for s in (
             "/global_costmap/clear_entirely_global_costmap", "/local_costmap/clear_entirely_local_costmap")] if ClearEntireCostmap else []
         self.drift = hz.DriftWatch(dist=p("drift_m", 0.05).value, gap=p("drift_gap_s", 5.0).value)   # 11-25 SLAM 보정 → 지역 costmap 옛 표시
-        self.get_logger().info(f"HAZARD 준비: 좌표 {self.frame}, 바닥형 {sorted(self.H.types)}, 점수 ≥ {self.H.on}, LiDAR 점 ≤ {self.H.scan_max}")
+        self.get_logger().info(f"HAZARD 준비: 의자 {'2차만 (1차 끔)' if self.chair_method == 'contact' else '1차 → 없으면 2차'}, 좌표 {self.frame}, 바닥형 {sorted(self.H.types)}, 점수 ≥ {self.H.on}, LiDAR 점 ≤ {self.H.scan_max}")
 
     def lookup(self, src):
         try:

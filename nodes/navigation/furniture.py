@@ -267,8 +267,8 @@ class FurnitureMap:
          새 가구는 on (0.5) 이상, 이미 있는 가구 자리면 keep_on (0.3) 이상 → 받음 (추적의 시작 엄격·유지 너그러움).
          낮춰도 다리는 LiDAR 덩어리가 마스크 발자국 10 cm 안일 때만 → 엉뚱한 걸 받아도 다리가 안 맞으면 영향 없음."""
 
-    def __init__(self, on=0.5, keep_on=0.3, assoc=0.5, **kw):
-        self.on, self.keep_on, self.assoc, self.kw = on, keep_on, assoc, kw
+    def __init__(self, on=0.5, keep_on=0.3, assoc=0.5, chair_kw=None, **kw):
+        self.on, self.keep_on, self.assoc, self.kw, self.chair_kw = on, keep_on, assoc, kw, chair_kw or {}
         self.items = []
 
     def observe(self, name, conf, cam, bearing, foot, scan, robot):
@@ -299,7 +299,7 @@ class FurnitureMap:
         if F is not None and conf < self.on:
             how = f"same (낮은 점수 {conf:.2f}, 기존 가구 자리라 받음)"
         if F is None:
-            F = Chair(name=name) if name in ROUND else Furniture(name=name, **self.kw)
+            F = Chair(name=name, **self.chair_kw) if name in ROUND else Furniture(name=name, **self.kw)
             self.items.append(F)
         found = F.add_view(cam, bearing, foot, scan, robot)
         return F, found, how
@@ -365,8 +365,9 @@ class Chair:
        좌석 (~45 cm) 은 머리 (~30 cm) 보다 높음 → 막는 건 별 다리·바퀴만.
        중심 = 기둥 평균, 반지름 = clamp(장면 중간값들의 중간값, min_r, max_r) + pad. 원을 sides 각형으로."""
 
-    def __init__(self, name="chair", match=0.15, near=0.6, min_r=0.28, max_r=0.45, pad=0.05, sides=16, merge=0.10):
+    def __init__(self, name="chair", match=0.15, near=0.6, min_r=0.28, max_r=0.45, pad=0.05, sides=16, merge=0.10, long=0.30, use1=True):
         self.name, self.match, self.near, self.min_r, self.max_r, self.pad, self.sides, self.merge = name, match, near, min_r, max_r, pad, sides, merge
+        self.long, self.use1 = long, use1    # 11-26 use1=False: 1차 끄고 2차만 (실물 비교 시험용, floor_hazard chair_method:=2)
         self.cols = []           # [[x, y, 본 횟수]] 기둥
         self.radii = []          # 장면별 중간값
         self.legs = []           # FurnitureMap 의 연관 판단용 (= 기둥)
@@ -388,7 +389,7 @@ class Chair:
             self.miss = self.why_miss(mf, scan)
         if not cand:
             if self.c2:                                                 # 2차만으로도 연관 판단 (FurnitureMap) 되게 접점 대표점
-                allc = np.vstack([v[0] for v in self.c2])
+                allc = np.vstack([v["c"] for v in self.c2])
                 self.legs = [[float(allc[:, 0].mean()), float(allc[:, 1].mean()), len(self.c2), 0.03]] if not self.cols else self.legs
             return []
         self.miss = ""
@@ -405,6 +406,9 @@ class Chair:
         if len(r):
             self.radii.append(float(np.median(r)))
         self.legs = [[c[0], c[1], c[2], 0.03] for c in self.cols]
+        if not self.use1 and self.c2:                                   # 1차 끔: 연관 판단도 2차 접점 대표점으로
+            allc = np.vstack([v["c"] for v in self.c2])
+            self.legs = [[float(allc[:, 0].mean()), float(allc[:, 1].mean()), len(self.c2), 0.03]]
         self.views.append((np.asarray(cam, float), bearing[0], bearing[1], np.asarray(scan, float).reshape(-1, 2)))
         return [(cx, cy)]
 
@@ -422,13 +426,20 @@ class Chair:
     def contact(self, cam, bearing, mf, scan):
         """2차 (11-25 Jasper: 기둥을 LiDAR 로 봐야만 그리면, 가려지거나 4 다리 의자면 영영 못 그림. 떠 있는 가구는 다리가 있고,
            LiDAR 가 보는 건 크기와 상관없이 '접점' → 가구 디자인에 상관없는 규칙 하나):
-           접점 = 카메라가 본 좌우 끝 방향 사이 + 마스크 아래점 match 안의 LiDAR 점 (다리·기둥·통판 다 됨)
-           거리 = 접점 중 가까운 쪽 (10 % 분위), 폭 = 끝 방향을 그 거리에 놓은 끝 점 (방향은 믿음)"""
+           카메라는 방향만 정확, 거리 기준점은 LiDAR 가 그 가구에 닿은 점 (접점).
+           접점 = 카메라가 본 좌우 끝 방향 사이 + 마스크 아래점 match 안의 LiDAR 점, 단 long (30 cm) 넘게 이어진 선 (벽·책상 옆판) 은 뺌
+             (11-26 run_1126: 여러 장면에 벽·책상 점이 섞여 2차가 세로 1.3 m 로 커짐)
+           거리 = 접점 중 가까운 쪽 (10 % 분위), 폭 = 끝 방향을 그 거리에 놓은 끝 점 (방향은 믿음)
+           장면마다 모양 하나 (합치지 않음) → shape2 가 가운데 넓이의 장면을 고름"""
         cam = np.asarray(cam, float)
         p = np.asarray(scan, float).reshape(-1, 2)
         if not len(p):
             return
-        ok = in_wedge(cam, bearing, p) & (np.hypot(*(p[:, None, :] - mf[None, :, :]).transpose(2, 0, 1)).min(1) <= self.match)
+        cut = np.where(np.hypot(*np.diff(p, axis=0).T) > 0.05)[0] + 1   # 스캔 순서로 덩어리 → 긴 선은 접점 후보에서 뺌
+        short = np.zeros(len(p), bool)
+        for idx in np.split(np.arange(len(p)), cut):
+            short[idx] = float(np.hypot(*(p[idx].max(0) - p[idx].min(0)))) <= self.long
+        ok = short & in_wedge(cam, bearing, p) & (np.hypot(*(p[:, None, :] - mf[None, :, :]).transpose(2, 0, 1)).min(1) <= self.match)
         c = p[ok]
         if not len(c):
             return
@@ -436,45 +447,40 @@ class Chair:
         r0 = float(np.quantile(rng, 0.1))
         ends = [cam + r0 * np.array([math.cos(b), math.sin(b)]) for b in bearing if b is not None]
         near = mf[np.hypot(*(mf - cam).T) < r0]                         # 바닥에 내린 마스크 점은 실제보다 멀리 찍힐 수는 있어도
-        if len(near):                                                   #   가깝게 찍히진 않음 → 접점보다 가까운 마스크 점 = 가구가 거기까지는 옴
-            c = np.vstack([c, near])                                    #   (회전의자: 기둥은 가운데, 바퀴는 34 cm 앞)
-        u = c.mean(0) - cam
+        own = np.vstack([c, near, np.array(ends).reshape(-1, 2)])       #   가깝게 찍히진 않음 → 접점보다 가까운 마스크 점 = 가구가 거기까지는 옴
+        u = c.mean(0) - cam                                             #   (회전의자: 기둥은 가운데, 바퀴는 34 cm 앞)
         u = u / max(np.linalg.norm(u), 1e-6)
-        legs = [(x, y) for x, y, _ in leg_clusters(p, clear=0.0)]       # 벽 찾기에선 작은 덩어리 (다리·기둥) 만 뺌 — 접점이 벽에 붙어 있으면
-        wall = ray_hit(c.mean(0), u, p, width=0.05, skip=legs, skip_r=0.05)   #   벽 점도 접점에 섞임 → 그걸 빼면 벽을 뚫고 지나감 (sim 25)
-        self.c2.append((c, np.array(ends).reshape(-1, 2), u, wall))
-
-    def shape2(self):
-        """2차 모양: 모든 장면의 접점 + 끝 점의 볼록 껍질. 안 보인 뒤쪽 = 보인 폭만큼은 있다고 가정 (정사각형 가정, 벽에서 멈춤).
-           옆에서 본 장면이 쌓이면 껍질 자체가 깊어져 가정이 줄어듦. 여유 pad (비전 근거)."""
-        if not self.c2:
-            return None
-        pts = np.vstack([np.vstack([c, e]) for c, e, _, _ in self.c2])
-        c0 = np.vstack([v[0] for v in self.c2]).mean(0)
-        grow, w, e, ext, src = [pts], 0.0, 0.0, 0.0, "가정"
-        for c, en, u, wall in self.c2:                                  # 장면마다 그 장면의 시선 방향 u 로, 그 장면 점들을 뒤로 밀어 채움:
-            own = np.vstack([c, en])                                    #   다른 장면이 그 방향 깊이를 봤으면 (전체 깊이 > 이 장면 + 10 cm) 그 깊이까지,
-            n = np.array([-u[1], u[0]])                                 #   아니면 보인 폭만큼 있다고 가정 (정사각형). 벽에서 멈춤.
-            wv, ev, Ev = float(np.ptp(own @ n)), float(np.ptp(own @ u)), float(np.ptp(pts @ u))
-            seen = Ev > ev + 0.10                                       #   (11-25 sim 24: 앞 + 옆 = ㄱ 자 → 합친 깊이만 보면 삼각형, 뒤 모서리 다리가 빠짐)
-            xv = max(0.0, (Ev if seen else wv) - ev)
-            if math.isfinite(wall):                                     # 벽 거리는 접점 가운데에서 잼 → 이미 뒤로 나간 만큼 빼고 남은 만큼만
-                xv = max(0.0, min(xv, wall - float(np.max((own - c0) @ u))))
-            grow.append(own + xv * u)
-            if xv >= ext:
-                w, e, ext, src = wv, ev, xv, ("다른 장면 깊이" if seen else "가정")
-        allp = np.vstack(grow)
+        n = np.array([-u[1], u[0]])
+        w, e = float(np.ptp(own @ n)), float(np.ptp(own @ u))
+        ext = max(0.0, w - e)                                           # 안 보인 뒤쪽 = 보인 폭만큼 (정사각형 가정)
+        legs = [(x, y) for x, y, _ in leg_clusters(p, clear=0.0)]       # 벽 찾기에선 작은 덩어리 (다리·기둥) 만 뺌
+        wall = ray_hit(c.mean(0), u, p, width=0.05, skip=legs, skip_r=0.05)
+        if math.isfinite(wall):                                         # 벽에서 멈춤 (접점 가운데에서 잰 거리 − 이미 뒤로 나간 만큼)
+            ext = max(0.0, min(ext, wall - float(np.max((own - c.mean(0)) @ u))))
         a = np.linspace(0, 2 * math.pi, 8, endpoint=False)
         ring = np.column_stack([np.cos(a), np.sin(a)]) * self.pad
+        allp = np.vstack([own, own + ext * u])
         poly = convex((allp[:, None, :] + ring[None, :, :]).reshape(-1, 2))
-        ncon = sum(len(v[0]) for v in self.c2)
-        return {"corners": poly, "center": poly.mean(0), "radius": float(max(w, e + ext) / 2 + self.pad), "round": True,
-                "confirmed": False, "lo": 0.0, "hi": w, "depth": e + ext, "spacing": 0.0, "method": 2,
-                "why": {"lo": f"2차 접점 {ncon} 점 / 장면 {len(self.c2)}, 폭 {w:.2f} 보인 깊이 {e:.2f} + {src} {ext:.2f}", "hi": "", "depth": ""}}
+        x, y = poly.T
+        area = 0.5 * abs(float(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
+        self.c2.append({"poly": poly, "area": area, "w": w, "e": e, "ext": ext, "n": len(c), "c": c})
+
+    def shape2(self):
+        """2차 모양: 장면별 모양 중 넓이가 가운데인 것 (한 장면의 엉뚱한 점이 전체를 키우지 않게). 여유 pad 포함."""
+        if not self.c2:
+            return None
+        order = sorted(self.c2, key=lambda v: v["area"])
+        v = order[len(order) // 2]
+        P = v["poly"]
+        lo, hi = order[0]["area"], order[-1]["area"]
+        return {"corners": P, "center": P.mean(0), "radius": float(max(v["w"], v["e"] + v["ext"]) / 2 + self.pad), "round": True,
+                "confirmed": False, "lo": 0.0, "hi": v["w"], "depth": v["e"] + v["ext"], "spacing": 0.0, "method": 2,
+                "why": {"lo": f"2차 장면 {len(self.c2)} 개 중 가운데 (넓이 {v['area']:.2f}, 범위 {lo:.2f}~{hi:.2f} m²), "
+                              f"접점 {v['n']} 점, 폭 {v['w']:.2f} 보인 깊이 {v['e']:.2f} + 가정 {v['ext']:.2f}", "hi": "", "depth": ""}}
 
     def shape(self):
         """1차 (기둥) 가 있으면 1차, 없으면 2차. 둘 다 계산해서 'alt' 에 다른 쪽을 실음 (로그로 비교, 줄자와 맞춰 보고 합치는 규칙은 그다음)"""
-        r1, r2 = self.shape1(), self.shape2()
+        r1, r2 = (self.shape1() if self.use1 else None), self.shape2()
         r = r1 or r2
         if r is not None:
             r["alt"] = r2 if r is r1 else None

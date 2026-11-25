@@ -288,7 +288,7 @@ footS = np.vstack([[(0.85 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) 
                    [(1.25 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) for _ in range(4)]])
 M4.observe("chair", 0.7, CAMS, bearings(CAMS, SEAT), footS, fake_scan(LEG4, wall_at(2.5), origin=CAMS), (1.05, -1.0))
 r4b = M4.items[0].shape()
-check("24 옆에서 한 번 더 → 같은 의자, 여전히 4 다리 덮음, 깊이 0.40~0.60 (보인 깊이가 늘고 가정은 줄어듦)",
+check("24 옆에서 한 번 더 → 같은 의자, 장면별 모양 중 가운데 것도 4 다리 덮음, 깊이 0.40~0.60",
       len(M4.items) == 1 and covers(r4b["corners"], LEG4) and 0.40 <= r4b["depth"] <= 0.60,
       (len(M4.items), r4b["why"]["lo"], round(r4b["depth"], 2)))
 rng5 = np.random.default_rng(5)
@@ -313,6 +313,31 @@ M6.observe("chair", 0.6, CAM, B5, chair_foot2(rng5), fake_scan([COL], wall_at(2.
 r6 = M6.items[0].shape()
 check("26 기둥 보이면 그대로 1차 (원), 2차는 alt 로 같이 (비교용)", r6["method"] == 1 and r6["alt"] is not None and r6["alt"]["method"] == 2,
       (r6["why"]["lo"], r6["alt"] and r6["alt"]["why"]["lo"]))
+
+# 27~28. 11-26 run_1126: 여러 장면을 합치면 벽·책상 점이 섞여 2차가 세로 1.3 m 로 커짐 → 장면별 모양 + 긴 선 빼기
+def foot_toward(cam, rng, n=60):
+    a0 = math.atan2(cam[1] - COL[1], cam[0] - COL[0])
+    a, u = rng.uniform(-1.2, 1.2, n), rng.random(n)
+    side = np.where(u < 0.35, math.pi, 0.0)
+    rr = np.where(u < 0.35, rng.uniform(0.10, 0.30, n), np.where(u < 0.42, rng.uniform(0.08, 0.12, n), rng.uniform(0.28, 0.34, n)))
+    return np.column_stack([COL[0] + rr * np.cos(a0 + a + side), COL[1] + rr * np.sin(a0 + a + side)])
+def tangent(cam, r=0.34):
+    d = math.hypot(COL[0] - cam[0], COL[1] - cam[1]); a = math.atan2(COL[1] - cam[1], COL[0] - cam[0]); h = math.asin(min(1.0, r / d))
+    return (a + h, a - h)
+DESK = [((0.55, 0.58), (1.45, 0.58)), ((1.6, -1.0), (1.6, 1.5))]       # 의자 옆 책상 옆판 (바퀴에서 ~10 cm) + 뒤 벽
+rng7 = np.random.default_rng(7)
+M7 = fu.FurnitureMap(chair_kw={"use1": False})
+areas = []
+for cam in [(0.06, 0.0), (0.25, -0.55), (0.10, 0.35), (0.06, 0.0), (0.45, -0.70)]:
+    cam = np.array(cam)
+    M7.observe("chair", 0.8, cam, tangent(cam), foot_toward(cam, rng7), fake_scan([COL], DESK, origin=cam), cam)
+    areas.append(round(float(np.ptp(M7.items[0].shape()["corners"], axis=0).max()), 2) if M7.items and M7.items[0].shape() else None)
+r7 = M7.items[0].shape()
+far = float(np.max(np.hypot(*(r7["corners"] - COL).T)))
+check("27 책상 옆판·벽 옆 회전의자 5 장 (1차 끔) → 2차 하나, 기둥·앞바퀴 덮음, 기둥에서 가장 먼 꼭짓점 ≤ 0.70, 장면이 쌓여도 안 커짐",
+      len(M7.items) == 1 and r7["method"] == 2 and covers(r7["corners"], [COL, (COL[0] - 0.30, COL[1])]) and far <= 0.70
+      and max(a for a in areas if a) <= 1.0, (r7["why"]["lo"], round(far, 2), areas))
+check("28 1차 끔 (use1=False) → 기둥이 보여도 2차", r7["method"] == 2 and M7.items[0].cols, len(M7.items[0].cols))
 
 
 def real_chair(set_name="chair1"):
@@ -354,6 +379,11 @@ def real_chair(set_name="chair1"):
         print(f"   2차: {a2['why']['lo']} | x {P[:, 0].min():+.2f}~{P[:, 0].max():+.2f} y {P[:, 1].min():+.2f}~{P[:, 1].max():+.2f}")
     check(f"R4 {set_name}: 2차만으로도 기둥 + 앞쪽 바퀴 (기둥 − 0.34) 덮음", a2 is not None and covers(a2["corners"], [(1.02, 0.15), (0.70, 0.15)]),
           a2 and np.round(a2["corners"], 2).tolist())
+    if a2 is not None:                                               # 11-26 Jasper 기준: 실제 별 다리 (x 0.68~1.36, y −0.19~0.49) 의 ±15 cm 안
+        P = a2["corners"]
+        err = [0.68 - P[:, 0].min(), P[:, 0].max() - 1.36, -0.19 - P[:, 1].min(), P[:, 1].max() - 0.49]
+        check(f"R5 {set_name}: 2차 범위가 실제 별 다리 ±15 cm 안 (앞·뒤·오른·왼 넘친 만큼)", max(abs(e) for e in err) <= 0.15,
+              [round(e, 2) for e in err])
 
 
 def real(set_name="bed1"):
