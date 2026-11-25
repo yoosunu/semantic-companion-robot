@@ -67,6 +67,7 @@ sys.modules["visualization_msgs.msg"].MarkerArray = lambda: types.SimpleNamespac
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nodes", "navigation"))
 import scr_explore as E
 E.ntfy = lambda *a, **k: None
+E.INIT_LOOK = False          # 11-25: 아래 옛 시험들은 바로 탐색 (초기화 시험은 맨 끝 I)
 
 def make(frontiers):
     X = E.Explorer("t"); X.publish_markers = lambda: None
@@ -296,4 +297,56 @@ ok("D2 취소 무응답 15 s → 우리가 정리, crawl 이 같은 관찰점으
    and (round(X.probe["tx"], 2), round(X.probe["ty"], 2)) == first)
 X = make(fr); sent.clear(); move(X, 0.0, 0.0); X.send(1.0, 0.5, 0.0, 0.0, view=(0.8, 0.4), crawled=True); f = sent[-1][2]; f.cb(f); tick(X, 50); answer(5); tick(X, 1)
 ok("D3 이미 이어받았던 목표(crawled) 는 45 s 규칙 → no_progress 포기", reasons(X) == ["no_progress"])
+
+# I) 11-25 시작 전 초기화: 넓으면 한 바퀴 둘러보기 / 좁으면 고개만 → 넓은 곳 → 한 바퀴 → 탐색
+import json as _json
+def cmap(obst=(), size=4.0, res=0.05):
+    """가운데 (0, 0) 인 size m 정사각 비용지도. obst = [(x0, y0, x1, y1)] 막힘 (100)"""
+    n = int(size / res); o = -size / 2
+    d = [0] * (n * n)
+    for x0, y0, x1, y1 in obst:
+        for r in range(n):
+            for c in range(n):
+                x, y = o + (c + 0.5) * res, o + (r + 0.5) * res
+                if x0 <= x <= x1 and y0 <= y <= y1:
+                    d[r * n + c] = 100
+    return types.SimpleNamespace(data=d, info=types.SimpleNamespace(width=n, height=n, resolution=res,
+                                 origin=types.SimpleNamespace(position=types.SimpleNamespace(x=o, y=o))))
+wall = cmap([(0.30, -2.0, 2.0, 2.0)])                       # 로봇 앞 30 cm 부터 막힘 (침대에 붙어 시작)
+c_near = E.clearance(*(wall.data, wall.info.width, wall.info.height, 0.05, -2.0, -2.0), 0.0, 0.0)
+sp = E.open_spot(*(wall.data, wall.info.width, wall.info.height, 0.05, -2.0, -2.0), 0.0, 0.0)
+ok("I1 clearance: 앞 30 cm 막힘 → 0.3 m 근처, 넓은 곳은 막힘 반대쪽 (x < 0) 에 여유 ≥ 0.5",
+   abs(c_near - 0.30) < 0.06 and sp is not None and sp[0] < 0 and sp[2] >= 0.5)
+def survey_log(X):
+    pubs = []; X.survey_pub = types.SimpleNamespace(publish=lambda m: pubs.append(_json.loads(m.data))); return pubs
+def done(X, pubs, found=("bed",)):
+    X.on_survey_done(types.SimpleNamespace(data=_json.dumps({"sid": pubs[-1]["sid"], "found": list(found)})))
+E.INIT_LOOK = True
+X = make([[]]); X.cmap = cmap(); pubs = survey_log(X); sent.clear(); tick(X, 1)
+ok("I2 넓은 시작 → 바퀴 쓰기 전에 둘러보기 먼저 (Nav2 목표 없음)", X.phase == "init" and len(pubs) == 1 and not sent
+   and pubs[0]["pans"] == [-60, -30, 0, 30, 60])
+turns = []
+for k in range(3):
+    done(X, pubs); tick(X, 1)
+    p = sent[-1][0].pose.pose; turns.append(round(2 * math.atan2(p.orientation.z, p.orientation.w), 2))
+    answer(4); tick(X, 1)
+done(X, pubs); tick(X, 2)
+ok("I3 넓은 곳: 둘러보기 4 번 + 90° 돌기 3 번 → 탐색", len(pubs) == 4 and len(turns) == 3 and all(abs(t - math.pi / 2) < 0.01 for t in turns)
+   and X.phase in ("explore", "home"))
+X = make([[]]); X.cmap = wall; pubs = survey_log(X); sent.clear(); tick(X, 1)
+ok("I4 좁은 시작 (침대 30 cm) → 고개만 둘러보기, 바퀴 안 씀", X.init["st"] == "survey0" and len(pubs) == 1 and not sent)
+tick(X, 5)
+ok("I5 둘러보기 끝나기 전엔 안 움직임", not sent)
+done(X, pubs); tick(X, 1)
+g = sent[-1][0].pose.pose.position
+ok("I6 둘러본 뒤 → 넓은 곳 (막힘 반대쪽) 으로 이동", X.init["st"] == "move" and g.x < 0)
+answer(4); tick(X, 1)
+ok("I7 도착 → 거기서 둘러보기 (돌기는 그 다음)", X.init["st"] == "look" and len(pubs) == 2)
+X = make([[]]); X.cmap = cmap(); pubs = survey_log(X); sent.clear(); tick(X, 1); tick(X, 31)
+ok("I8 glance 답 없음 30 s → 멈추지 않고 다음 (돌기)", len(sent) == 1 and X.init["st"] == "turn")
+X = make([[]]); X.cmap = cmap([(-2.0, -2.0, 2.0, -0.2), (-2.0, 0.2, 2.0, 2.0), (-2.0, -2.0, -0.2, 2.0), (0.2, -2.0, 2.0, 2.0)])
+pubs = survey_log(X); sent.clear(); tick(X, 1); done(X, pubs); n0 = len(sent); tick(X, 1)
+ok("I9 좁고 넓은 곳도 없음 → 초기화 이동·돌기 없이 바로 탐색", n0 == 0 and X.phase in ("explore", "home")
+   and any("넓은 곳 없음" in l for l in X.logs))
+E.INIT_LOOK = False
 print(f"\n{sum(R)}/{len(R)} 통과")

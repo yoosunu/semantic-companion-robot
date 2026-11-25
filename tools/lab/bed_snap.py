@@ -30,7 +30,7 @@ import ground  # noqa: E402
 from yolo_onnx import Yolo  # noqa: E402
 
 POSES = [(-40, -15), (-20, -15), (0, -15), (20, -15), (40, -15)]
-FURN = ("bed", "couch", "dining table", "sofa", "table")
+FURN = ("bed", "couch", "dining table", "sofa", "table", "chair")   # 11-25 + chair (회전의자: 바퀴 발자국·기둥 확인용)
 LASER_YAW = math.pi                       # URDF laser_yaw (라이다 0° = 로봇 뒤)
 
 

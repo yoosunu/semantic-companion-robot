@@ -90,6 +90,63 @@ WHISKER_BUSY = ("stop", "back", "trapped", "help")   # Whisker 가 몰고 있는
 WEDGE_R, WEDGE_S = 0.15, 120.0   # m, s — 같은 자리(15 cm) 판단, 그 자리 기억 시간
 WEDGE_ESC_MAX = 2        # 같은 자리 탈출 요청 최대 (그 뒤엔 진짜 길 없음으로 포기)
 PROBE_QUIET = 1.5        # s, 더듬기 전 Nav2 가 조용해질 때까지 (취소 후 velocity_smoother 가 0 까지 감속)
+# 11-25 시작 전 초기화 (Jasper): 침대에 붙어 시작 → 아직 침대를 못 본 채 제자리 회전 → 들이받음.
+#   넓으면 그 자리에서 한 바퀴 둘러보기 / 좁으면 고개만 둘러보기 (바퀴 안 씀) → 넓은 곳으로 → 한 바퀴 둘러보기 → 탐색
+#   둘러보기 = glance 에 semantic/survey (고개 −60…+60, 자세마다 YOLO) → floor_hazard 가 가구·바닥 위험물을 그림
+#   "집" 자리는 넓은 곳으로 두는 게 운영 규칙 (좁은 경우 처리는 보험)
+INIT_LOOK = True         # False = 바로 탐색 (시뮬·옛 방식)
+OPEN_R = 0.50            # m, 이 반경 안에 막힌 칸 (비용 ≥ LETHAL_C) 이 없으면 "넓다" — 제자리에서 돌아도 됨
+OPEN_SEARCH = 1.5        # m, 좁을 때 넓은 곳 찾는 반경
+LETHAL_C = 99            # 비용지도 99 (몸 닿음) 이상 = 막힘. 모르는 칸 (−1) 은 막힘으로 안 봄 (시작 땐 거의 모름)
+SURVEY_PANS, SURVEY_TILT = (-60, -30, 0, 30, 60), -15
+SURVEY_TIMEOUT = 30.0    # s, glance 가 답 없으면 (꺼져 있음 등) 그냥 다음으로
+INIT_TURNS = 3           # 넓은 곳에서 90° 씩 몇 번 돌며 둘러볼지 (3 번 → 4 방향)
+INIT_NAV_S = 40.0        # s, 초기화 이동·회전 한 번 시간 제한
+
+
+def clearance(data, w, h, res, ox, oy, x, y, lethal=LETHAL_C, reach=1.0):
+    """(x, y) 에서 가장 가까운 막힌 칸 (비용 ≥ lethal) 까지 거리 m. reach 안에 없으면 reach. 모르는 칸 (−1) 은 막힘 아님"""
+    A = np.asarray(data, dtype=np.int16).reshape(h, w)
+    c0, r0 = int((x - ox) / res), int((y - oy) / res)
+    k = int(reach / res) + 1
+    sub = A[max(0, r0 - k):r0 + k + 1, max(0, c0 - k):c0 + k + 1]
+    rr, cc = np.nonzero(sub >= lethal)
+    if not len(rr):
+        return reach
+    d = np.hypot(rr + max(0, r0 - k) - r0, cc + max(0, c0 - k) - c0) * res
+    return float(min(reach, d.min()))
+
+
+def open_spot(data, w, h, res, ox, oy, x, y, need=OPEN_R, search=OPEN_SEARCH, lethal=LETHAL_C):
+    """search 안의 아는 빈 칸 (0 ≤ 비용 < 50) 중 여유 (가장 가까운 막힌 칸까지) ≥ need 인 곳 → (x, y, 여유) 또는 None.
+       여유가 가장 큰 곳들 (최대 − 5 cm 안) 중 가장 가까운 곳 (멀리 돌아가지 않게)"""
+    A = np.asarray(data, dtype=np.int16).reshape(h, w)
+    c0, r0 = int((x - ox) / res), int((y - oy) / res)
+    k = int((search + need) / res) + 1
+    R0, C0 = max(0, r0 - k), max(0, c0 - k)
+    sub = A[R0:r0 + k + 1, C0:c0 + k + 1]
+    orr, occ = np.nonzero(sub >= lethal)
+    fr, fc = np.nonzero((sub >= 0) & (sub < 50))
+    dist0 = np.hypot(fr + R0 - r0, fc + C0 - c0) * res
+    keep = dist0 <= search
+    fr, fc, dist0 = fr[keep], fc[keep], dist0[keep]
+    if not len(fr):
+        return None
+    if len(orr):
+        clear = np.full(len(fr), np.inf)
+        for i in range(0, len(orr), 512):                               # 막힌 칸이 많아도 메모리 작게
+            d = np.hypot(fr[:, None] - orr[None, i:i + 512], fc[:, None] - occ[None, i:i + 512]) * res
+            clear = np.minimum(clear, d.min(1))
+    else:
+        clear = np.full(len(fr), search + need)
+    clear = np.minimum(clear, need + 0.5)
+    ok = clear >= need
+    if not ok.any():
+        return None
+    best = clear[ok].max()
+    idx = np.nonzero(ok & (clear >= best - 0.05))[0]
+    i = idx[np.argmin(dist0[idx])]
+    return (ox + (fc[i] + C0 + 0.5) * res, oy + (fr[i] + R0 + 0.5) * res, float(clear[i]))
 
 
 def wrap(a):
@@ -157,7 +214,9 @@ class Explorer(Node):
         # 11-08: 예전엔 관찰점 도착도 reached 에 넣어 "가 봤다"로 기억 → 통로에 들어가 보지도 않고 unseen (11시)
         self.frontiers = []                      # 마지막으로 찾은 [{"x","y","size","cells":[(x,y)]}]
         self.goal = None                         # {"x","y","t0","best","best_t","contacts","handle"}
-        self.phase = "explore"                   # explore → home → done
+        self.phase = "init" if INIT_LOOK else "explore"   # (init →) explore → home → done
+        self.init = {"st": "check"}              # 11-25 시작 전 초기화 상태
+        self.survey_sid = 0
         self.odom_hist = collections.deque(maxlen=20 * 180)
         self.map_fix = None
         self.moved = {"p": None, "t": time.time(), "sent": False}
@@ -182,6 +241,8 @@ class Explorer(Node):
         for t in ("pose", "amcl_pose"):
             self.create_subscription(PoseWithCovarianceStamped, t, self.on_map_pose, 10)
         self.marker_pub = self.create_publisher(MarkerArray, "scr_explore/markers", 1)
+        self.survey_pub = self.create_publisher(String, "semantic/survey", 10)          # 11-25 둘러보기 요청 (glance_node)
+        self.create_subscription(String, "semantic/survey_done", self.on_survey_done, 10)
         self.state_pub = self.create_publisher(String, "robot/state", 10)   # 11-10 상태 (화면·말하기가 같은 걸 봄)
         self.n_open = 0
         self.nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
@@ -441,6 +502,9 @@ class Explorer(Node):
             threading.Thread(target=ntfy, args=("robot: explore STUCK?", f"{STUCK_S / 60:.0f}분 동안 10 cm 도 못 움직임. RViz 확인", True),
                              daemon=True).start()
 
+        if self.phase == "init":
+            self.init_step(now, rx, ry)
+            return
         self.frontiers = self.find_frontiers()
         given = [(g["x"], g["y"]) for g in self.gave_up]
         cands, held = [], []
@@ -592,6 +656,112 @@ class Explorer(Node):
         self.send(best["x"], best["y"], rx, ry, view=(best["vx"], best["vy"]), stage=1)
 
     # ------------------------------------------------------------------ Nav2
+    # ------------------------------------------------------------------ 시작 전 초기화 (11-25)
+    def cm_args(self):
+        cm = self.cmap
+        return (cm.data, cm.info.width, cm.info.height, cm.info.resolution, cm.info.origin.position.x, cm.info.origin.position.y)
+
+    def start_survey(self, why):
+        self.survey_sid += 1
+        self.init.update(sid=self.survey_sid, t=time.time(), done=False)
+        self.survey_pub.publish(String(data=json.dumps({"sid": self.survey_sid, "pans": list(SURVEY_PANS), "tilt": SURVEY_TILT})))
+        self.say(f"초기화: 둘러보기 {self.survey_sid} ({why})")
+
+    def on_survey_done(self, m):
+        try:
+            j = json.loads(m.data)
+        except ValueError:
+            return
+        if self.init.get("sid") == j.get("sid"):
+            self.init["done"] = True
+            self.say(f"초기화: 둘러보기 {j.get('sid')} 끝 — 본 것: {', '.join(j.get('found', [])) or '없음'}")
+
+    def init_nav(self, x, y, yaw, why):
+        ps = PoseStamped()
+        ps.header.frame_id = "map"
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x, ps.pose.position.y = float(x), float(y)
+        ps.pose.orientation.z, ps.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        goal = NavigateToPose.Goal()
+        goal.pose = ps
+        self.init.update(nav=None, t=time.time())
+        self.set_owner("nav2", why)
+        s = self.init
+
+        def accepted(f):
+            h = f.result()
+            if not h.accepted:
+                s["nav"] = 6
+                return
+            s["handle"] = h
+            h.get_result_async().add_done_callback(lambda r: s.update(nav=r.result().status))
+        self.nav.send_goal_async(goal).add_done_callback(accepted)
+
+    def finish_init(self, why):
+        self.phase = "explore"
+        if self.owner == "nav2":
+            self.set_owner("none", "초기화 끝")
+        self.say(f"초기화 끝 ({why}) → 탐색 시작")
+
+    def init_step(self, now, rx, ry):
+        """check → (좁음: survey0 → move) → look → turn → look … → 탐색"""
+        s = self.init
+        st = s["st"]
+        if st == "check":
+            c = clearance(*self.cm_args(), rx, ry)
+            if c >= OPEN_R:
+                s.update(st="look", k=0)
+                self.say(f"초기화: 넓음 (막힌 칸까지 {c:.2f} m ≥ {OPEN_R}) → 이 자리에서 한 바퀴 둘러보기")
+                self.start_survey("넓은 자리, 방향 1/4")
+            else:
+                s.update(st="survey0")
+                self.say(f"초기화: 좁음 (막힌 칸까지 {c:.2f} m < {OPEN_R}) → 바퀴 안 쓰고 고개만 먼저")
+                self.start_survey("좁은 자리, 고개만")
+            return
+        if st in ("survey0", "look"):
+            if not s.get("done") and now - s["t"] < SURVEY_TIMEOUT:
+                return
+            if not s.get("done"):
+                self.say(f"초기화: 둘러보기 답 없음 ({SURVEY_TIMEOUT:.0f} s — glance 꺼짐?) → 다음으로", warn=True)
+            if st == "survey0":
+                sp = open_spot(*self.cm_args(), rx, ry)
+                if sp is None:
+                    self.finish_init(f"{OPEN_SEARCH} m 안에 넓은 곳 없음 — 돌지 않고 바로")
+                    return
+                s.update(st="move", spot=sp)
+                self.say(f"초기화: 넓은 곳 ({sp[0]:.2f}, {sp[1]:.2f}) 여유 {sp[2]:.2f} m 로 이동")
+                p = self.robot_pose()
+                self.init_nav(sp[0], sp[1], p[2] if p else 0.0, "초기화: 넓은 곳으로")
+                return
+            s["k"] = s.get("k", 0) + 1
+            if s["k"] > INIT_TURNS:
+                self.finish_init(f"4 방향 둘러봄")
+                return
+            p = self.robot_pose()
+            s.update(st="turn")
+            self.init_nav(rx, ry, wrap((p[2] if p else 0.0) + math.pi / 2), f"초기화: 90° 돌기 {s['k']}/{INIT_TURNS}")
+            return
+        if st in ("move", "turn"):
+            if s.get("nav") is None:
+                if now - s["t"] > INIT_NAV_S:
+                    if s.get("handle"):
+                        s["handle"].cancel_goal_async()
+                    self.finish_init(f"{'이동' if st == 'move' else '돌기'} {INIT_NAV_S:.0f} s 넘음")
+                return
+            res = s.pop("nav")
+            if self.owner == "nav2":
+                self.set_owner("none", "초기화 이동 끝")
+            if res != 4:
+                self.finish_init(f"{'넓은 곳으로 이동' if st == 'move' else '돌기'} 실패 ({res}) — 그대로")
+                return
+            if st == "move":
+                c = clearance(*self.cm_args(), *self.robot())
+                s.update(k=0)
+                self.say(f"초기화: 넓은 곳 도착 (막힌 칸까지 {c:.2f} m)")
+            s["st"] = "look"
+            self.start_survey(f"방향 {s.get('k', 0) + 1}/{INIT_TURNS + 1}")
+            return
+
     def send(self, x, y, rx, ry, home=False, view=None, stage=1, contacts=0, crawled=False):
         """x, y = 경계 (포기·기억은 경계 기준), view = 실제로 갈 관찰점"""
         vx, vy = view if view else (x, y)

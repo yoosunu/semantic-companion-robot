@@ -108,6 +108,10 @@ class GlanceNode(Node):
             self.push = serve(port)
         os.makedirs(OUT, exist_ok=True)
         self.create_subscription(String, "floor/blobs", self.on_blobs, 10)
+        self.create_subscription(String, "semantic/survey", self.on_survey, 10)      # 11-25 둘러보기 (탐색기가 시작 전에)
+        self.pub_survey = self.create_publisher(String, "semantic/survey_done", 10)
+        self.survey = None
+        self.create_timer(0.3, self.survey_tick)
         self.create_subscription(String, "/semantic/hazards", lambda m: setattr(self, "hazards", json.loads(m.data)), 10)
         self.create_subscription(String, "neri/profile", self.on_profile, 10)
         self.create_subscription(Float32MultiArray, "pantilt/cmd", self.on_head, 10)
@@ -148,7 +152,7 @@ class GlanceNode(Node):
         return vis
 
     def on_blobs(self, m):
-        if self.job or not (self.mode == "IDLE" or self.mode.startswith("TASK:")) or time.time() - self.end_t < self.gap:
+        if self.job or self.survey or not (self.mode == "IDLE" or self.mode.startswith("TASK:")) or time.time() - self.end_t < self.gap:
             return
         try:
             d = json.loads(m.data)
@@ -171,6 +175,56 @@ class GlanceNode(Node):
                                                                   "hold": self.focus_max + 3.0})))
         self.get_logger().info(f"GLANCE #{gid} 요청: 후보 {cand['dist'] * 100:.0f} cm ({x:+.2f}, {y:+.2f}) {cand['hits']} 번 봄"
                                f"{' (가장자리)' if cand['edge'] else ''} → 고개 ({pan:+.0f}, {tilt:+.0f}), 돌 각도 {turn:.0f}°")
+
+    # ---------- 둘러보기 (11-25 Jasper: 탐색 전 초기화 — 바퀴를 움직이기 전에 먼저 봄) ----------
+    def on_survey(self, m):
+        """semantic/survey {"sid", "pans": [...], "tilt"} → 자세마다 고개 (사령관 glance 요청) → 2 장 → YOLO26 + YOLOE → 덤 보기 형식으로
+           semantic/seen (floor_hazard 가 침대·발닦개를 그림) → 다 끝나면 semantic/survey_done {"sid", "found"}"""
+        try:
+            r = json.loads(m.data) if m.data.strip().startswith("{") else {}
+        except ValueError:
+            r = {}
+        poses = [(float(p), float(r.get("tilt", -15.0))) for p in r.get("pans", [-60, -30, 0, 30, 60])]
+        self.survey = {"sid": r.get("sid", 0), "poses": poses, "i": 0, "found": [], "t0": time.time()}
+        self.get_logger().info(f"SURVEY {self.survey['sid']} 시작: 고개 {[p for p, _ in poses]} (틸트 {poses[0][1] if poses else '-'})"
+                               + (" — 지금 힐끗 끝나면" if self.job else ""))
+
+    def survey_tick(self):
+        sv = self.survey
+        if not sv or self.job or time.time() - self.end_t < 0.3:
+            return
+        if sv["i"] >= len(sv["poses"]):
+            found = sorted(set(sv["found"]))
+            self.pub_survey.publish(String(data=json.dumps({"sid": sv["sid"], "found": found})))
+            self.get_logger().info(f"SURVEY {sv['sid']} 끝 ({time.time() - sv['t0']:.1f} s): {', '.join(found) or '없음'}")
+            self.survey = None
+            return
+        pan, tilt = sv["poses"][sv["i"]]
+        sv["i"] += 1
+        now = time.time()
+        gid, self.next_id = self.next_id, self.next_id + 1
+        turn = max(abs(pan - self.head_cmd[0]), abs(tilt - self.head_cmd[1]))
+        self.job = {"id": gid, "cand": None, "survey": True, "pan": pan, "tilt": tilt, "turn": turn,
+                    "settle": self.settle_base + self.settle_deg * turn, "t": {"req": now}, "frames": [], "pool": [], "skipped": 0}
+        self.pub_req.publish(String(data="glance:" + json.dumps({"id": gid, "pan": pan, "tilt": tilt, "hold": 4.0})))
+
+    def survey_decide(self, j, base):
+        """한 자세: 십자 (후보 점) 없이 화면 전체 → 덤 보기 (가구는 0.3 부터, 나머지 0.5, 두 장 모두) → semantic/seen"""
+        h, w = j["frames"][0][0].shape[:2]
+        body = self.body(j["pan"], j["tilt"], h, w)
+        far = (-1e4, -1e4)                                               # 십자 없음 → vote 는 장마다 검출 목록만
+        _, d26 = self.vote(self.yolo26, None, j["frames"], far, self.coco_on, body)
+        _, dE = self.vote(self.yoloe, set(self.yoloe_words), j["frames"], far, self.yoloe_on, body)
+        ext = self.extras(j, d26, None) + self.extras(j, dE, None)
+        self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": "", "conf": 0.0, "model": "-", "wx": 0.0, "wy": 0.0,
+                                                      "footprint": [], "outline": [], "cut": False, "extras": ext,
+                                                      "survey": self.survey["sid"] if self.survey else None, "ms": {}})))
+        if self.survey:
+            self.survey["found"] += [e["name"] for e in ext]
+        self.get_logger().info(f"SURVEY #{j['id']} 고개 ({j['pan']:+.0f}, {j['tilt']:+.0f}) → "
+                               + (", ".join(f"{e['name']} {e['conf']:.2f}" for e in ext) or "없음"))
+        self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))
+        self.job, self.end_t = None, time.time()
 
     def on_img(self, m):
         now = time.time()
@@ -225,7 +279,7 @@ class GlanceNode(Node):
         j["frames"] = [j["pool"][i] for i in idx]
         j["skipped"] = len(j["pool"]) - len(idx)
         t["frames"] = now
-        self.decide(j, max(s for _, s in j["pool"]))
+        (self.survey_decide if j.get("survey") else self.decide)(j, max(s for _, s in j["pool"]))
 
     @staticmethod
     def width(foot):
@@ -235,7 +289,7 @@ class GlanceNode(Node):
 
     def give_up(self, why):
         j = self.job
-        gone = self.cands.fail(j["cand"]["wx"], j["cand"]["wy"], time.time(), pose=self.pose, limit=self.max_fail)
+        gone = False if j.get("survey") else self.cands.fail(j["cand"]["wx"], j["cand"]["wy"], time.time(), pose=self.pose, limit=self.max_fail)
         self.get_logger().warn(f"GLANCE #{j['id']} 포기: {why} (받은 장 {len(j['pool'])}, 본 {j.get('views', 0)} 번)"
                                + (f" → 같은 자리 {self.max_fail} 번째: '?' 로 기억, 다시 안 봄" if gone else ""))
         self.pub_ev.publish(String(data=json.dumps({"type": "glanced", "id": j["id"]})))   # 사령관이 hold 동안 붙잡지 않게
