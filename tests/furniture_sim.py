@@ -220,6 +220,76 @@ try:
 except ImportError as e:
     print(f"건너뜀 17 (ground 못 불러옴: {e})")
 
+# 18~21. 회전의자 (11-25 chair1: 기둥 = LiDAR 작은 덩어리, 반지름 = 장면 중간값들의 중간값, 줄자 별 다리 지름 68 cm)
+COL = (1.0, 0.15)
+def chair_foot(rng, r_wheel=0.32, frac_float=0.35, n=60, arc=(-1.2, 1.2)):
+    """허브·다리·바퀴 쪽 (기둥에서 0.08 ~ 바퀴, 바닥 — chair1 실물: 기둥 ↔ 가장 가까운 마스크 아래점 8~13 cm)
+       + 떠 있는 좌석 옆 (0.45~0.56, 멀리 찍힘), 로봇 쪽 반원만 보임"""
+    a = rng.uniform(*arc, n) + math.pi                              # 로봇 (원점) 쪽
+    u = rng.random(n)                                               # 아래에서 보면 별 다리 끝·바퀴가 대부분, 허브는 조금
+    rr = np.where(u < frac_float, rng.uniform(0.45, 0.56, n),
+                  np.where(u < frac_float + 0.07, rng.uniform(0.08, 0.12, n), rng.uniform(max(0.08, r_wheel - 0.06), r_wheel + 0.02, n)))
+    return np.column_stack([COL[0] + rr * np.cos(a), COL[1] + rr * np.sin(a)])
+rng = np.random.default_rng(1)
+Mc = fu.FurnitureMap()
+for _ in range(3):
+    Mc.observe("chair", 0.6, CAM, (math.radians(30), math.radians(-20)), chair_foot(rng), fake_scan([COL], wall_at(2.5)), (0, 0))
+rc = Mc.items[0].shape() if Mc.items else None
+check("18 의자 3 장 → 원 하나, 중심 = 기둥 (3 cm 안), 반지름 0.34~0.42 (떠 있는 점 섞여도 중간값)",
+      len(Mc.items) == 1 and rc and np.hypot(*(rc["center"] - COL)) < 0.03 and 0.34 <= rc["radius"] <= 0.42,
+      rc and (np.round(rc["center"], 2).tolist(), round(rc["radius"], 3), rc["why"]["lo"]))
+M1 = fu.FurnitureMap()
+M1.observe("chair", 0.6, CAM, (math.radians(30), math.radians(-20)), chair_foot(rng, r_wheel=0.16, frac_float=0.0), fake_scan([COL], wall_at(2.5)), (0, 0))
+r1 = M1.items[0].shape()
+check("19 한 장에 바퀴가 가까이만 보임 (중간값 작음) → 최소 0.28 + 5 cm", abs(r1["radius"] - 0.33) < 1e-6 and "최소" in r1["why"]["lo"],
+      (round(r1["radius"], 3), r1["why"]["lo"]))
+NEW = (0.6, -0.6)
+foot2 = np.vstack([np.column_stack([NEW[0] + 0.3 * np.cos(np.linspace(2, 4.3, 30)), NEW[1] + 0.3 * np.sin(np.linspace(2, 4.3, 30))]),
+                   [[NEW[0] - 0.1, NEW[1] + 0.02]]])                 # 허브 점 하나 (기둥 짝짓기)
+Mc.observe("chair", 0.6, CAM, (math.radians(30), math.radians(-50)), foot2, fake_scan([NEW], wall_at(2.5)), (0, 0))
+check("20 의자를 옮김 (보이는 범위인데 옛 기둥 없음) → 옛 원 지우고 새 자리 하나",
+      len(Mc.items) == 1 and np.hypot(*(Mc.items[0].shape()["center"] - NEW)) < 0.05, [np.round(i.shape()["center"], 2).tolist() for i in Mc.items])
+Mb = fu.FurnitureMap()
+Mb.observe("bed", 0.76, CAM, B, MASK, fake_scan(FRONT + BACK, DRAWER + wall_at(2.03)), (0, 0))
+Mb.observe("chair", 0.6, CAM, (math.radians(-35), math.radians(-60)), foot2, fake_scan([NEW], DRAWER + wall_at(2.03)), (0, 0))
+check("21 침대 + 의자 → 둘 다 있음 (사각형 + 원), costmap 점에 둘 다",
+      sorted(i.name for i in Mb.items) == ["bed", "chair"] and len(Mb.cloud_points()) > 1000, [i.name for i in Mb.items])
+
+
+def real_chair(set_name="chair1"):
+    """11-25 chair1 실물 (glance 와 같은 발자국: 3 열마다, 3 m 안) → 기둥 (+1.02, +0.15), 줄자 반지름 0.34"""
+    import cv2
+    sys.path.insert(0, os.path.join(ROOT, "nodes", "perception"))
+    sys.path.insert(0, os.path.join(ROOT, "tools", "lab"))
+    import ground
+    from yolo_onnx import Yolo
+    import bed_snap as bs
+    d = os.path.join(ROOT, "logs", "bed_set", set_name)
+    print(f"--- 실물 {set_name}")
+    K, D, _ = ground.load_calib(os.path.join(ROOT, "logs", "bed_set", "fisheye_640x480.json"))
+    yolo = Yolo(os.path.join(ROOT, "models", "yolo26s-seg.onnx"), size=320, conf=0.2)
+    M = fu.FurnitureMap()
+    for p in json.load(open(os.path.join(d, "poses.json")))["poses"]:
+        bgr = cv2.imread(os.path.join(d, p["file"]))
+        scan = bs.scan_to_base(p["scan"])
+        for name, conf, bx, by, bw, bh, mask in [x for x in yolo.detect(bgr, masks=True) if x[0] == "chair" and len(x) == 7]:
+            cols = np.nonzero(mask.any(0))[0]
+            px = [[c + 0.5, np.nonzero(mask[:, c])[0].max() + 0.5] for c in cols[::3]]
+            fl = ground.pixels_to_floor(px, K, D, p["pan"], p["tilt"])
+            fl = fl[np.isfinite(fl).all(1)]
+            fl = fl[np.hypot(fl[:, 0], fl[:, 1]) < 3.0]
+            b = ground.pixel_bearing([px[0], px[-1]], K, D, p["pan"], p["tilt"])
+            cut = (cols.min() <= 3, cols.max() >= mask.shape[1] - 4)
+            _, t = ground.cam_pose(p["pan"], p["tilt"])
+            F, got, how = M.observe("chair", conf, t[:2], [None if c else float(v) for v, c in zip(b, cut)], fl, scan, (0.0, 0.0))
+            print(f"   pan {p['pan']:+d}: chair {conf:.2f} → {how} 기둥 {[(round(x, 2), round(y, 2)) for x, y in got]}")
+    chairs = [i for i in M.items if i.name == "chair"]
+    r = chairs[0].shape() if chairs else None
+    check(f"R1 {set_name}: 의자 하나, 중심 = 기둥 (+1.02, +0.15) 3 cm 안", len(chairs) == 1 and r is not None
+          and np.hypot(*(r["center"] - [1.02, 0.15])) < 0.03, r and (np.round(r["center"], 3).tolist(), len(chairs)))
+    check(f"R2 {set_name}: 반지름 = 줄자 0.34 + pad 5 cm (±4 cm)", r is not None and abs(r["radius"] - 0.39) <= 0.04,
+          r and (round(r["radius"], 3), r["why"]["lo"]))
+
 
 def real(set_name="bed1"):
     """실물 기록 (11-24 bed1 정면, 11-25 bed2 오른쪽으로 옮겨 비스듬히·옆면 보임): 마스크 다시 돌림 → Furniture → 실측과 비교.
@@ -286,4 +356,6 @@ if "--real" in sys.argv:
     for name in ("bed1", "bed2", "bed3"):
         if os.path.isdir(os.path.join(ROOT, "logs", "bed_set", name)):
             real(name)
+    if os.path.isdir(os.path.join(ROOT, "logs", "bed_set", "chair1")):
+        real_chair("chair1")
 print(f"\n{sum(results)}/{len(results)} 통과")

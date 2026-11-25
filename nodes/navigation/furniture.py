@@ -42,7 +42,8 @@ import math
 
 import numpy as np
 
-FURNITURE = ("bed", "dining table", "couch")   # 밑이 뜬 가구 (지금 실물 시험은 침대만)
+FURNITURE = ("bed", "dining table", "couch", "chair")   # 밑이 뜬 가구 (실물 시험: 침대, 의자)
+ROUND = ("chair",)       # 11-25 회전의자: 기둥 하나 + 별 모양 다리·바퀴 (LiDAR 아래) → 원
 
 
 def leg_clusters(pts, gap=0.05, max_d=0.08, clear=0.15):
@@ -278,6 +279,9 @@ class FurnitureMap:
         if not len(foot):
             return None, [], "skip: 발자국 없음"
         F, how = None, "new"
+        if name in ROUND:                                               # 옮긴 의자: 보이는 범위인데 기둥이 없으면 지움
+            for it in [i for i in self.items if i.name == name and i.gone(scan, cam, bearing)]:
+                self.items.remove(it)
         for it in self.items:
             if it.name != name:
                 continue
@@ -292,7 +296,7 @@ class FurnitureMap:
         if F is not None and conf < self.on:
             how = f"same (낮은 점수 {conf:.2f}, 기존 가구 자리라 받음)"
         if F is None:
-            F = Furniture(name=name, **self.kw)
+            F = Chair(name=name) if name in ROUND else Furniture(name=name, **self.kw)
             self.items.append(F)
         found = F.add_view(cam, bearing, foot, scan, robot)
         return F, found, how
@@ -311,5 +315,69 @@ class FurnitureMap:
 
 
 def _inside(poly, p):
-    s = [(poly[(i + 1) % 4] - poly[i])[0] * (p - poly[i])[1] - (poly[(i + 1) % 4] - poly[i])[1] * (p - poly[i])[0] for i in range(4)]
+    n = len(poly)
+    s = [(poly[(i + 1) % n] - poly[i])[0] * (p - poly[i])[1] - (poly[(i + 1) % n] - poly[i])[1] * (p - poly[i])[0] for i in range(n)]
     return all(v >= -1e-9 for v in s) or all(v <= 1e-9 for v in s)
+
+
+class Chair:
+    """회전의자 (11-25, Jasper: 별 모양 다리는 LiDAR 아래라 위스커가 요리조리 피하다 포기 → 원기둥처럼 그려 비켜 가면 그만).
+       chair1 실측 (bed_snap): LiDAR 가 가스 기둥을 작은 덩어리 (1~3 cm) 로 5 장 모두 같은 자리, 마스크 아래점에서 8~13 cm.
+       마스크 아래점 = 바퀴 (바닥, 정확) + 좌석 옆·등받이 아래 (떠 있어 멀리 찍힘 0.45~0.56) → 기둥까지 거리의 장면별 중간값 →
+       그 중간값들의 중간값 = 0.34 (줄자 별 다리 지름 68 cm → 0.34). 한 장만 보면 0.22 까지 작게 나옴 → 최소 min_r.
+       좌석 (~45 cm) 은 머리 (~30 cm) 보다 높음 → 막는 건 별 다리·바퀴만.
+       중심 = 기둥 평균, 반지름 = clamp(장면 중간값들의 중간값, min_r, max_r) + pad. 원을 sides 각형으로."""
+
+    def __init__(self, name="chair", match=0.15, near=0.6, min_r=0.28, max_r=0.45, pad=0.05, sides=16, merge=0.10):
+        self.name, self.match, self.near, self.min_r, self.max_r, self.pad, self.sides, self.merge = name, match, near, min_r, max_r, pad, sides, merge
+        self.cols = []           # [[x, y, 본 횟수]] 기둥
+        self.radii = []          # 장면별 중간값
+        self.legs = []           # FurnitureMap 의 연관 판단용 (= 기둥)
+        self.views = []
+
+    def add_view(self, cam, bearing, mask_floor, scan, robot):
+        mf = np.asarray(mask_floor, float).reshape(-1, 2)
+        mf = mf[np.isfinite(mf).all(1)]
+        if not len(mf):
+            return []
+        cand = [(cx, cy) for cx, cy, _ in leg_clusters(scan) if np.hypot(*(mf - [cx, cy]).T).min() <= self.match]
+        if not cand:
+            return []
+        mid = np.median(mf, axis=0)                                     # 발자국 가운데에 가장 가까운 덩어리 = 기둥
+        cx, cy = min(cand, key=lambda c: math.hypot(c[0] - mid[0], c[1] - mid[1]))
+        for c in self.cols:
+            if math.hypot(c[0] - cx, c[1] - cy) < self.merge:
+                c[0] += (cx - c[0]) / (c[2] + 1); c[1] += (cy - c[1]) / (c[2] + 1); c[2] += 1
+                break
+        else:
+            self.cols.append([cx, cy, 1])
+        r = np.hypot(*(mf - [cx, cy]).T)
+        r = r[r < self.near]
+        if len(r):
+            self.radii.append(float(np.median(r)))
+        self.legs = [[c[0], c[1], c[2], 0.03] for c in self.cols]
+        self.views.append((np.asarray(cam, float), bearing[0], bearing[1], np.asarray(scan, float).reshape(-1, 2)))
+        return [(cx, cy)]
+
+    def shape(self):
+        if not self.cols or not self.radii:
+            return None
+        c = max(self.cols, key=lambda k: k[2])                         # 가장 많이 본 기둥
+        r0 = float(np.median(self.radii))
+        r = min(self.max_r, max(self.min_r, r0)) + self.pad
+        a = np.linspace(0, 2 * math.pi, self.sides, endpoint=False)
+        poly = np.column_stack([c[0] + r * np.cos(a), c[1] + r * np.sin(a)])
+        why = f"기둥 x{c[2]}, 장면 {len(self.radii)} 개 중간값 {r0:.2f}" + (" (최소로 올림)" if r0 < self.min_r else " (최대로 내림)" if r0 > self.max_r else "")
+        return {"corners": poly, "center": np.array(c[:2]), "radius": r, "round": True, "confirmed": False,
+                "lo": 0.0, "hi": 2 * r, "depth": 2 * r, "spacing": 0.0, "why": {"lo": why, "hi": "", "depth": ""}}
+
+    def gone(self, scan, cam, bearing):
+        """카메라 방향 범위 안 (2 m 안) 인데 기둥 자리에 LiDAR 덩어리가 없음 = 의자를 옮김"""
+        if not self.cols or bearing[0] is None or bearing[1] is None:
+            return False
+        c = max(self.cols, key=lambda k: k[2])
+        ang = math.atan2(c[1] - cam[1], c[0] - cam[0])
+        lo, hi = min(bearing), max(bearing)
+        if not (lo <= ang <= hi) or math.hypot(c[0] - cam[0], c[1] - cam[1]) > 2.0:
+            return False
+        return not any(math.hypot(x - c[0], y - c[1]) < self.merge for x, y, _ in leg_clusters(scan))

@@ -153,7 +153,9 @@ class FloorHazard(Node):
         head = (f"FURN #{jid} {o['name']} {o['conf']:.2f} {word} | 이번 다리 {len(found)} 개"
                 + (f" | 잘림 {cutw}" if cutw else "") + f" | 다리 {len(F.legs)}: {legs}")
         if r is None:
-            self.get_logger().info(head + " | 영역 없음 (앞줄 다리 2 개를 한 장에서 같이 봐야 함)")
+            self.get_logger().info(head + " | 영역 없음 (앞줄 다리 2 개를 한 장에서 같이 봐야 함 / 의자는 기둥 1 개)")
+        elif r.get("round"):                                            # 11-25 회전의자 = 원
+            self.get_logger().info(head + f" | 원 중심 ({r['center'][0]:+.2f}, {r['center'][1]:+.2f}) 반지름 {r['radius']:.2f} | {r['why']['lo']}")
         else:
             self.get_logger().info(head + f" | 길이 {r['hi'] - r['lo']:.2f} 깊이 {r['depth']:.2f} 간격 {r['spacing']:.2f} | "
                                    f"끝: {r['why']['lo']} / {r['why']['hi']} | 깊이: {r['why']['depth']} | "
