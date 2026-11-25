@@ -218,7 +218,8 @@ class GlanceNode(Node):
         ext = self.extras(j, d26, None) + self.extras(j, dE, None)
         self.pub_seen.publish(String(data=json.dumps({"id": j["id"], "name": "", "conf": 0.0, "model": "-", "wx": 0.0, "wy": 0.0,
                                                       "footprint": [], "outline": [], "cut": False, "extras": ext,
-                                                      "survey": self.survey["sid"] if self.survey else None, "ms": {}})))
+                                                      "survey": self.survey["sid"] if self.survey else None, "ms": {},
+                                                      "t_img": j["t"].get("frames")})))
         if self.survey:
             self.survey["found"] += [e["name"] for e in ext]
         self.get_logger().info(f"SURVEY #{j['id']} 고개 ({j['pan']:+.0f}, {j['tilt']:+.0f}) → "
@@ -487,7 +488,8 @@ class GlanceNode(Node):
         ms = {k: int((t[k] - r) * 1000) for k in ("mode", "head", "frames", "yolo26", "yoloe") if k in t}
         seen = {"id": j["id"], "name": name, "conf": round(conf, 3), "model": model,
                 "wx": round(wx, 3), "wy": round(wy, 3), "footprint": foot, "outline": outl,
-                "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms}
+                "cut": bool(best and best[3] is not None and self.cut(best[3])), "extras": ext, "ms": ms,
+                "t_img": t.get("frames")}                              # 11-26 사진 다 모은 시각 (wall) → floor_hazard 가 반영 지연을 잼
         if best and best[3] is not None and name in fu.FURNITURE:
             seen.update(self.furn_view(best[3], j["pan"], j["tilt"]))
         self.pub_seen.publish(String(data=json.dumps(seen)))

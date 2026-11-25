@@ -66,9 +66,10 @@ class FloorHazard(Node):
         self.frame = p("frame", "map").value
         self.remove_floating = p("remove_floating", False).value   # 11-20: 진짜 발닦개를 "떠 있음" 으로 두 번 뺌 → 원인 볼 때까지 관찰 모드
         self.H = hz.HazardMap(on=p("on", 0.4).value, scan_max=p("scan_max", 2).value)   # 11-20: 0.5 → 0.4 (바닥형은 전부 YOLOE 단어, 따라보기와 같게)
-        self.chair_method = p("chair_method", "auto").value              # 11-26 "contact" = 의자 1차 (기둥) 끄고 2차 (접점) 만 — 실물 비교 시험 (숫자 "2" 는 ROS 가 정수로 읽어 타입 오류)
+        self.chair_method = p("chair_method", "column").value            # 11-26 의자: column = 1차 (기둥) 만 (기본, 2차 걷어냄 — furniture.Chair 설명),
+                                                                         #   auto = 1차 → 없으면 2차, contact = 2차만 (숫자 "2" 는 ROS 가 정수로 읽어 타입 오류)
         self.F = fu.FurnitureMap(on=p("furn_on", 0.5).value, keep_on=p("furn_keep_on", 0.3).value,   # 이중 문턱: 새 가구 0.5, 기존 자리 0.3
-                                 chair_kw={"use1": self.chair_method != "contact"})
+                                 chair_kw={"use1": self.chair_method != "contact", "use2": self.chair_method in ("auto", "contact")})
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.scan = None
@@ -84,7 +85,7 @@ class FloorHazard(Node):
         self.clear_cli = [self.create_client(ClearEntireCostmap, s) for s in (
             "/global_costmap/clear_entirely_global_costmap", "/local_costmap/clear_entirely_local_costmap")] if ClearEntireCostmap else []
         self.drift = hz.DriftWatch(dist=p("drift_m", 0.05).value, gap=p("drift_gap_s", 5.0).value)   # 11-25 SLAM 보정 → 지역 costmap 옛 표시
-        self.get_logger().info(f"HAZARD 준비: 의자 {'2차만 (1차 끔)' if self.chair_method == 'contact' else '1차 → 없으면 2차'}, 좌표 {self.frame}, 바닥형 {sorted(self.H.types)}, 점수 ≥ {self.H.on}, LiDAR 점 ≤ {self.H.scan_max}")
+        self.get_logger().info(f"HAZARD 준비: 의자 {dict(column='1차 (기둥) 만', auto='1차 → 없으면 2차', contact='2차만 (1차 끔)').get(self.chair_method, self.chair_method)}, 좌표 {self.frame}, 바닥형 {sorted(self.H.types)}, 점수 ≥ {self.H.on}, LiDAR 점 ≤ {self.H.scan_max}")
 
     def lookup(self, src):
         try:
@@ -122,8 +123,9 @@ class FloorHazard(Node):
         if To is None or Tb is None or pts is None:
             self.get_logger().warn(f"HAZARD #{j.get('id')} 건너뜀: TF·스캔 없음")
             return
+        lag = round(time.time() - float(j["t_img"]), 2) if j.get("t_img") else None   # 11-26 사진 → 여기 (glance 처리 + 전달)
         for o in furn:
-            self.on_furniture(j.get("id"), o, To, Tb, pts)
+            self.on_furniture(j.get("id"), o, To, Tb, pts, lag)
         now = time.time()
         for o in objs:
             out = apply(To, o.get("outline") or np.zeros((0, 2)))
@@ -141,20 +143,30 @@ class FloorHazard(Node):
             else:
                 self.get_logger().info(f"HAZARD #{j.get('id')} {o['name']} {o['conf']:.2f} → 안 찍음 | {why}")
 
-    def on_furniture(self, jid, o, To, Tb, pts):
+    def on_furniture(self, jid, o, To, Tb, pts, lag=None):
         """밑이 뜬 가구 한 장 → FurnitureMap (odom 값을 map 으로, 방향엔 odom→map 회전만 더함)"""
         foot = apply(To, o.get("foot_dense") or o.get("footprint") or np.zeros((0, 2)))   # 촘촘한 발자국 (가는 다리 안 놓침)
         cam = apply(To, [o["cam"]])[0]
         bear = [None if b is None else b + To[2] for b in o["bearing"]]
+        before = {id(it): (it.name, (it.shape() or {}).get("corners")) for it in self.F.items}
         F, found, how = self.F.observe(o["name"], o["conf"], cam, bear, foot, pts, np.array(Tb[:2]))
+        after = {id(it): (it.shape() or {}).get("corners") for it in self.F.items}
+        old = [f"{nm} 사라짐/옮김" for k, (nm, c) in before.items() if k not in after and c is not None]
+        old += [f"{nm} 줄어듦/밀림" for k, (nm, c) in before.items() if k in after and fu.stale(c, after[k])]
+        if old:                                                         # 11-26 Jasper: 의자를 밀었는데 옛 원이 남음 → costmap 다시 그리기
+            self.get_logger().info(f"FURN #{jid} 옛 자리 지움: {', '.join(old)} → 비용지도 다시 그리기")
+            self.clear_costmaps()
         if F is None:
             self.get_logger().info(f"FURN #{jid} {o['name']} {o['conf']:.2f} → {how}")
+            return
+        if F not in self.F.items:                                       # 11-26: 기둥 못 찾은 새 의자 (안 남김)
+            self.get_logger().info(f"FURN #{jid} {o['name']} {o['conf']:.2f} 새 의자 안 남김 | 1차 실패: {getattr(F, 'miss', '')}")
             return
         r = F.shape()
         legs = ", ".join(f"({l[0]:+.2f},{l[1]:+.2f})x{l[2]}" for l in F.legs)
         cutw = "".join(w for w, b in zip(("왼", "오"), o["bearing"]) if b is None)
         word = "새 가구" if how == "new" else ("같은 가구" + (" (낮은 점수라 기존 자리로 받음)" if "낮은" in how else ""))
-        head = (f"FURN #{jid} {o['name']} {o['conf']:.2f} {word} | 이번 다리 {len(found)} 개"
+        head = (f"FURN #{jid} {o['name']} {o['conf']:.2f} {word}" + (f" (사진→반영 {lag:.2f} s)" if lag is not None else "") + f" | 이번 다리 {len(found)} 개"
                 + (f" | 잘림 {cutw}" if cutw else "") + f" | 다리 {len(F.legs)}: {legs}")
         miss = getattr(F, "miss", "")                                   # 11-25 의자 1차 (기둥) 실패 이유
         if r is None:
@@ -210,8 +222,7 @@ class FloorHazard(Node):
         for cl in self.clear_cli[1:] if local_only else self.clear_cli:
             if cl.service_is_ready():
                 fut = cl.call_async(ClearEntireCostmap.Request())
-                if local_only:                                          # 지운 직후 우리 점 구름 바로 다시 (1 초 빈틈 줄임)
-                    fut.add_done_callback(lambda _: self.publish_cloud())
+                fut.add_done_callback(lambda _: self.publish_cloud())  # 지운 직후 우리 점 구름 바로 다시 (1 초 빈틈 줄임)
 
     def check_drift(self):
         """11-25 map↔odom 이 한 칸 넘게 바뀌면 지역 costmap 만 지움 (전역은 map 좌표라 괜찮음)."""

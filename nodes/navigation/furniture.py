@@ -302,6 +302,8 @@ class FurnitureMap:
             F = Chair(name=name, **self.chair_kw) if name in ROUND else Furniture(name=name, **self.kw)
             self.items.append(F)
         found = F.add_view(cam, bearing, foot, scan, robot)
+        if name in ROUND and how == "new" and not F.legs and F.shape() is None:   # 11-26: 기둥도 모양도 없는 새 의자는 두지 않음
+            self.items.remove(F)                                        #   (안 그러면 기둥 못 찾은 의자가 볼 때마다 새로 쌓임 — 연관할 근거가 없음)
         return F, found, how
 
     def shapes(self):
@@ -350,6 +352,31 @@ def in_wedge(cam, bearing, pts):
     return ok
 
 
+def stale(old, new, tol=0.10):
+    """11-26 옛 모양의 꼭짓점 중 새 모양 바깥으로 tol 넘게 떨어진 게 있나 (= costmap 에 옛 칸이 남음 → 지워야 함).
+       costmap 가구 층은 clearing: false 라 새로 칠하는 건 되지만 줄어들거나 옮겨진 자리는 안 지워짐.
+       new 가 None (가구가 사라짐) 이면 True. 침대처럼 1~5 cm 흔들리는 건 tol 안."""
+    if old is None:
+        return False
+    if new is None:
+        return True
+    new = np.asarray(new, float)
+    n = len(new)
+    for p in np.asarray(old, float):
+        if _inside(new, p):
+            continue
+        d = min(_seg_dist(p, new[i], new[(i + 1) % n]) for i in range(n))
+        if d > tol:
+            return True
+    return False
+
+
+def _seg_dist(p, a, b):
+    ab = b - a
+    t = 0.0 if not ab.any() else float(np.clip((p - a) @ ab / (ab @ ab), 0, 1))
+    return float(np.hypot(*(p - (a + t * ab))))
+
+
 def _inside(poly, p):
     n = len(poly)
     s = [(poly[(i + 1) % n] - poly[i])[0] * (p - poly[i])[1] - (poly[(i + 1) % n] - poly[i])[1] * (p - poly[i])[0] for i in range(n)]
@@ -365,9 +392,13 @@ class Chair:
        좌석 (~45 cm) 은 머리 (~30 cm) 보다 높음 → 막는 건 별 다리·바퀴만.
        중심 = 기둥 평균, 반지름 = clamp(장면 중간값들의 중간값, min_r, max_r) + pad. 원을 sides 각형으로."""
 
-    def __init__(self, name="chair", match=0.15, near=0.6, min_r=0.28, max_r=0.45, pad=0.05, sides=16, merge=0.10, long=0.30, use1=True):
+    def __init__(self, name="chair", match=0.15, near=0.6, min_r=0.28, max_r=0.45, pad=0.05, sides=16, merge=0.10, long=0.30, use1=True, use2=False):
         self.name, self.match, self.near, self.min_r, self.max_r, self.pad, self.sides, self.merge = name, match, near, min_r, max_r, pad, sides, merge
-        self.long, self.use1 = long, use1    # 11-26 use1=False: 1차 끄고 2차만 (실물 비교 시험용, floor_hazard chair_method:=2)
+        self.long, self.use1, self.use2 = long, use1, use2   # 11-26 use1=False: 1차 끄고 2차만 (실물 비교 시험용)
+        # 11-26 2차는 기본 끔 (Jasper 와 결정): 실물 2차만 주행 (run_1126b) 에서 중심이 장면마다 10~25 cm 흔들리고
+        #   모양이 비뚤어진 사다리꼴 (폭 = 좌석·팔걸이 끝 방향). 의자는 '덤' 으로 몇 장 스쳐 보는 게 전부라
+        #   짧게·적은 장면으로 정확해야 함 → 한 장으로 중심이 정확한 1차 (기둥) 만. 놓친 의자는 위스커 → 나중에 ToF.
+        #   1차 실패 이유 (miss) 는 계속 로그로 남김.
         self.cols = []           # [[x, y, 본 횟수]] 기둥
         self.radii = []          # 장면별 중간값
         self.legs = []           # FurnitureMap 의 연관 판단용 (= 기둥)
@@ -380,7 +411,8 @@ class Chair:
         mf = mf[np.isfinite(mf).all(1)]
         if not len(mf):
             return []
-        self.contact(cam, bearing, mf, scan)
+        if self.use2 or not self.use1:
+            self.contact(cam, bearing, mf, scan)
         cand = [(cx, cy) for cx, cy, _ in leg_clusters(scan) if np.hypot(*(mf - [cx, cy]).T).min() <= self.match]
         if len(cand) >= 2:                                              # 11-25: 다리 여럿 = 4 다리 의자 → 기둥 하나 (회전의자) 규칙이 아님
             self.miss = f"작은 덩어리 {len(cand)} 개 (기둥 하나가 아님 → 2차)"
@@ -480,7 +512,8 @@ class Chair:
 
     def shape(self):
         """1차 (기둥) 가 있으면 1차, 없으면 2차. 둘 다 계산해서 'alt' 에 다른 쪽을 실음 (로그로 비교, 줄자와 맞춰 보고 합치는 규칙은 그다음)"""
-        r1, r2 = (self.shape1() if self.use1 else None), self.shape2()
+        r1 = self.shape1() if self.use1 else None
+        r2 = self.shape2() if (self.use2 or not self.use1) else None
         r = r1 or r2
         if r is not None:
             r["alt"] = r2 if r is r1 else None

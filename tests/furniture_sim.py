@@ -277,7 +277,7 @@ rng4 = np.random.default_rng(4)
 foot4 = np.vstack([[(0.85 + rng4.normal(0, 0.01), 0.20 + rng4.normal(0, 0.01)) for _ in range(4)],
                    [(0.85 + rng4.normal(0, 0.01), -0.20 + rng4.normal(0, 0.01)) for _ in range(4)],
                    np.column_stack([rng4.uniform(1.5, 2.0, 12), rng4.uniform(-0.18, 0.18, 12)])])   # 앞 가로대 (떠 있어 멀리)
-M4 = fu.FurnitureMap()
+M4 = fu.FurnitureMap(chair_kw={"use2": True})
 _, got, how = M4.observe("chair", 0.7, CAM, bearings(CAM, SEAT), foot4, fake_scan(LEG4, wall_at(2.5)), (0, 0))
 r4 = M4.items[0].shape() if M4.items else None
 check("23 4 다리 의자 앞에서 (앞다리 2 개만 마스크와 맞음) → 2차, 다리 4 개 다 덮음, 폭 < 0.65 깊이 < 0.65",
@@ -294,7 +294,7 @@ check("24 옆에서 한 번 더 → 같은 의자, 장면별 모양 중 가운�
 rng5 = np.random.default_rng(5)
 NEARWALL = [((1.10, -0.6), (1.10, 0.9))]                             # 기둥 뒤 8 cm 에 벽·책상 옆판 → 떨어짐 조건 실패
 B5 = (math.radians(30), math.radians(-12))
-M5 = fu.FurnitureMap()
+M5 = fu.FurnitureMap(chair_kw={"use2": True})
 def chair_foot2(rng, n=60):
     """물리적으로 맞는 발자국: 바퀴 (바닥, 로봇 쪽 반원 0.28~0.34) + 허브 + 떠 있는 좌석 가장자리 (실제보다 멀리 찍힘 → 기둥 뒤쪽)"""
     a = rng.uniform(-1.2, 1.2, n)
@@ -308,7 +308,7 @@ r5 = M5.items[0].shape() if M5.items else None
 check("25 회전의자 기둥이 벽에 붙음 (1차 실패, 이유 '붙어 있음') → 2차로 그림, 기둥·앞쪽 바퀴 덮음, 벽 안 넘음",
       r5 is not None and r5.get("method") == 2 and "붙어" in r5["miss"] and covers(r5["corners"], [COL, (COL[0] - 0.30, COL[1])])
       and r5["corners"][:, 0].max() <= 1.10 + 0.06, r5 and (r5["why"]["lo"], r5["miss"], round(float(r5["corners"][:, 0].max()), 2)))
-M6 = fu.FurnitureMap()
+M6 = fu.FurnitureMap(chair_kw={"use2": True})
 M6.observe("chair", 0.6, CAM, B5, chair_foot2(rng5), fake_scan([COL], wall_at(2.5)), (0, 0))
 r6 = M6.items[0].shape()
 check("26 기둥 보이면 그대로 1차 (원), 2차는 alt 로 같이 (비교용)", r6["method"] == 1 and r6["alt"] is not None and r6["alt"]["method"] == 2,
@@ -339,6 +339,18 @@ check("27 책상 옆판·벽 옆 회전의자 5 장 (1차 끔) → 2차 하나, 
       and max(a for a in areas if a) <= 1.0, (r7["why"]["lo"], round(far, 2), areas))
 check("28 1차 끔 (use1=False) → 기둥이 보여도 2차", r7["method"] == 2 and M7.items[0].cols, len(M7.items[0].cols))
 
+M9 = fu.FurnitureMap()
+for _ in range(2):
+    M9.last, _, _ = M9.observe("chair", 0.8, CAM, B5, chair_foot2(rng5), fake_scan([COL], NEARWALL), (0, 0))
+check("29 기본 (11-26 2차 걷어냄): 기둥이 벽에 붙어 1차 실패 → 그리지 않음, 빈 가구도 안 쌓임, 실패 이유는 남김",
+      not M9.items and "붙어" in M9.last.miss, (len(M9.items), M9.last.miss))
+
+# 30~32. 11-26 costmap 옛 칸 지우기 판단 (fu.stale): 의자를 밀면 옛 원이 남음 (가구 층 clearing: false)
+sq = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], float)
+check("30 옛 모양 = 새 모양 (+3 cm 흔들림) → 안 지움", not fu.stale(sq, sq + 0.03))
+check("31 의자 20 cm 밀림 → 지움", fu.stale(sq * 0.6, sq * 0.6 + [0.2, 0.0]))
+check("32 가구 사라짐 (새 모양 없음) → 지움 / 커지기만 함 → 안 지움", fu.stale(sq, None) and not fu.stale(sq * 0.5, sq))
+
 
 def real_chair(set_name="chair1"):
     """11-25 chair1 실물 (glance 와 같은 발자국: 3 열마다, 3 m 안) → 기둥 (+1.02, +0.15), 줄자 반지름 0.34"""
@@ -352,7 +364,7 @@ def real_chair(set_name="chair1"):
     print(f"--- 실물 {set_name}")
     K, D, _ = ground.load_calib(os.path.join(ROOT, "logs", "bed_set", "fisheye_640x480.json"))
     yolo = Yolo(os.path.join(ROOT, "models", "yolo26s-seg.onnx"), size=320, conf=0.2)
-    M = fu.FurnitureMap()
+    M = fu.FurnitureMap(chair_kw={"use2": True})   # 2차는 기본 끔 → 비교 기록용으로만 켬
     for p in json.load(open(os.path.join(d, "poses.json")))["poses"]:
         bgr = cv2.imread(os.path.join(d, p["file"]))
         scan = bs.scan_to_base(p["scan"])
@@ -377,13 +389,12 @@ def real_chair(set_name="chair1"):
     if a2 is not None:                                               # 11-25 밤 2차를 같은 장면으로 (기둥 안 쓰고): 줄자 별 다리 지름 0.68, 기둥 (1.02, 0.15)
         P = a2["corners"]
         print(f"   2차: {a2['why']['lo']} | x {P[:, 0].min():+.2f}~{P[:, 0].max():+.2f} y {P[:, 1].min():+.2f}~{P[:, 1].max():+.2f}")
-    check(f"R4 {set_name}: 2차만으로도 기둥 + 앞쪽 바퀴 (기둥 − 0.34) 덮음", a2 is not None and covers(a2["corners"], [(1.02, 0.15), (0.70, 0.15)]),
-          a2 and np.round(a2["corners"], 2).tolist())
+    # 11-26 2차 걷어냄 → R4·R5 는 판정이 아니라 기록 (걷어낸 근거: 앞바퀴 여유 0, 양옆 +17/+19 cm > 기준 15)
+    print(f"   기록 R4 {set_name}: 2차가 기둥 + 앞바퀴 덮음? {a2 is not None and covers(a2['corners'], [(1.02, 0.15), (0.70, 0.15)])}")
     if a2 is not None:                                               # 11-26 Jasper 기준: 실제 별 다리 (x 0.68~1.36, y −0.19~0.49) 의 ±15 cm 안
         P = a2["corners"]
         err = [0.68 - P[:, 0].min(), P[:, 0].max() - 1.36, -0.19 - P[:, 1].min(), P[:, 1].max() - 0.49]
-        check(f"R5 {set_name}: 2차 범위가 실제 별 다리 ±15 cm 안 (앞·뒤·오른·왼 넘친 만큼)", max(abs(e) for e in err) <= 0.15,
-              [round(e, 2) for e in err])
+        print(f"   기록 R5 {set_name}: 2차가 실제 별 다리 바깥으로 넘친 만큼 (앞·뒤·오른·왼) {[round(float(e), 2) for e in err]} (기준 ±0.15)")
 
 
 def real(set_name="bed1"):
