@@ -81,6 +81,7 @@ class FloorHazard(Node):
         # 지우기: 점 구름만 비우면 costmap 층 (clearing: false) 에 칸이 남음 → 비용지도 전체 초기화 (LiDAR·위스커는 다음 주기에 다시 채움)
         self.clear_cli = [self.create_client(ClearEntireCostmap, s) for s in (
             "/global_costmap/clear_entirely_global_costmap", "/local_costmap/clear_entirely_local_costmap")] if ClearEntireCostmap else []
+        self.drift = hz.DriftWatch(dist=p("drift_m", 0.05).value, gap=p("drift_gap_s", 5.0).value)   # 11-25 SLAM 보정 → 지역 costmap 옛 표시
         self.get_logger().info(f"HAZARD 준비: 좌표 {self.frame}, 바닥형 {sorted(self.H.types)}, 점수 ≥ {self.H.on}, LiDAR 점 ≤ {self.H.scan_max}")
 
     def lookup(self, src):
@@ -196,10 +197,26 @@ class FloorHazard(Node):
                 else:
                     self.get_logger().info(f"HAZARD {it['name']} 바닥 확인 (다가간 {it['move']:.2f} m 에 {it['pull']:+.2f} m) | 기록: {rec}")
 
-    def clear_costmaps(self):
-        for cl in self.clear_cli:
+    def clear_costmaps(self, local_only=False):
+        for cl in self.clear_cli[1:] if local_only else self.clear_cli:
             if cl.service_is_ready():
-                cl.call_async(ClearEntireCostmap.Request())
+                fut = cl.call_async(ClearEntireCostmap.Request())
+                if local_only:                                          # 지운 직후 우리 점 구름 바로 다시 (1 초 빈틈 줄임)
+                    fut.add_done_callback(lambda _: self.publish_cloud())
+
+    def check_drift(self):
+        """11-25 map↔odom 이 한 칸 넘게 바뀌면 지역 costmap 만 지움 (전역은 map 좌표라 괜찮음)."""
+        To, Tb = self.lookup("odom"), self.lookup("base_footprint")
+        if To is None or Tb is None:
+            return
+        x0, y0, th = To                                                 # 로봇의 odom 좌표 = To⁻¹ · Tb
+        c, s = math.cos(-th), math.sin(-th)
+        p = ((Tb[0] - x0) * c - (Tb[1] - y0) * s, (Tb[0] - x0) * s + (Tb[1] - y0) * c)
+        d = self.drift.update(To, p, time.monotonic())
+        if d is not None:
+            self.get_logger().info(f"HAZARD 지역 costmap 지움: map↔odom 어긋남 {d * 100:.1f} cm "
+                                   f"(odom {To[0]:+.3f},{To[1]:+.3f},{math.degrees(To[2]):+.1f}°)")
+            self.clear_costmaps(local_only=True)
 
     def on_clear(self, _):
         self.get_logger().info(f"HAZARD 지움: {self.H.clear()} 개, 가구 {self.F.clear()} 개 + 비용지도 초기화")
@@ -207,6 +224,19 @@ class FloorHazard(Node):
         self.clear_costmaps()
 
     def tick(self):
+        self.publish_cloud()
+        self.check_drift()
+        st = self.H.state()
+        To = self.lookup("odom") if st else None
+        if To is not None:                                              # 11-20 따라보기용: glance_node 는 odom 좌표 → 같이 실어 줌
+            x0, y0, th = To
+            c, s = math.cos(-th), math.sin(-th)
+            for h in st:
+                dx, dy = h["cx"] - x0, h["cy"] - y0
+                h["ox"], h["oy"] = round(dx * c - dy * s, 3), round(dx * s + dy * c, 3)
+        self.pub_state.publish(String(data=json.dumps(st)))
+
+    def publish_cloud(self):
         pts = np.vstack([self.H.cloud_points().reshape(-1, 2), self.F.cloud_points().reshape(-1, 2)])
         m = PointCloud2()
         m.header.stamp = self.get_clock().now().to_msg()
@@ -219,15 +249,6 @@ class FloorHazard(Node):
         self.pub_cloud.publish(m)
         self.pub_furn.publish(String(data=json.dumps([{"name": F.name, "corners": np.round(r["corners"], 3).tolist()}
                                                       for F, r in self.F.shapes() if r is not None])))
-        st = self.H.state()
-        To = self.lookup("odom") if st else None
-        if To is not None:                                              # 11-20 따라보기용: glance_node 는 odom 좌표 → 같이 실어 줌
-            x0, y0, th = To
-            c, s = math.cos(-th), math.sin(-th)
-            for h in st:
-                dx, dy = h["cx"] - x0, h["cy"] - y0
-                h["ox"], h["oy"] = round(dx * c - dy * s, 3), round(dx * s + dy * c, 3)
-        self.pub_state.publish(String(data=json.dumps(st)))
 
 
 def main():

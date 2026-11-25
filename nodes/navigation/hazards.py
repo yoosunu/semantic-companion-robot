@@ -235,3 +235,37 @@ class HazardMap:
                  "cx": round(float(it["poly"][:, 0].mean()), 3), "cy": round(float(it["poly"][:, 1].mean()), 3),
                  "area": round(area(it["poly"]), 3), "full": it["full"],
                  "ground": it["ground"], "flagged": bool(it.get("flagged"))} for it in self.items]
+
+
+class DriftWatch:
+    """11-25 지역 costmap 옛 표시 지우기.
+    지역 costmap 은 odom 좌표로 칸을 저장. SLAM 이 map↔odom 을 고치면, 우리 층 (semantic·whisker, clearing: false) 에
+    예전에 찍힌 칸이 옛 자리에 남음 → run_1125d 침대 사각형 두 겹 (map 기준 꼭짓점은 6 cm 안에서 그대로였음).
+    어긋남 = 로봇 자리의 점이 map 에서 움직인 거리 + 창 반경 × 회전 (창 끝 칸이 가장 많이 밀림).
+    한 칸 (5 cm) 넘게 밀리면 지역 costmap 만 지움 → 우리 점 구름·위스커는 1 초마다 다시 보내므로 바른 자리에 다시 찍힘."""
+
+    def __init__(self, dist=0.05, window=1.5, gap=5.0):
+        self.dist, self.window, self.gap = dist, window, gap
+        self.ref, self.last = None, -1e9
+
+    def drift(self, To, p):
+        """To, ref = odom 의 map 자세 (x, y, yaw). p = 로봇의 odom 좌표."""
+        def put(T):
+            c, s = math.cos(T[2]), math.sin(T[2])
+            return T[0] + p[0] * c - p[1] * s, T[1] + p[0] * s + p[1] * c
+        (ax, ay), (bx, by) = put(self.ref), put(To)
+        da = abs(math.atan2(math.sin(To[2] - self.ref[2]), math.cos(To[2] - self.ref[2])))
+        return math.hypot(bx - ax, by - ay) + self.window * da
+
+    def update(self, To, p, now):
+        """지워야 하면 어긋남 [m], 아니면 None."""
+        if To is None or p is None:
+            return None
+        if self.ref is None:
+            self.ref = To
+            return None
+        d = self.drift(To, p)
+        if d < self.dist or now - self.last < self.gap:
+            return None
+        self.ref, self.last = To, now
+        return d

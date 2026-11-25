@@ -134,4 +134,27 @@ for rx, ry, px, py in seen(0.05, [0.0, 0.2, 0.35, 0.5]):
     ev2 += Q2.observe_frame(rx, ry, [(px, py), (px + 0.15, 0.05)], remove=True)
 check("22 떠 있는 것 (장면 단위, 조각 섞임) → 떠 있음", [e[0] for e in ev2] == ["floating"] and not Q2.items, [e[0] for e in ev2])
 
+# 23~29. 11-25 DriftWatch: SLAM 이 map↔odom 을 고치면 지역 costmap (odom 좌표) 의 옛 표시가 밀림 (run_1125d 침대 두 겹)
+import math  # noqa: E402
+D = hz.DriftWatch(dist=0.05, window=1.5, gap=5.0)
+check("23 처음 한 번은 기준만 잡음", D.update((0.0, 0.0, 0.0), (1.0, 0.0), 0.0) is None)
+check("24 잔떨림 (2 cm, 0.5°) → 안 지움", D.update((0.02, 0.0, math.radians(0.5)), (1.0, 0.0), 10.0) is None,
+      round(D.drift((0.02, 0.0, math.radians(0.5)), (1.0, 0.0)), 3))
+d = D.update((0.06, 0.0, 0.0), (1.0, 0.0), 20.0)
+check("25 6 cm 보정 → 지움", d is not None and abs(d - 0.06) < 1e-6, d)
+check("26 바로 또 보정 (5 초 안) → 기다림", D.update((0.0, 0.0, 0.0), (1.0, 0.0), 22.0) is None)
+d = D.update((0.0, 0.0, 0.0), (1.0, 0.0), 26.0)
+check("27 5 초 지나면 → 지움 (기준은 지운 때 자세)", d is not None and abs(d - 0.06) < 1e-6, d)
+E = hz.DriftWatch()
+E.update((0.0, 0.0, 0.0), (0.0, 0.0), 0.0)
+out = [E.update((0.02 * k, 0.0, 0.0), (0.0, 0.0), 10.0 * k) for k in (1, 2, 3)]
+check("28 조금씩 쌓인 어긋남 (2 cm × 3) → 세 번째에 지움", out[0] is None and out[1] is None and out[2] is not None, out)
+F1, F2 = hz.DriftWatch(), hz.DriftWatch()
+F1.update((0.0, 0.0, 0.0), (0.0, 0.0), 0.0)
+F2.update((0.0, 0.0, 0.0), (3.0, 0.0), 0.0)
+r1 = F1.update((0.0, 0.0, math.radians(1.0)), (0.0, 0.0), 10.0)
+r2 = F2.update((0.0, 0.0, math.radians(1.0)), (3.0, 0.0), 10.0)
+check("29 같은 1° 회전: 로봇이 odom 원점 → 안 지움, 3 m 떨어짐 → 지움 (멀수록 많이 밀림)", r1 is None and r2 is not None,
+      f"{F1.drift((0, 0, math.radians(1.0)), (0, 0)):.3f} / {r2}")
+
 print(f"\n{sum(results)}/{len(results)} 통과")
