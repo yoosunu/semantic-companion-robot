@@ -168,7 +168,7 @@ class FacePerception(Node):
         dets = []
         for _, conf, x, y, bw, bh in found:
             ex, ey = face_angles(x + bw / 2, y + bh / 2, w, h)
-            dets.append({"pan": hp + ex, "tilt": ht + ey, "w": bw * HFOV / w, "h": bh * VFOV / h})
+            dets.append({"pan": float(hp + ex), "tilt": float(ht + ey), "w": float(bw * HFOV / w), "h": float(bh * VFOV / h)})
         self.binder.step_bodies(dets, shot)
         faces = [(tr.id, tr.pan, tr.tilt) for tr in self.tracker.tracks.values() if tr.seen == shot]
         self.binder.bind(faces, shot)

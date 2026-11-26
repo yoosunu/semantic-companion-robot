@@ -75,4 +75,17 @@ S.step_bodies([body(0.0, w=40.0, h=90.0), body(3.0, tilt=15.0, w=12.0, h=40.0)],
 S.bind([(5, 3.0, 30.0)], 0.0)
 check("11 겹친 상자 → 얼굴이 들어가는 가장 작은 상자", S.face_body.get(5) == 2, S.face_body)
 
+# 12. 11-26 실물에서 노드가 죽음: YOLO 좌표가 numpy float32 → body_list 를 json 으로 못 씀
+import json  # noqa: E402
+import numpy as np  # noqa: E402
+T = pb.PeopleBinder(fo.OwnerVote)
+T.step_bodies([{k: np.float32(v) for k, v in body(0.0).items()}], np.float32(1.0))
+T.bind([(np.int64(3), np.float32(0.0), np.float32(30.0))], np.float32(1.0))
+try:
+    json.dumps(T.body_list(np.float32(1.5)))
+    ok = True
+except TypeError as e:
+    ok = str(e)
+check("12 numpy 값 (float32·int64) 이 섞여도 몸 목록을 JSON 으로 씀", ok is True, ok)
+
 print(f"\n{sum(results)}/{len(results)} 통과")

@@ -109,5 +109,6 @@ class PeopleBinder:
         return v.state if v else ""
 
     def body_list(self, t):
-        return [{"id": b.id, "name": b.name, "pan": round(b.pan, 1), "tilt": round(b.tilt, 1), "w": round(b.w, 1),
-                 "h": round(b.h, 1), "face": b.face, "unseen": round(t - b.seen, 2)} for b in self.bodies.values()]
+        return [{"id": b.id, "name": b.name, "pan": round(float(b.pan), 1), "tilt": round(float(b.tilt), 1), "w": round(float(b.w), 1),
+                 "h": round(float(b.h), 1), "face": None if b.face is None else int(b.face), "unseen": round(float(t - b.seen), 2)}
+                for b in self.bodies.values()]   # 11-26 실물: YOLO 좌표가 numpy float32 → json 이 못 써서 노드가 죽음 → float 로
