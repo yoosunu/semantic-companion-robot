@@ -5,6 +5,7 @@
         pantilt/cmd          고개 명령 [팬, 틸트, …] — 영상 찍힐 때 고개가 어디였는지 기록용 (look 이 보냄)
         neri/profile         executive 설정표 — face_hz 칸 (0 = 영상 처리 멈춤: 잠. 보안·절약) (11-14 사령관 v1)
   출력  people               scr_interfaces/People: 확인된 트랙 전부 (얼굴 큰 순)
+        people/bodies        String JSON [{id, name, pan, tilt, w, h, face, unseen}] — 몸 (11-26, 나중에 따라오기)
 
   한 장 처리 순서
     1. 찍힌 시각 = 받은 시각 − latency. 그때 고개 각도를 명령 기록에서 찾음
@@ -16,6 +17,9 @@
        → 트랙마다 face_owner.OwnerVote → Person.name = "jasper" / "stranger" / "" (모름), name_conf = 이번 유사도, votes
        규칙 (11-26 실측 face_eval replay): 0.40 이상 3 장 중 2 장 = jasper (공개 사진 215 명 중 착각 0, 나는 2~3 장),
        잘 보인 장 (≥10 px, 검출 ≥0.80) 5 장 전부 <0.30 = stranger. 우선 순서: 모름 → 큰 얼굴
+    6. (11-26 Jasper: 얼굴과 몸은 하나) person_hz (2 Hz) 로 YOLO26n person → 몸 추적 (person_bind) → 얼굴이 몸 윗부분 안이면 묶음.
+       이름의 주인은 몸: 뒤돌아 얼굴이 사라져도 유지, 다시 보인 얼굴 (새 추적) 은 바로 물려받음. 몸 목록 → people/bodies (JSON)
+       YOLO 모델이 없으면 몸 없이 얼굴 추적이 이름을 가짐 (5 까지만)
   로그  1 s 마다 PEOPLE [...]
 """
 import collections
@@ -37,6 +41,8 @@ from std_msgs.msg import Float32MultiArray, String
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_track import Tracker, face_angles, yaw_pitch  # noqa: E402
 import face_owner  # noqa: E402
+import person_bind  # noqa: E402
+from face_track import HFOV, VFOV  # noqa: E402
 
 cv2.setNumThreads(2)   # 11-13 cpu_bench: 기본(4코어 전부)이면 YuNet 640 하나가 코어 1.4개 → 다른 노드와 뺏음
 
@@ -64,8 +70,17 @@ class FacePerception(Node):
             g = np.load(gpath).astype(np.float32)
             self.gal = g / np.linalg.norm(g, axis=1, keepdims=True)
             self.rec = cv2.FaceRecognizerSF.create(os.path.expanduser(p("rec_model", "~/models/face_sface.onnx").value), "")
-        self.votes = {}                                     # 트랙 id → OwnerVote
+        self.binder = person_bind.PeopleBinder(lambda: face_owner.OwnerVote(**self.vote_kw))   # 얼굴·몸 묶기 + 이름 (투표) 주인
         self.rec_ms, self.n_rec = 0.0, 0
+        # 11-26 몸 (YOLO26n person)
+        self.person_hz = p("person_hz", 2.0).value
+        self.person_conf = p("person_conf", 0.4).value
+        self.yolo, self.last_person, self.yolo_ms, self.n_yolo = None, 0.0, 0.0, 0
+        ypath = os.path.expanduser(p("person_model", "~/models/yolo26n.onnx").value)
+        if self.person_hz > 0 and os.path.exists(ypath):
+            from yolo_onnx import Yolo
+            self.yolo = Yolo(ypath, size=320, conf=self.person_conf)
+        self.pub_bodies = self.create_publisher(String, "people/bodies", 10)
         self.head = collections.deque(maxlen=100)          # (받은 시각, 팬, 틸트)
         self.moved_t = 0.0                                 # 마지막으로 고개 명령이 바뀐 시각
         self.log_t, self.n_frames, self.n_skip, self.det_ms = 0.0, 0, 0, 0.0
@@ -76,7 +91,8 @@ class FacePerception(Node):
         self.pub = self.create_publisher(People, "people", 10)
         self.get_logger().info(f"PEOPLE 준비: YuNet 검출 폭 {self.det_w}, 추적, 인식 "
                                + (f"{self.owner} 등록 {len(self.gal)} 장, 문턱 {self.vote_kw['thr']} 2/3, 아님 <{self.vote_kw['not_thr']}×5, 장마다 최대 {self.rec_max} 명"
-                                  if self.gal is not None else f"끔 (등록 {gpath} 없음)"))
+                                  if self.gal is not None else f"끔 (등록 {gpath} 없음)")
+                               + (f" | 몸: YOLO26n person {self.person_hz:.0f} Hz ≥{self.person_conf}" if self.yolo else f" | 몸: 끔 ({ypath} 없음 또는 person_hz 0)"))
 
     def on_profile(self, m):
         try:
@@ -135,18 +151,35 @@ class FacePerception(Node):
             dets.append({"pan": hp + ex, "tilt": ht + ey, "px": float(fw) * 320.0 / w, "det": float(r[14]),
                          "yaw": yaw, "pitch": pitch, "box": r[:4].tolist(), "lm": r[4:14].tolist()})
         self.tracker.step(dets, shot)
+        self.binder.drop_faces({tr.id for tr in self.tracker.tracks.values()})
+        if self.yolo is not None and now - self.last_person >= 1.0 / self.person_hz:
+            self.last_person = now
+            self.bodies(bgr, shot, hp, ht)
         self.recognize(bgr, shot)
         self.publish(shot)
 
+    def bodies(self, bgr, shot, hp, ht):
+        """11-26 YOLO26n person → 몸 (각도) → 몸 추적 → 이번 장에 보인 얼굴을 몸 윗부분에 묶음"""
+        h, w = bgr.shape[:2]
+        t0 = time.time()
+        found = [d for d in self.yolo.detect(bgr) if d[0] == "person"]
+        self.yolo_ms += (time.time() - t0) * 1000
+        self.n_yolo += 1
+        dets = []
+        for _, conf, x, y, bw, bh in found:
+            ex, ey = face_angles(x + bw / 2, y + bh / 2, w, h)
+            dets.append({"pan": hp + ex, "tilt": ht + ey, "w": bw * HFOV / w, "h": bh * VFOV / h})
+        self.binder.step_bodies(dets, shot)
+        faces = [(tr.id, tr.pan, tr.tilt) for tr in self.tracker.tracks.values() if tr.seen == shot]
+        self.binder.bind(faces, shot)
+        self.pub_bodies.publish(String(data=json.dumps(self.binder.body_list(shot), ensure_ascii=False)))
+
     def recognize(self, bgr, shot):
         """11-26 이번 장에 잡힌 확인된 트랙 → SFace → OwnerVote (모름 먼저, 큰 얼굴 먼저, rec_max 명까지)"""
-        live = {tr.id for tr in self.tracker.tracks.values()}
-        for tid in [t for t in self.votes if t not in live]:
-            del self.votes[tid]                             # 끝난 트랙
         if self.rec is None:
             return
         now = [tr for tr in self.tracker.confirmed() if tr.seen == shot and tr.box is not None and tr.px >= self.rec_min_px]
-        now.sort(key=lambda tr: (self.votes.get(tr.id) is not None and self.votes[tr.id].state != "", -tr.px))
+        now.sort(key=lambda tr: (self.binder.name_of(tr.id) != "", -tr.px))     # 모름 먼저, 큰 얼굴 먼저
         for tr in now[: self.rec_max]:
             row = np.array(list(tr.box) + list(tr.lm) + [tr.det], np.float32)
             t0 = time.time()
@@ -155,20 +188,21 @@ class FacePerception(Node):
             self.n_rec += 1
             f = feat[0] / np.linalg.norm(feat[0])
             cos = float((self.gal @ f).max())
-            v = self.votes.setdefault(tr.id, face_owner.OwnerVote(**self.vote_kw))
+            v = self.binder.vote_of(tr.id)                   # 몸에 묶였으면 몸의 투표, 아니면 얼굴 자기 것
             st, changed = v.update(cos, tr.px, tr.det)
             tr.cos = cos
             if changed:
-                self.get_logger().info(f"PEOPLE #{tr.id} → {st or '모름'} (유사도 {cos:.2f}, {tr.px:.0f}px, 검출 {tr.det:.2f}, {v.frames} 장째)")
+                bid = self.binder.face_body.get(tr.id)
+                self.get_logger().info(f"PEOPLE #{tr.id}{f' (몸 {bid})' if bid else ''} → {st or '모름'} "
+                                       f"(유사도 {cos:.2f}, {tr.px:.0f}px, 검출 {tr.det:.2f}, {v.frames} 장째)")
 
     def publish(self, shot):
         msg = People()
         msg.header.stamp = Time(seconds=shot).to_msg()
         msg.header.frame_id = "camera"
         for tr in self.tracker.confirmed():
-            v = self.votes.get(tr.id)
             msg.people.append(Person(
-                track_id=tr.id, name=v.state if v else "", name_conf=float(getattr(tr, "cos", 0.0)), votes=v.votes() if v else 0,
+                track_id=tr.id, name=self.binder.name_of(tr.id), name_conf=float(getattr(tr, "cos", 0.0)), votes=0,
                 pan=float(tr.pan), tilt=float(tr.tilt), face_px=float(tr.px), det_score=float(tr.det),
                 yaw=float(tr.yaw), pitch=float(tr.pitch),
                 age_s=float(shot - tr.born), unseen_s=float(max(0.0, shot - tr.seen))))
@@ -177,10 +211,12 @@ class FacePerception(Node):
             self.log_t = time.time()
             ps = [f"#{p.track_id} {p.name or '?'}({p.name_conf:.2f}) 팬{p.pan:.0f} 틸트{p.tilt:.0f} {p.face_px:.0f}px yaw{p.yaw:.0f} pitch{p.pitch:.0f}"
                   f"{' (안보임 %.1fs)' % p.unseen_s if p.unseen_s > 0 else ''}" for p in msg.people]
-            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}]  처리 {self.n_frames}장 (검출 평균 {self.det_ms / max(1, self.n_frames):.0f} ms"
-                                   f", 인식 {self.n_rec}번 평균 {self.rec_ms / max(1, self.n_rec):.0f} ms) / 고개 도는 중 버림 {self.n_skip}장")
-            self.n_frames = self.n_skip = self.n_rec = 0
-            self.det_ms = self.rec_ms = 0.0
+            bs = [f"몸{b['id']} {b['name'] or '?'}{' 얼굴#%d' % b['face'] if b['face'] else ' 얼굴없음'}{' (안보임 %.1fs)' % b['unseen'] if b['unseen'] > 0.6 else ''}"
+                  for b in self.binder.body_list(shot)]
+            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}] 몸 [{', '.join(bs)}]  처리 {self.n_frames}장 (검출 평균 {self.det_ms / max(1, self.n_frames):.0f} ms"
+                                   f", 인식 {self.n_rec}번 {self.rec_ms / max(1, self.n_rec):.0f} ms, YOLO {self.n_yolo}번 {self.yolo_ms / max(1, self.n_yolo):.0f} ms) / 고개 도는 중 버림 {self.n_skip}장")
+            self.n_frames = self.n_skip = self.n_rec = self.n_yolo = 0
+            self.det_ms = self.rec_ms = self.yolo_ms = 0.0
 
 
 def main():
