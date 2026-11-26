@@ -130,9 +130,9 @@ c11 = [fv({"chair": [0.81]}, 1, True, None)[:2], fv({"chair": [0.81, 0.77]}, 2, 
        fv({"doormat": [0.8, 0.7]}, 2, False, None)[:2], fv({"doormat": [0.8, 0.7]}, 2, True, {"ground": None})[:2],
        fv({"doormat": [0.8, 0.7]}, 3, True, {"ground": True})[:2], fv({"rug": [0.7, 0.6], "doormat": [0.8, 0.75]}, 3, True, None)[:2],
        fv({"shelf": [0.23]}, 3, False, None)[:2], fv({"shelf": [0.51, 0.48], "laundry basket": [0.50]}, 3, False, None)[:2]]
-check("11 따라보기: 의자 1번 = 더 봄 / 2번 = 끝 / 빈 바닥 = 끝 / 애매 2번 = 더 봄 / 발닦개 잘림 = 더 봄 / 통째면 끝 (바닥 확인 안 기다림) "
+check("11 따라보기: 의자 0.81 한 번 = 끝 (11-27 강한 한 장) / 2번 = 끝 / 빈 바닥 = 끝 / 애매 2번 = 더 봄 / 발닦개 잘림 = 더 봄 / 통째면 끝 (바닥 확인 안 기다림) "
       "/ 3번 봐도 0.5 없음 = ? 끝 / 이름 갈려도 0.5 두 번 = 끝",
-      c11 == [(False, "?"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (True, "doormat"),
+      c11 == [(True, "chair"), (True, "chair"), (True, "-"), (False, "?"), (False, "doormat"), (True, "doormat"),
               (True, "doormat"), (True, "doormat"), (True, "?"), (True, "shelf")], c11)
 
 on4 = lambda n: 0.4 if n in ("trash can", "doormat") else 0.5
@@ -140,6 +140,13 @@ c12 = [fv({"trash can": [0.445, 0.451, 0.491]}, 3, True, None, on_for=on4)[:2], 
        fv({"chair": [0.45, 0.48, 0.44]}, 3, True, None, on_for=on4)[:2]]
 check("12 YOLOE 단어 문턱 0.4: 휴지통 0.45·0.45·0.49 → 확신 (0.5 면 ?) / COCO 의자 0.45 → ? (0.5 그대로)",
       c12 == [(True, "trash can"), (True, "?"), (True, "?")], c12)
+
+# 13. 11-27 강한 한 장 (0.7) — 따라보기 줄이기
+c13 = [fv({"chair": [0.69]}, 1, True, None)[:2], fv({"chair": [0.83]}, 1, True, None)[:2],
+       fv({"doormat": [0.85]}, 1, False, None)[:2], fv({"doormat": [0.85]}, 1, True, None)[:2],
+       fv({"chair": [0.83]}, 1, True, None, strong=1.1)[:2]]
+check("13 강한 한 장: 의자 0.69 = 더 봄 / 0.83 = 끝 / 발닦개 0.85 잘림 = 더 봄 (통째 필요) / 통째 = 끝 / strong 끄면 예전처럼 더 봄",
+      c13 == [(False, "?"), (True, "chair"), (False, "doormat"), (True, "doormat"), (False, "?")], c13)
 
 print(f"\n{sum(results)}/{len(results)} 통과")
 sys.exit(0 if all(results) else 1)

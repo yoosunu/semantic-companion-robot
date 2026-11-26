@@ -45,28 +45,32 @@ def pick_sharp(shs, n=2, ratio=0.6, extra=3):
 FLOOR_TYPES = ("doormat", "rug", "sock", "towel", "clothes", "plastic bag", "shoe", "slipper")   # = nodes/navigation/hazards.py
 
 
-def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_TYPES, on_for=None):
+def focus_verdict(votes, views, full, hazard, on=0.5, need=2, floor_types=FLOOR_TYPES, on_for=None, strong=0.7):
     """따라보기 (11-20 Jasper: 확신 못 한 건 고개로 따라가며 하나만 계속 봄, 확신되면 다음) — 끝낼지 판단.
        votes: {이름: [점수, ...]} 이번 물건을 본 횟수만큼 (십자 물건), views: 본 횟수, full: 통째로 본 적 있음,
        hazard: floor_hazard 표시 상태 ({"ground": True/None, "flagged": bool}) 또는 None (표시 없음)
        on_for(이름) → 그 이름의 문턱 (11-20 Jasper: YOLOE 는 원래 낮게 나옴 — 휴지통 0.45·0.45·0.49 세 번 → YOLOE 단어 0.4, COCO 0.5)
+       strong: 이 점수 이상 한 장이면 두 번 기다리지 않음 (11-27 Jasper: 따라보기가 길어 그 사이 의자를 못 보고 가까워짐.
+               한 번 보기 = 고개·사진·YOLO26·YOLOE 2.5~5 s 인데 의자 0.83·침대 0.83 도 한 번 더 봤음). 바닥형은 여전히 통째 필요
        → (끝?, 결과 이름 또는 "?", 이유)"""
     good = {n: [c for c in v if c >= (on_for(n) if on_for else on)] for n, v in votes.items()}
     good = {n: v for n, v in good.items() if v}
-    if sum(len(v) for v in good.values()) < need:                   # 11-20: 이름이 갈려도 (선반·수납함·빨래통) 0.5 넘은 게 두 번이면 확신
+    sure = {n: v for n, v in good.items() if max(v) >= strong}
+    if sum(len(v) for v in good.values()) < need and not sure:      # 11-20: 이름이 갈려도 (선반·수납함·빨래통) 0.5 넘은 게 두 번이면 확신
         if views >= need and not votes:
             return True, "-", "빈 바닥 (두 번 봐도 아무것도 없음)"
         if views >= 3 and not good:
             return True, "?", f"{views} 번 봐도 문턱 넘는 이름 없음"  # 11-20: shelf 0.23 하나로 17 s 를 다 씀
         return False, "?", "이름 아직"
     name = max(good, key=lambda n: sum(good[n]) / len(good[n]))
+    once = " (한 장 ≥%.1f)" % strong if sum(len(v) for v in good.values()) < need else ""
     split = f" (이름 갈림: {', '.join(sorted(good))})" if len(good) > 1 else ""
     if name in floor_types and not full:
         return False, name, "통째로 아직 못 봄"
     # 11-20: 바닥 확인 (2 단계) 은 관찰 모드로 접음 → 끝 조건에서 뺌 (가만히 있으면 원래 안 나와 17 s 기다림). 결과만 덧붙임
     extra = "" if name not in floor_types or hazard is None else (
         ", 떠 있음? (관찰)" if hazard.get("flagged") else ", 바닥 확인" if hazard.get("ground") else "")
-    return True, name, "이름 확신" + split + extra
+    return True, name, "이름 확신" + once + split + extra
 
 
 def head_for(x, y, tilt_min=-30.0, tilt_max=30.0):

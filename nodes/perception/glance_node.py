@@ -76,7 +76,8 @@ class GlanceNode(Node):
         self.settle_base, self.settle_deg = p("settle_base", 0.35).value, p("settle_per_deg", 0.005).value
         self.n_frames, self.sharp_ratio = p("frames", 2).value, p("sharp_ratio", 0.6).value
         self.extra, self.max_fail = p("frames_extra", 3).value, p("max_fail", 2).value
-        self.focus_max, self.focus_min_d = p("focus_max", 15.0).value, p("focus_min_d", 0.45).value   # 따라보기 (11-20)
+        self.focus_max, self.focus_min_d = p("focus_max", 8.0).value, p("focus_min_d", 0.45).value   # 따라보기 (11-20). 11-27 15 → 8 s (Jasper: 길어서 그 사이 의자를 놓침)
+        self.focus_strong = p("focus_strong", 0.7).value   # 11-27 이 점수 이상 한 장이면 바로 확신 (바닥형은 통째일 때만)
         self.track_deg = p("track_deg", 1.5).value          # 따라가기: 물건 각도가 이만큼 바뀌면 고개를 따라 돌림 (초당 5 번 계산)
         self.create_timer(0.2, self.track)
         self.hazards = []
@@ -554,7 +555,7 @@ class GlanceNode(Node):
 
     def focus_next(self, j, best, wx, wy, ext=()):
         """따라보기 (11-20 Jasper): 확신 못 한 건 고개로 그 물건만 따라가며 다시 봄 → 확신되면 끝 (glanced) → 다음 후보.
-           확신 = glance.focus_verdict (이름 0.5 이상 두 번, 바닥형이면 통째 + 바닥 확인). 끝: 확신 / 빈 바닥 / focus_max 초과 /
+           확신 = glance.focus_verdict (이름 0.5 이상 두 번 또는 0.7 이상 한 번 (11-27), 바닥형이면 통째 + 바닥 확인). 끝: 확신 / 빈 바닥 / focus_max 초과 /
            너무 가깝거나 멀어 못 봄 (고개 −30 이 바닥 ~0.45 m 까지)"""
         now = time.time()
         j["views"] = j.get("views", 0) + 1
@@ -581,7 +582,8 @@ class GlanceNode(Node):
                 self.get_logger().info(f"FOCUS #{j['id']} 십자 옆 {e['name']} {e['conf']:.2f} 로 겨냥 옮김 "
                                        f"({math.hypot(e['wx'] - cw, e['wy'] - ch) * 100:.0f} cm)")
         on_for = lambda n: self.yoloe_on_focus if n in self.yoloe_words else self.extra_on
-        done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on, on_for=on_for)
+        done, res, why = gl.focus_verdict(votes, j["views"], j.get("full", False), self.hazard_near(wx, wy), on=self.extra_on, on_for=on_for,
+                                          strong=self.focus_strong)
         took = now - j["t"]["req"]
         x, y = gl.to_robot(self.pose, j["cand"]["wx"], j["cand"]["wy"])
         d = math.hypot(x, y)
