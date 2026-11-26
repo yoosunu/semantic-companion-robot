@@ -205,6 +205,18 @@ o9, n9 = W8.adopt("chair", (1.0, 0.0), key="F1")       # 맡기는 쪽은 아직
 check("16 같은 key 로 옛 자리를 다시 맡겨도 → 새 객체 안 만들고 LiDAR 가 따라간 자리 그대로 (유령 #2 방지)",
       not n9 and o9 is o8 and len(W8.objs) == 1 and abs(o8.p[1] - 0.6) < 0.03, (len(W8.objs), o8.p.round(2).tolist()))
 
+# 17. 11-27 탐색 주행: odom 회전 드리프트 (150 s 에 24°) 로 가만있는 침대가 '옮겨짐 0.10~0.16 m' 반복
+#     → 속도 조건 (최근 2 s 안에 10 cm). 장마다 무작위 흔들림 (13) 이 아니라 한쪽으로 쌓이는 드리프트
+Wd = wo.WorldObjects()
+bd, _ = Wd.adopt("bed", [(x, y) for x, y, _ in BED], t=0.0)
+ev = []
+for k in range(1500):                                     # 150 s 동안 odom 이 0.16°/s 로 돌아감 (총 24°) — 세상은 그대로
+    a = math.radians(0.16 * k * 0.1)
+    P = scan(BED, walls=BOX + DRAWER, sensor=(0.2, 0.0)) if k % 10 == 0 or k == 0 else P
+    ev += Wd.step(P @ wo.rot(a).T, wo.rot(a) @ np.array([0.2, 0.0]), k * 0.1)
+check("17 odom 이 150 s 에 24° 돌아가는 드리프트 → 가만있는 침대에 moving·moved·missing 없음",
+      not [e for e in ev if e[0] in ("moving", "moved", "missing")], [e[0] for e in ev][:6])
+
 
 def real(path):
     """11-27 실물: 로봇 정지, 의자 (기둥) 를 앞 0.97 m 에 → 0~10 s 가만히, 10~20 왼쪽으로 ~55 cm 밀기, 20~28 사람이 앞에 서기,
@@ -237,10 +249,37 @@ def real(path):
           [(t, k, i.get("to")) for t, k, i in log if k == "moved"])
 
 
+def real_drive(path):
+    """11-27 탐색 뒤 주행 녹화 (150 s, Nav2 목표 + 제자리 90° 회전 여러 번). 침대·의자 아무도 안 건드림 (Jasper 확인).
+       침대 다리 2 개 (map (-0.14, 0.65), (-0.12, -0.31)) 를 odom 으로 맡기고 그대로 흘림 → 사건 0 이어야 함"""
+    L = [json.loads(x) for x in open(path)]
+    ap = lambda T, P: np.column_stack([T[0] + P[:, 0] * math.cos(T[2]) - P[:, 1] * math.sin(T[2]),
+                                       T[1] + P[:, 0] * math.sin(T[2]) + P[:, 1] * math.cos(T[2])])
+    W, bed, ev, yaws = wo.WorldObjects(), None, [], []
+    for s in L:
+        if not s["odom_at"] or not s["map_odom"]:
+            continue
+        yaws.append(math.degrees(s["map_odom"][2]))
+        r = np.array(s["r"])
+        a = s["amin"] + np.arange(len(r)) * s["ainc"]
+        ok = np.isfinite(r) & (r > 0.15) & (r < 12)
+        Po = ap(s["odom_at"], np.column_stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])]))
+        if bed is None:
+            x, y, th = s["map_odom"]
+            c, si = math.cos(th), math.sin(th)
+            inv = (-(x * c + y * si), -(-x * si + y * c), -th)
+            bed, _ = W.adopt("bed", ap(inv, np.array([[-0.14, 0.65], [-0.12, -0.31]])), t=s["t"])
+            continue
+        ev += [(round(s["t"], 1), e[0]) for e in W.step(Po, np.array(s["odom_at"][:2]), s["t"])]
+    print(f"--- 실물 drive: map↔odom 방향 {min(yaws):.1f}° ~ {max(yaws):.1f}° (드리프트), 사건 {ev}")
+    check("R6 주행 150 s (드리프트 24°), 가만있는 침대 → moving·moved·missing 없음", not [e for e in ev if e[1] in ("moving", "moved", "missing")], ev[:6])
+
+
 if "--real" in sys.argv:
-    p = os.path.join(ROOT, "logs", "scan", "chair_push.jsonl")
-    if os.path.exists(p):
-        real(p)
-    else:
-        print("실물 기록 없음:", p)
+    for name, fn in (("chair_push.jsonl", real), ("drive.jsonl", real_drive)):
+        p = os.path.join(ROOT, "logs", "scan", name)
+        if os.path.exists(p):
+            fn(p)
+        else:
+            print("실물 기록 없음:", p)
 print(f"\n{sum(results)}/{len(results)} 통과")

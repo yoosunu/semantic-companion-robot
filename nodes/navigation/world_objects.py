@@ -22,6 +22,11 @@
   11-27 실물 (world_model 첫 주행): 천천히 민 0.34·0.27 m 는 따라감, 빠르게 굴리자 '움직이기 시작' 직후 놓침 (녹화 땐 5 cm/장이었는데 더 빨랐음)
     → 움직이는 중엔 최근 속도로 다음 자리를 예측하고 문턱을 gate_moving (25 cm) 로 (사람 추적과 같은 방식)
     → 맡기기는 key (floor_hazard 가구 하나) 로: 아는 key 면 새로 안 만듦 (놓친 뒤 옛 자리로 다시 맡겨 유령 #2 가 생겼음)
+  11-27 실물 (탐색 주행 + 주행 녹화 drive.jsonl 150 s): 가만있는 침대·의자에 '옮겨짐 0.10~0.16 m, 회전 ±5~10°' 가 30~40 s 마다.
+    원인 = odom 회전 드리프트: 150 s 회전 섞인 주행에 map↔odom 방향이 1.3° → 24.9° (스키드 스티어 바퀴 미끄러짐).
+      침대 다리는 odom 에서 최대 1 m, map 에서도 ±13 cm 흔들림 (SLAM 보정이 띄엄띄엄).
+    → 움직임은 '쉬던 자리와 비교' 가 아니라 '최근 win_s (2 s) 안에 move_m 넘게' (속도 조건). 드리프트는 느리게 쌓이고 진짜 밀기는 몇 초 안.
+      쉬던 자리는 멈춰 있는 동안 계속 따라감 (드리프트를 흡수). moved 거리 = 움직이기 시작한 자리 → 멈춘 자리.
 """
 import math
 
@@ -70,6 +75,7 @@ class Obj:
         self.still_from, self.still_p, self.still_th = None, self.p.copy(), 0.0
         self.history = []                                # [(t, from, to)]
         self.v = np.zeros(2)                             # 움직이는 중 속도 (m/s, odom) — 다음 자리 예측용
+        self.trail = [(t, self.p.copy(), 0.0)]           # 최근 win_s 자세 (속도 조건)
         self.last = {"found": len(a), "hidden": 0, "clear": 0}   # 이번 스캔 닻 상태 수 (로그용)
 
     def anchors(self):
@@ -86,9 +92,9 @@ class Obj:
 
 class WorldObjects:
     def __init__(self, gate=0.10, small=0.08, hold_s=1.0, move_m=0.10, move_deg=10.0, settle_s=1.0, margin=0.08,
-                 ray_deg=2.0, fit_err=0.04, gate_moving=0.25):
+                 ray_deg=2.0, fit_err=0.04, gate_moving=0.25, win_s=2.0):
         self.gate, self.small, self.hold_s, self.move_m, self.settle_s = gate, small, hold_s, move_m, settle_s
-        self.gate_moving, self.keys = gate_moving, {}
+        self.gate_moving, self.keys, self.win_s = gate_moving, {}, win_s
         self.move_th, self.margin, self.ray, self.fit_err = math.radians(move_deg), margin, math.radians(ray_deg), fit_err
         self.objs, self.next_id = {}, 1
 
@@ -192,11 +198,17 @@ class WorldObjects:
             ev.append(("found", o, {"after": round(t - (o.lost_t or t), 2)}))
             o.state = PRESENT
         o.seen_t, o.lost_t, o.clear_t = t, None, None
-        far = float(np.hypot(*(o.p - o.rest_p)))
-        turn = abs(wrap(o.th - o.rest_th))
-        if o.state != MOVING and (far > self.move_m or turn > self.move_th):
-            o.state, o.still_from, o.still_p, o.still_th = MOVING, t, o.p.copy(), o.th
-            ev.append(("moving", o, {"from": o.rest_p.round(3).tolist()}))
+        o.trail = [x for x in o.trail if t - x[0] <= self.win_s] + [(t, o.p.copy(), o.th)]
+        t0, p0, th0 = o.trail[0]
+        far = float(np.hypot(*(o.p - p0)))                   # 최근 win_s 안에 움직인 거리 (드리프트는 여기선 작음)
+        turn = abs(wrap(o.th - th0))
+        if o.state != MOVING:
+            if far > self.move_m or turn > self.move_th:
+                o.rest_p, o.rest_th = p0.copy(), th0          # 움직이기 시작한 자리 = win_s 전
+                o.state, o.still_from, o.still_p, o.still_th = MOVING, t, o.p.copy(), o.th
+                ev.append(("moving", o, {"from": o.rest_p.round(3).tolist()}))
+            else:
+                o.rest_p, o.rest_th = o.p.copy(), o.th        # 멈춰 있는 동안 쉬는 자리는 따라감 (느린 드리프트 흡수)
         return ev + self.settle(o, t)
 
     def settle(self, o, t):
@@ -212,6 +224,7 @@ class WorldObjects:
         turn = math.degrees(wrap(o.th - o.rest_th))
         o.history.append((t, frm.round(3).tolist(), o.p.round(3).tolist(), round(turn, 1)))
         o.rest_p, o.rest_th, o.state, o.v = o.p.copy(), o.th, PRESENT, np.zeros(2)
+        o.trail = [(t, o.p.copy(), o.th)]                       # 멈춘 뒤부터 다시 (움직이던 기록이 창에 남아 바로 또 moving 되지 않게)
         return [("moved", o, {"from": frm.round(3).tolist(), "to": o.p.round(3).tolist(),
                               "dist": round(float(np.hypot(*(o.p - frm))), 3), "turn": round(turn, 1)})]
 
