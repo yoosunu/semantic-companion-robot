@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""face_perception — 보기 담당 노드 (11-12, P1 1단계: 검출 + 추적. 인식은 다음 단계).
+"""face_perception — 보기 담당 노드 (11-12 검출 + 추적, 11-26 인식: 이 사람이 Jasper 인가).
 
   입력  camera/image_raw     영상 (640x480·10fps 권장. 검출은 det_w 폭으로 줄여서)
         pantilt/cmd          고개 명령 [팬, 틸트, …] — 영상 찍힐 때 고개가 어디였는지 기록용 (look 이 보냄)
@@ -12,6 +12,10 @@
     2. YuNet → 얼굴마다 상자·점 5개·점수
     3. 얼굴 방향 = 고개 + 화면 각도, 얼굴 돌아간 정도(yaw/pitch) = 점 5개로
     4. face_track.Tracker 로 이어 붙임 → 확인된 트랙을 /people 로
+    5. (11-26) 이번 장에 얼굴이 잡힌 확인된 트랙 중 rec_max 명까지 SFace → 등록 (~/.scr_faces/<owner>.npy) 과 유사도
+       → 트랙마다 face_owner.OwnerVote → Person.name = "jasper" / "stranger" / "" (모름), name_conf = 이번 유사도, votes
+       규칙 (11-26 실측 face_eval replay): 0.40 이상 3 장 중 2 장 = jasper (공개 사진 215 명 중 착각 0, 나는 2~3 장),
+       잘 보인 장 (≥10 px, 검출 ≥0.80) 5 장 전부 <0.30 = stranger. 우선 순서: 모름 → 큰 얼굴
   로그  1 s 마다 PEOPLE [...]
 """
 import collections
@@ -32,6 +36,7 @@ from std_msgs.msg import Float32MultiArray, String
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from face_track import Tracker, face_angles, yaw_pitch  # noqa: E402
+import face_owner  # noqa: E402
 
 cv2.setNumThreads(2)   # 11-13 cpu_bench: 기본(4코어 전부)이면 YuNet 640 하나가 코어 1.4개 → 다른 노드와 뺏음
 
@@ -48,6 +53,19 @@ class FacePerception(Node):
         model = os.path.expanduser(p("face_model", "~/models/face_yunet.onnx").value)
         self.det = cv2.FaceDetectorYN.create(model, "", (self.det_w, self.det_w), 0.6)
         self.tracker = Tracker()
+        # 11-26 인식
+        self.owner = p("owner", "jasper").value
+        self.rec_max = p("rec_max", 2).value                # 한 장에 인식할 최대 얼굴 수 (CPU 예산)
+        self.rec_min_px = p("rec_min_px", 8.0).value         # 이보다 작은 얼굴은 인식 안 함 (320 기준)
+        self.vote_kw = dict(thr=p("rec_thr", 0.40).value, k=2, n=3, not_thr=p("not_thr", 0.30).value, not_k=5)
+        self.rec, self.gal = None, None
+        gpath = os.path.join(os.path.expanduser("~/.scr_faces"), self.owner + ".npy")
+        if os.path.exists(gpath):
+            g = np.load(gpath).astype(np.float32)
+            self.gal = g / np.linalg.norm(g, axis=1, keepdims=True)
+            self.rec = cv2.FaceRecognizerSF.create(os.path.expanduser(p("rec_model", "~/models/face_sface.onnx").value), "")
+        self.votes = {}                                     # 트랙 id → OwnerVote
+        self.rec_ms, self.n_rec = 0.0, 0
         self.head = collections.deque(maxlen=100)          # (받은 시각, 팬, 틸트)
         self.moved_t = 0.0                                 # 마지막으로 고개 명령이 바뀐 시각
         self.log_t, self.n_frames, self.n_skip, self.det_ms = 0.0, 0, 0, 0.0
@@ -56,7 +74,9 @@ class FacePerception(Node):
         self.create_subscription(String, "neri/profile", self.on_profile, 10)
         self.enabled = True
         self.pub = self.create_publisher(People, "people", 10)
-        self.get_logger().info(f"PEOPLE 준비: YuNet 검출 폭 {self.det_w}, 추적 (인식은 아직)")
+        self.get_logger().info(f"PEOPLE 준비: YuNet 검출 폭 {self.det_w}, 추적, 인식 "
+                               + (f"{self.owner} 등록 {len(self.gal)} 장, 문턱 {self.vote_kw['thr']} 2/3, 아님 <{self.vote_kw['not_thr']}×5, 장마다 최대 {self.rec_max} 명"
+                                  if self.gal is not None else f"끔 (등록 {gpath} 없음)"))
 
     def on_profile(self, m):
         try:
@@ -115,26 +135,52 @@ class FacePerception(Node):
             dets.append({"pan": hp + ex, "tilt": ht + ey, "px": float(fw) * 320.0 / w, "det": float(r[14]),
                          "yaw": yaw, "pitch": pitch, "box": r[:4].tolist(), "lm": r[4:14].tolist()})
         self.tracker.step(dets, shot)
+        self.recognize(bgr, shot)
         self.publish(shot)
+
+    def recognize(self, bgr, shot):
+        """11-26 이번 장에 잡힌 확인된 트랙 → SFace → OwnerVote (모름 먼저, 큰 얼굴 먼저, rec_max 명까지)"""
+        live = {tr.id for tr in self.tracker.tracks.values()}
+        for tid in [t for t in self.votes if t not in live]:
+            del self.votes[tid]                             # 끝난 트랙
+        if self.rec is None:
+            return
+        now = [tr for tr in self.tracker.confirmed() if tr.seen == shot and tr.box is not None and tr.px >= self.rec_min_px]
+        now.sort(key=lambda tr: (self.votes.get(tr.id) is not None and self.votes[tr.id].state != "", -tr.px))
+        for tr in now[: self.rec_max]:
+            row = np.array(list(tr.box) + list(tr.lm) + [tr.det], np.float32)
+            t0 = time.time()
+            feat = self.rec.feature(self.rec.alignCrop(bgr, row))
+            self.rec_ms += (time.time() - t0) * 1000
+            self.n_rec += 1
+            f = feat[0] / np.linalg.norm(feat[0])
+            cos = float((self.gal @ f).max())
+            v = self.votes.setdefault(tr.id, face_owner.OwnerVote(**self.vote_kw))
+            st, changed = v.update(cos, tr.px, tr.det)
+            tr.cos = cos
+            if changed:
+                self.get_logger().info(f"PEOPLE #{tr.id} → {st or '모름'} (유사도 {cos:.2f}, {tr.px:.0f}px, 검출 {tr.det:.2f}, {v.frames} 장째)")
 
     def publish(self, shot):
         msg = People()
         msg.header.stamp = Time(seconds=shot).to_msg()
         msg.header.frame_id = "camera"
         for tr in self.tracker.confirmed():
+            v = self.votes.get(tr.id)
             msg.people.append(Person(
-                track_id=tr.id, name="", name_conf=0.0, votes=0,
+                track_id=tr.id, name=v.state if v else "", name_conf=float(getattr(tr, "cos", 0.0)), votes=v.votes() if v else 0,
                 pan=float(tr.pan), tilt=float(tr.tilt), face_px=float(tr.px), det_score=float(tr.det),
                 yaw=float(tr.yaw), pitch=float(tr.pitch),
                 age_s=float(shot - tr.born), unseen_s=float(max(0.0, shot - tr.seen))))
         self.pub.publish(msg)
         if time.time() - self.log_t >= 1.0:
             self.log_t = time.time()
-            ps = [f"#{p.track_id} 팬{p.pan:.0f} 틸트{p.tilt:.0f} {p.face_px:.0f}px yaw{p.yaw:.0f} pitch{p.pitch:.0f}"
+            ps = [f"#{p.track_id} {p.name or '?'}({p.name_conf:.2f}) 팬{p.pan:.0f} 틸트{p.tilt:.0f} {p.face_px:.0f}px yaw{p.yaw:.0f} pitch{p.pitch:.0f}"
                   f"{' (안보임 %.1fs)' % p.unseen_s if p.unseen_s > 0 else ''}" for p in msg.people]
-            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}]  처리 {self.n_frames}장 (검출 평균 {self.det_ms / max(1, self.n_frames):.0f} ms) / 고개 도는 중 버림 {self.n_skip}장")
-            self.n_frames = self.n_skip = 0
-            self.det_ms = 0.0
+            self.get_logger().info(f"PEOPLE {len(ps)}명 [{', '.join(ps)}]  처리 {self.n_frames}장 (검출 평균 {self.det_ms / max(1, self.n_frames):.0f} ms"
+                                   f", 인식 {self.n_rec}번 평균 {self.rec_ms / max(1, self.n_rec):.0f} ms) / 고개 도는 중 버림 {self.n_skip}장")
+            self.n_frames = self.n_skip = self.n_rec = 0
+            self.det_ms = self.rec_ms = 0.0
 
 
 def main():
