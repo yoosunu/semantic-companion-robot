@@ -532,6 +532,13 @@ class Chair:
         return {"corners": poly, "center": np.array(c[:2]), "radius": r, "round": True, "confirmed": False, "method": 1,
                 "lo": 0.0, "hi": 2 * r, "depth": 2 * r, "spacing": 0.0, "why": {"lo": "1차 " + why, "hi": "", "depth": ""}}
 
+    def shift(self, dx, dy):
+        """11-27 world_model 이 '옮겨짐' (LiDAR 가 기둥을 따라감) 을 알려 주면 → 기둥·원 중심을 같이 옮김 (반지름은 그대로)"""
+        for c in self.cols:
+            c[0] += dx
+            c[1] += dy
+        self.legs = [[c[0], c[1], c[2], 0.03] for c in self.cols]
+
     def gone(self, scan, cam, bearing):
         """카메라 방향 범위 안 (2 m 안) 인데 기둥 자리에 LiDAR 덩어리가 없음 = 의자를 옮김"""
         if not self.cols or bearing[0] is None or bearing[1] is None:

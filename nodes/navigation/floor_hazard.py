@@ -80,6 +80,9 @@ class FloorHazard(Node):
         self.pub_cloud = self.create_publisher(PointCloud2, "/semantic/cloud", 1)
         self.pub_state = self.create_publisher(String, "/semantic/hazards", 1)
         self.pub_furn = self.create_publisher(String, "/semantic/furniture", 1)   # 11-25 가구 도형 (map) → 탐색기 "가구 밑" 경계
+        # 11-27 객체 주인은 world_model: 확인된 지지점 (의자 기둥, 침대 LiDAR 다리) 을 맡기고, '옮겨짐' 을 받으면 모양을 옮김
+        self.pub_adopt = self.create_publisher(String, "/semantic/adopt", 10)
+        self.create_subscription(String, "/semantic/object_event", self.on_object_event, 10)
         self.create_timer(1.0 / p("rate_hz", 1.0).value, self.tick)
         # 지우기: 점 구름만 비우면 costmap 층 (clearing: false) 에 칸이 남음 → 비용지도 전체 초기화 (LiDAR·위스커는 다음 주기에 다시 채움)
         self.clear_cli = [self.create_client(ClearEntireCostmap, s) for s in (
@@ -153,6 +156,8 @@ class FloorHazard(Node):
         after = {id(it): (it.shape() or {}).get("corners") for it in self.F.items}
         old = [f"{nm} 사라짐/옮김" for k, (nm, c) in before.items() if k not in after and c is not None]
         old += [f"{nm} 줄어듦/밀림" for k, (nm, c) in before.items() if k in after and fu.stale(c, after[k])]
+        for k in [k for k in before if k not in after]:                 # 11-27 FurnitureMap 이 뺀 가구 → world_model 에서도 뺌
+            self.pub_adopt.publish(String(data=json.dumps({"key": str(k), "drop": True})))
         if old:                                                         # 11-26 Jasper: 의자를 밀었는데 옛 원이 남음 → costmap 다시 그리기
             self.get_logger().info(f"FURN #{jid} 옛 자리 지움: {', '.join(old)} → 비용지도 다시 그리기")
             self.clear_costmaps()
@@ -163,6 +168,8 @@ class FloorHazard(Node):
             self.get_logger().info(f"FURN #{jid} {o['name']} {o['conf']:.2f} 새 의자 안 남김 | 1차 실패: {getattr(F, 'miss', '')}")
             return
         r = F.shape()
+        if r is not None:
+            self.adopt(F, r)                                            # 11-27 → world_model 이 매 스캔 붙잡음
         legs = ", ".join(f"({l[0]:+.2f},{l[1]:+.2f})x{l[2]}" for l in F.legs)
         cutw = "".join(w for w, b in zip(("왼", "오"), o["bearing"]) if b is None)
         word = "새 가구" if how == "new" else ("같은 가구" + (" (낮은 점수라 기존 자리로 받음)" if "낮은" in how else ""))
@@ -183,6 +190,38 @@ class FloorHazard(Node):
             self.get_logger().info(head + f" | 길이 {r['hi'] - r['lo']:.2f} 깊이 {r['depth']:.2f} 간격 {r['spacing']:.2f} | "
                                    f"끝: {r['why']['lo']} / {r['why']['hi']} | 깊이: {r['why']['depth']} | "
                                    f"꼭짓점 {np.round(r['corners'], 2).tolist()}")
+
+    def adopt(self, F, r):
+        """11-27 확인된 지지점을 world_model 에 맡김 (매번 보냄 — 이미 있으면 world_model 이 같은 객체로 받음).
+           의자 = 가장 많이 본 기둥 하나, 다리형 = LiDAR 로 확인한 다리 (격자로 추론한 다리는 닻 아님)"""
+        if r.get("round"):
+            if not getattr(F, "cols", None):
+                return
+            c = max(F.cols, key=lambda k: k[2])
+            anchors = [[c[0], c[1]]]
+        else:
+            anchors = [[l[0], l[1]] for l in F.legs]
+        if not anchors:
+            return
+        self.pub_adopt.publish(String(data=json.dumps({"key": str(id(F)), "name": F.name, "anchors": np.round(anchors, 3).tolist(),
+                                                        "corners": np.round(r["corners"], 3).tolist()})))
+
+    def on_object_event(self, m):
+        """11-27 world_model 사건. moved → 그 가구 모양을 옮기고 costmap 다시 그림 (첫 버전: 의자만 — 다리형은 기록만)"""
+        j = json.loads(m.data)
+        if j.get("type") != "moved" or not j.get("key") or "delta" not in j:
+            return
+        F = next((it for it in self.F.items if str(id(it)) == j["key"]), None)
+        if F is None:
+            self.get_logger().info(f"FURN 옮겨짐 받음 #{j['id']} {j['name']} — floor_hazard 엔 그 가구가 없음 (이미 지움)")
+            return
+        dx, dy = j["delta"]
+        if hasattr(F, "shift"):
+            F.shift(dx, dy)
+            self.get_logger().info(f"FURN {F.name} 옮김 반영: world_model #{j['id']} {j['dist']:.2f} m ({dx:+.2f}, {dy:+.2f}) → 비용지도 다시 그리기")
+            self.clear_costmaps()
+        else:
+            self.get_logger().info(f"FURN {F.name} 옮겨짐 (world_model #{j['id']} {j['dist']:.2f} m, 회전 {j.get('turn', 0):+.0f}°) — 다리형 모양 이동은 아직 (기록만)")
 
     def on_blobs(self, msg):
         """바닥 감지 덩어리 → 표시 근처면 모아서 떠 있나 판정 (2단계)"""

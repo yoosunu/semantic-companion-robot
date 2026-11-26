@@ -351,6 +351,16 @@ check("30 옛 모양 = 새 모양 (+3 cm 흔들림) → 안 지움", not fu.stal
 check("31 의자 20 cm 밀림 → 지움", fu.stale(sq * 0.6, sq * 0.6 + [0.2, 0.0]))
 check("32 가구 사라짐 (새 모양 없음) → 지움 / 커지기만 함 → 안 지움", fu.stale(sq, None) and not fu.stale(sq * 0.5, sq))
 
+# 33. 11-27 world_model 이 '옮겨짐' 을 알려 주면 의자 원이 따라감
+Ms = fu.FurnitureMap()
+Ms.observe("chair", 0.6, CAM, (math.radians(30), math.radians(-20)), chair_foot(np.random.default_rng(9)), fake_scan([COL], wall_at(2.5)), (0, 0))
+ch = Ms.items[0]
+c0 = ch.shape()["center"].copy()
+ch.shift(0.12, 0.55)
+c1 = ch.shape()["center"]
+check("33 Chair.shift(0.12, 0.55) → 원 중심·기둥이 같이 옮겨감, 반지름 그대로", np.allclose(c1 - c0, [0.12, 0.55]) and np.allclose(ch.legs[0][:2], c1),
+      (np.round(c0, 2).tolist(), np.round(c1, 2).tolist()))
+
 
 def real_chair(set_name="chair1"):
     """11-25 chair1 실물 (glance 와 같은 발자국: 3 열마다, 3 m 안) → 기둥 (+1.02, +0.15), 줄자 반지름 0.34"""
