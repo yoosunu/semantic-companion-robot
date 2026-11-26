@@ -81,6 +81,9 @@ class FacePerception(Node):
             from yolo_onnx import Yolo
             self.yolo = Yolo(ypath, size=320, conf=self.person_conf)
         self.pub_bodies = self.create_publisher(String, "people/bodies", 10)
+        # 11-26 눈으로 확인용 그림 (기본 끔): 1 s 마다 몸 상자 (파랑) + 얼굴 상자 (초록 jasper / 빨강 stranger / 회색 모름) + 이름
+        self.debug_img = os.path.expanduser(p("debug_img", "").value)   # 예: ~/face_lab/people.jpg (집 안 사진 → 저장소에 안 올림)
+        self.debug_t, self.last_boxes = 0.0, []
         self.head = collections.deque(maxlen=100)          # (받은 시각, 팬, 틸트)
         self.moved_t = 0.0                                 # 마지막으로 고개 명령이 바뀐 시각
         self.log_t, self.n_frames, self.n_skip, self.det_ms = 0.0, 0, 0, 0.0
@@ -157,6 +160,29 @@ class FacePerception(Node):
             self.bodies(bgr, shot, hp, ht)
         self.recognize(bgr, shot)
         self.publish(shot)
+        if self.debug_img and now - self.debug_t >= 1.0:
+            self.debug_t = now
+            self.draw(bgr, shot)
+
+    def draw(self, bgr, shot):
+        img = bgr.copy()
+        for x, y, bw, bh, bid, conf in self.last_boxes:
+            b = self.binder.bodies.get(bid)
+            cv2.rectangle(img, (x, y), (x + bw, y + bh), (255, 120, 0), 2)
+            cv2.putText(img, f"body{bid} {b.name if b and b.name else '?'} {conf:.2f}", (x + 3, y + bh - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 120, 0), 1)
+        col = {"jasper": (0, 200, 0), "stranger": (0, 0, 230)}
+        for tr in self.tracker.tracks.values():
+            if tr.seen != shot or tr.box is None:
+                continue
+            x, y, fw, fh = [int(v) for v in tr.box]
+            name = self.binder.name_of(tr.id)
+            c = col.get(name, (160, 160, 160))
+            bid = self.binder.face_body.get(tr.id)
+            cv2.rectangle(img, (x, y), (x + fw, y + fh), c, 2)
+            cv2.putText(img, f"#{tr.id} {name or '?'} {getattr(tr, 'cos', 0.0):.2f}{' b%d' % bid if bid else ''}", (x, max(12, y - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, c, 1)
+        cv2.imwrite(self.debug_img, img)
 
     def bodies(self, bgr, shot, hp, ht):
         """11-26 YOLO26n person → 몸 (각도) → 몸 추적 → 이번 장에 보인 얼굴을 몸 윗부분에 묶음"""
@@ -170,6 +196,10 @@ class FacePerception(Node):
             ex, ey = face_angles(x + bw / 2, y + bh / 2, w, h)
             dets.append({"pan": float(hp + ex), "tilt": float(ht + ey), "w": float(bw * HFOV / w), "h": float(bh * VFOV / h)})
         self.binder.step_bodies(dets, shot)
+        self.last_boxes = []
+        for (_, conf, x, y, bw, bh), d in zip(found, dets):          # 그림용: 상자 픽셀 + 어느 몸인지 (update 가 값을 그대로 복사)
+            bid = next((b.id for b in self.binder.bodies.values() if b.seen == shot and b.pan == d["pan"] and b.tilt == d["tilt"]), None)
+            self.last_boxes.append((int(x), int(y), int(bw), int(bh), bid, float(conf)))
         faces = [(tr.id, tr.pan, tr.tilt) for tr in self.tracker.tracks.values() if tr.seen == shot]
         self.binder.bind(faces, shot)
         self.pub_bodies.publish(String(data=json.dumps(self.binder.body_list(shot), ensure_ascii=False)))
