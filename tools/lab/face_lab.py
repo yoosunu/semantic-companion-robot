@@ -15,6 +15,9 @@
     face_lab.py watch --stream --det-w 640 --min-px 0   멀리 실험: 검출도 원본 크기로, 작은 얼굴도 인식해 보기
                                   (검출 결과는 ~/face_lab/log.csv 에 계속 쌓임: 얼굴 크기 vs 유사도 그래프용)
     face_lab.py watch --image 사진.png   카메라 없이 사진 한 장으로 (Mac/VM 시험용)
+    face_lab.py record d1_front [--secs 20] [--det-w 640]   11-26 정확도 측정용: 매 영상 얼굴마다 특징 벡터·크기·검출 점수·유사도를
+                                  ~/face_lab/rec/<이름>.npz 로 (사진은 안 남김, 확인용 잘린 얼굴 모음 한 장만 rec/<이름>.jpg)
+                                  → Mac 에서 tools/lab/face_eval.py 로 거리·각도별 정답률, 투표 규칙 시뮬
 
   개인정보: 얼굴 벡터는 생체정보. 본인 동의로만 등록, repo 밖 ~/.scr_faces/ (권한 600) 에만, forget 으로 지움.
 """
@@ -255,9 +258,47 @@ def watch(lab, image=None, stream=False):
             time.sleep(0.5)                              # 스트림이면 쉬지 않고 (카메라 10 fps 만큼)
 
 
+def record(lab, label, secs=20.0):
+    """11-26 정확도 측정: secs 동안 매 영상 (카메라 10 fps, 처리 시간만큼 건너뜀) 얼굴마다 기록. 한 장면 = 한 상황 (거리·자세)"""
+    d = os.path.join(OUT, "rec")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    rows, feats, crops, end, n_img = [], [], [], time.time() + secs, 0
+    print(f"기록 {label}: {secs:.0f} s (등록: {', '.join(f'{k}({len(v)}장)' for k, v in lab.gallery.items()) or '없음'})")
+    for bgr in frames():
+        now = time.time()
+        if now > end:
+            break
+        n_img += 1
+        fs = lab.faces(bgr)
+        for k, (face, px) in enumerate(fs):
+            crop, feat = lab.embed(bgr, face)                   # 작아도 전부 (크기별 정답률을 보려고 — min_px 안 씀)
+            name, cos = lab.who(feat)
+            rows.append((now, n_img, k, len(fs), px, float(face[14]), cos))
+            feats.append(feat[0])
+            if len(crops) < 24 and (not crops or n_img % 5 == 0):
+                crops.append(crop)
+        if n_img % 10 == 0:
+            last = [r for r in rows if r[1] == n_img]
+            print(f"  {n_img:3d}장 얼굴 {len(last)}" + "".join(f" | {r[4]:.0f}px cos {r[6]:.2f}" for r in last))
+    if not rows:
+        print("얼굴 0 개 → 저장 안 함")
+        return
+    r = np.array(rows, float)
+    path = os.path.join(d, label + ".npz")
+    np.savez(path, t=r[:, 0], img=r[:, 1], k=r[:, 2], nface=r[:, 3], px=r[:, 4], det=r[:, 5], cos=r[:, 6],
+             feat=np.array(feats, np.float32), n_img=n_img, label=label, gallery=json.dumps({k: len(v) for k, v in lab.gallery.items()}))
+    os.chmod(path, 0o600)
+    if crops:
+        rows8 = [np.hstack(crops[i:i + 8] + [np.zeros_like(crops[0])] * (8 - len(crops[i:i + 8]))) for i in range(0, len(crops), 8)]
+        cv2.imwrite(os.path.join(d, label + ".jpg"), np.vstack(rows8))
+    ok = (r[:, 6] >= COS_OK).mean()
+    print(f"저장 {path}: 영상 {n_img} 장, 얼굴 {len(rows)} 개, 크기 {np.median(r[:, 4]):.0f}px (중간값), "
+          f"cos 중간값 {np.median(r[:, 6]):.2f}, ≥{COS_OK} {ok * 100:.0f}%")
+
+
 def main():
     a = sys.argv[1:]
-    if not a or a[0] not in ("enroll", "watch", "forget"):
+    if not a or a[0] not in ("enroll", "watch", "forget", "record"):
         print(__doc__)
         return
     if a[0] == "forget":
@@ -274,6 +315,8 @@ def main():
     print(f"검출 폭 {lab.det_w}, 인식 최소 얼굴 {lab.min_px}px (320 기준)")
     if a[0] == "enroll":
         enroll(lab, a[1])
+    elif a[0] == "record":
+        record(lab, a[1], arg("--secs", 20.0))
     else:
         watch(lab, a[a.index("--image") + 1] if "--image" in a else None, "--stream" in a)
 
