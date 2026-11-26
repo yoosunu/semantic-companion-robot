@@ -58,8 +58,8 @@ class WorldModel(Node):
         super().__init__("world_model")
         p = self.declare_parameter
         self.odom, self.map = p("odom_frame", "odom").value, p("map_frame", "map").value
-        self.W = wo.WorldObjects(gate=p("gate", 0.10).value, hold_s=p("hold_s", 1.0).value, move_m=p("move_m", 0.10).value)
-        self.key2id = {}
+        self.W = wo.WorldObjects(gate=p("gate", 0.10).value, hold_s=p("hold_s", 1.0).value, move_m=p("move_m", 0.10).value,
+                                 gate_moving=p("gate_moving", 0.25).value)   # 11-27 움직이는 중엔 속도 예측 + 25 cm (빠르게 굴리면 놓쳤음)
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.create_subscription(LaserScan, "/scan", self.on_scan, qos_profile_sensor_data)
@@ -91,7 +91,7 @@ class WorldModel(Node):
         j = json.loads(m.data)
         key = str(j.get("key"))
         if j.get("drop"):
-            oid = self.key2id.pop(key, None)
+            oid = self.W.keys.get(key)
             if oid in self.W.objs:
                 self.get_logger().info(f"OBJ #{oid} {self.W.objs[oid].name} 뺌 (floor_hazard 가 가구를 지움)")
                 self.W.drop(oid)
@@ -101,17 +101,14 @@ class WorldModel(Node):
             return
         anchors = apply(T, j["anchors"])
         corners = apply(T, j["corners"]) if j.get("corners") else None
-        o, new = self.W.adopt(j["name"], anchors, corners, time.time())
-        old = self.key2id.get(key)
-        self.key2id[key] = o.id
+        o, new = self.W.adopt(j["name"], anchors, corners, time.time(), key=key)   # 아는 key 면 그대로 (위치는 LiDAR 가 주인)
         if new:
-            self.get_logger().info(f"OBJ #{o.id} {o.name} 맡음: 닻 {len(o.local)} 개 "
-                                   f"{np.round(np.asarray(j['anchors']), 2).tolist()} (map)" + (f" — key {key} 가 #{old} 였음" if old else ""))
+            self.get_logger().info(f"OBJ #{o.id} {o.name} 맡음: 닻 {len(o.local)} 개 {np.round(np.asarray(j['anchors']), 2).tolist()} (map)")
 
     def on_clear(self, _):
         n = len(self.W.objs)
         self.W.objs.clear()
-        self.key2id.clear()
+        self.W.keys.clear()
         self.get_logger().info(f"OBJ 전부 지움: {n} 개")
 
     # ---------- 매 스캔 ----------
@@ -133,7 +130,7 @@ class WorldModel(Node):
             self.event(kind, o, info)
 
     def event(self, kind, o, info):
-        key = next((k for k, v in self.key2id.items() if v == o.id), None)
+        key = self.W.key_of(o.id)
         ev = {"type": kind, "id": o.id, "key": key, "name": o.name}
         T = self.lookup(self.map, self.odom)
         for k in ("from", "to"):
@@ -160,7 +157,7 @@ class WorldModel(Node):
         out = []
         for o in self.W.objs.values():
             c = apply(T, [o.p])[0]
-            out.append({"id": o.id, "key": next((k for k, v in self.key2id.items() if v == o.id), None), "name": o.name, "state": o.state,
+            out.append({"id": o.id, "key": self.W.key_of(o.id), "name": o.name, "state": o.state,
                         "x": round(float(c[0]), 3), "y": round(float(c[1]), 3), "th": round(math.degrees(o.th + T[2]), 1),
                         "anchors": apply(T, o.anchors()).round(3).tolist()})
         self.pub_obj.publish(String(data=json.dumps(out, ensure_ascii=False)))

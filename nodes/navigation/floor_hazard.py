@@ -207,8 +207,19 @@ class FloorHazard(Node):
                                                         "corners": np.round(r["corners"], 3).tolist()})))
 
     def on_object_event(self, m):
-        """11-27 world_model 사건. moved → 그 가구 모양을 옮기고 costmap 다시 그림 (첫 버전: 의자만 — 다리형은 기록만)"""
+        """11-27 world_model 사건. moved → 그 가구 모양을 옮기고 costmap 다시 그림 / missing → 의자 원 지움 (첫 버전: 의자만 — 다리형은 기록만)"""
         j = json.loads(m.data)
+        if j.get("type") == "missing" and j.get("key"):                 # 11-27 LiDAR 가 빈자리를 직접 봄 (1 s) → 의자 원 지움 (다리형은 기록만)
+            F = next((it for it in self.F.items if str(id(it)) == j["key"]), None)
+            if F is not None and hasattr(F, "shift"):
+                self.F.items.remove(F)
+                self.pub_adopt.publish(String(data=json.dumps({"key": j["key"], "drop": True})))
+                self.get_logger().info(f"FURN {F.name} 지움: world_model #{j['id']} 없음 의심 (LiDAR 가 빈자리를 {j.get('since')} s 봄) → 비용지도 다시 그리기")
+                self.publish_cloud()
+                self.clear_costmaps()
+            elif F is not None:
+                self.get_logger().info(f"FURN {F.name} 없음 의심 받음 (world_model #{j['id']}) — 다리형은 기록만")
+            return
         if j.get("type") != "moved" or not j.get("key") or "delta" not in j:
             return
         F = next((it for it in self.F.items if str(id(it)) == j["key"]), None)

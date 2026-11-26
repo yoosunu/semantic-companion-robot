@@ -185,6 +185,26 @@ check("13 odom 흔들림 (±1.5 cm, ±1°) → 거짓 moving 없음", not [e for
 o1, new1 = W6.adopt("chair", [(1.01, 0.21)], t=7.0)
 check("14 이미 있는 의자 다리 근처로 다시 맡기기 → 새로 안 만들고 같은 객체", not new1 and o1 is c6 and len(W6.objs) == 1)
 
+# 15~16. 11-27 실물 첫 주행에서 빠르게 굴리자 놓침 → 속도 예측 + 움직이는 중 문턱 25 cm
+W7 = wo.WorldObjects()
+c7, _ = W7.adopt("chair", (1.0, 0.0), t=0.0)
+ev, t, y = [], 0.0, 0.0
+for k in range(40):                                       # 가만히 → 점점 빨라져 한 장에 15 cm (1.5 m/s) → 멈춤
+    step = [0.0] * 5 + [0.03, 0.06, 0.10, 0.15, 0.15, 0.15, 0.15, 0.12, 0.08, 0.04] + [0.0] * 25
+    y += step[k]
+    ev += W7.step(scan([(1.0, y, 0.02)]), SENSOR, t)
+    t += 0.1
+mv = [e[2] for e in ev if e[0] == "moved"]
+check("15 빠르게 굴리기 (한 장 최대 15 cm, 1.5 m/s) → 놓치지 않고 moved (~1.03 m), 없음 의심 없음",
+      "missing" not in [e[0] for e in ev] and len(mv) == 1 and abs(mv[0]["dist"] - 1.03) < 0.05, ([e[0] for e in ev], mv))
+W8 = wo.WorldObjects()
+o8, n8 = W8.adopt("chair", (1.0, 0.0), key="F1")
+for k in range(1, 21):
+    W8.step(scan([(1.0, 0.03 * k, 0.02)]), SENSOR, k * 0.1)
+o9, n9 = W8.adopt("chair", (1.0, 0.0), key="F1")       # 맡기는 쪽은 아직 옛 자리로 다시 보냄
+check("16 같은 key 로 옛 자리를 다시 맡겨도 → 새 객체 안 만들고 LiDAR 가 따라간 자리 그대로 (유령 #2 방지)",
+      not n9 and o9 is o8 and len(W8.objs) == 1 and abs(o8.p[1] - 0.6) < 0.03, (len(W8.objs), o8.p.round(2).tolist()))
+
 
 def real(path):
     """11-27 실물: 로봇 정지, 의자 (기둥) 를 앞 0.97 m 에 → 0~10 s 가만히, 10~20 왼쪽으로 ~55 cm 밀기, 20~28 사람이 앞에 서기,

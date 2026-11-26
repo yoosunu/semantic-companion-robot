@@ -19,6 +19,9 @@
     4. 못 찾은 닻: 시선에 닻보다 margin 넘게 가까운 점 → 가려짐 / 시선이 닻 너머로 감 → 안 보임 / 응답 없음 → 판단 안 함
     5. 객체: 하나라도 찾음 → 있음. 하나도 못 찾음 + 안 보임 닻 있음 → hold_s 뒤 없음 의심 (missing). 그 외 → 가려짐 (보류)
     6. 쉬는 자세에서 move_m 또는 move_deg 넘게 → moving. 그 뒤 settle_s 동안 한 자리 → moved (from → to, 거리, 회전)
+  11-27 실물 (world_model 첫 주행): 천천히 민 0.34·0.27 m 는 따라감, 빠르게 굴리자 '움직이기 시작' 직후 놓침 (녹화 땐 5 cm/장이었는데 더 빨랐음)
+    → 움직이는 중엔 최근 속도로 다음 자리를 예측하고 문턱을 gate_moving (25 cm) 로 (사람 추적과 같은 방식)
+    → 맡기기는 key (floor_hazard 가구 하나) 로: 아는 key 면 새로 안 만듦 (놓친 뒤 옛 자리로 다시 맡겨 유령 #2 가 생겼음)
 """
 import math
 
@@ -66,6 +69,7 @@ class Obj:
         self.state, self.seen_t, self.lost_t, self.clear_t = PRESENT, t, None, None
         self.still_from, self.still_p, self.still_th = None, self.p.copy(), 0.0
         self.history = []                                # [(t, from, to)]
+        self.v = np.zeros(2)                             # 움직이는 중 속도 (m/s, odom) — 다음 자리 예측용
         self.last = {"found": len(a), "hidden": 0, "clear": 0}   # 이번 스캔 닻 상태 수 (로그용)
 
     def anchors(self):
@@ -82,34 +86,49 @@ class Obj:
 
 class WorldObjects:
     def __init__(self, gate=0.10, small=0.08, hold_s=1.0, move_m=0.10, move_deg=10.0, settle_s=1.0, margin=0.08,
-                 ray_deg=2.0, fit_err=0.04):
+                 ray_deg=2.0, fit_err=0.04, gate_moving=0.25):
         self.gate, self.small, self.hold_s, self.move_m, self.settle_s = gate, small, hold_s, move_m, settle_s
+        self.gate_moving, self.keys = gate_moving, {}
         self.move_th, self.margin, self.ray, self.fit_err = math.radians(move_deg), margin, math.radians(ray_deg), fit_err
         self.objs, self.next_id = {}, 1
 
-    def adopt(self, name, anchors, shape=None, t=0.0):
+    def adopt(self, name, anchors, shape=None, t=0.0, key=None):
         """비전 + LiDAR 로 확인된 객체를 맡김. anchors = 확인된 지지점 (점 하나 또는 여러 개, odom).
-           같은 이름 객체의 닻이 gate×2 안에 이미 있으면 그것 (모양만 새로)"""
+           key (맡기는 쪽의 가구 하나) 를 이미 알면 그 객체 그대로 — 위치는 LiDAR 가 주인 (맡기는 쪽 자리는 옛 것일 수 있음).
+           아니면 같은 이름 객체의 닻이 gate×2 안에 있으면 그것 (모양만 새로)"""
         a = np.asarray(anchors, float).reshape(-1, 2)
+        if key is not None and self.keys.get(key) in self.objs:
+            return self.objs[self.keys[key]], False
         for o in self.objs.values():
             d = np.hypot(*(o.anchors()[:, None, :] - a[None, :, :]).transpose(2, 0, 1))
             if o.name == name and float(d.min()) < self.gate * 2:
                 if shape is not None:
                     o.shape = (np.asarray(shape, float).reshape(-1, 2) - o.p) @ rot(o.th)   # 객체 기준으로
+                if key is not None:
+                    self.keys[key] = o.id
                 return o, False
         o = Obj(self.next_id, name, a, shape, t)
         self.objs[o.id] = o
+        if key is not None:
+            self.keys[key] = o.id
         self.next_id += 1
         return o, True
+
+    def key_of(self, oid):
+        return next((k for k, v in self.keys.items() if v == oid), None)
 
     def step(self, pts, sensor, t):
         """pts: 이번 스캔 점 (odom, 스캔 순서), sensor: 센서 위치 (odom). → 사건 [(종류, 객체, 정보)]"""
         pts = np.asarray(pts, float).reshape(-1, 2)
         cands = [c.mean(0) for c in segments(pts) if len(c) >= 2 and np.hypot(*(c.max(0) - c.min(0))) <= self.small]
-        pred = {o.id: o.anchors() for o in self.objs.values()}
+        pred, gate = {}, {}
+        for o in self.objs.values():                           # 움직이는 중이면 최근 속도로 예측 + 넓은 문턱
+            moving = o.state == MOVING
+            pred[o.id] = o.anchors() + (o.v * max(0.0, t - o.seen_t) if moving else 0.0)
+            gate[o.id] = self.gate_moving if moving else self.gate
         pairs = sorted((float(np.hypot(*(m - pred[oid][i]))), oid, i, j)
                        for oid in pred for i in range(len(pred[oid])) for j, m in enumerate(cands)
-                       if np.hypot(*(m - pred[oid][i])) <= self.gate)
+                       if np.hypot(*(m - pred[oid][i])) <= gate[oid])
         used_a, used_c, match = set(), set(), {oid: {} for oid in pred}
         for _, oid, i, j in pairs:
             if (oid, i) in used_a or j in used_c:
@@ -144,6 +163,9 @@ class WorldObjects:
             else:
                 i = idx[0]
                 p, th = m[i] - rot(o.th) @ o.local[i], o.th
+            dt = t - o.seen_t
+            if dt > 1e-3:                                      # 속도 (부드럽게) — 다음 스캔 예측용
+                o.v = 0.5 * o.v + 0.5 * (np.asarray(p, float) - o.p) / dt
             o.p, o.th = np.asarray(p, float), float(th)
             pred = o.anchors()
             looks = [self.look(pred[k], sensor, ang, rng) for k in range(n) if k not in m]
@@ -189,9 +211,11 @@ class WorldObjects:
         frm = o.rest_p.copy()
         turn = math.degrees(wrap(o.th - o.rest_th))
         o.history.append((t, frm.round(3).tolist(), o.p.round(3).tolist(), round(turn, 1)))
-        o.rest_p, o.rest_th, o.state = o.p.copy(), o.th, PRESENT
+        o.rest_p, o.rest_th, o.state, o.v = o.p.copy(), o.th, PRESENT, np.zeros(2)
         return [("moved", o, {"from": frm.round(3).tolist(), "to": o.p.round(3).tolist(),
                               "dist": round(float(np.hypot(*(o.p - frm))), 3), "turn": round(turn, 1)})]
 
     def drop(self, oid):
         self.objs.pop(oid, None)
+        for k in [k for k, v in self.keys.items() if v == oid]:
+            del self.keys[k]
