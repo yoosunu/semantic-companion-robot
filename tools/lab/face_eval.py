@@ -12,6 +12,7 @@
   쓰기 (Pi)
     ~/yolo_venv/bin/python face_eval.py neg ~/lfw [--max 4000]    음성 만들기 (사진 4000 장 ≈ 몇 분)
     ~/yolo_venv/bin/python face_eval.py report                     표: 상황별 정답률 / 크기별 / 문턱별 착각률 / 투표 규칙
+    ~/yolo_venv/bin/python face_eval.py replay                     11-26 face_owner (jasper / 아님 / 모름) 규칙으로 다시 흘리기
 """
 import glob
 import json
@@ -153,12 +154,58 @@ def report():
         print(line)
 
 
+def replay():
+    """11-26 face_owner.OwnerVote 로 기록을 다시 흘림: 나 = 이름 붙기까지 장 수·잘못 '아님' 횟수, 남 = 잘못 jasper·'아님' 도달"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "nodes", "perception"))
+    import face_owner as fo
+    G = gallery()
+    pos = {os.path.basename(p)[:-4]: dict(np.load(p)) for p in sorted(glob.glob(os.path.join(REC, "*.npz")))
+           if not os.path.basename(p).startswith("neg_")}
+    negs = [dict(np.load(p)) for p in sorted(glob.glob(os.path.join(REC, "neg_*.npz")))]
+    for d in pos.values():
+        d["cos"], _ = rescore(d, G)
+    for d in negs:
+        d["cos"], _ = rescore(d, G)
+    grid = [dict(thr=0.363, k=2, n=3, not_thr=0.30, not_k=5), dict(thr=0.40, k=2, n=3, not_thr=0.30, not_k=5),
+            dict(thr=0.40, k=2, n=3, not_thr=0.25, not_k=5), dict(thr=0.40, k=2, n=3, not_thr=0.30, not_k=3),
+            dict(thr=0.45, k=2, n=3, not_thr=0.30, not_k=5)]
+    print(f"지금 등록 {0 if G is None else len(G)} 장. 나 = 장면마다 '이름 붙은 장 / 잘못 아님 된 횟수', 남 = 같은 사람 사진을 한 추적처럼")
+    for kw in grid:
+        line = f"thr {kw['thr']:.3f} {kw['k']}/{kw['n']} 아님<{kw['not_thr']:.2f}×{kw['not_k']}:"
+        for name, d in pos.items():
+            one = d["nface"] == 1
+            v = fo.OwnerVote(**kw)
+            first, wrong, prev = None, 0, ""
+            for i, (c, px, det) in enumerate(zip(d["cos"][one], d["px"][one], d["det"][one])):
+                st, _ = v.update(float(c), float(px), float(det))
+                if st == "jasper" and first is None:
+                    first = i + 1
+                if st == "stranger" and prev != "stranger":
+                    wrong += 1
+                prev = st
+            line += f" {name} {first or 'x'}/{wrong}"
+        bad = good = tot = 0
+        for d in negs:
+            for w in np.unique(d["who"]):
+                m = d["who"] == w
+                if m.sum() < 5:
+                    continue
+                tot += 1
+                v = fo.OwnerVote(**kw)
+                sts = [v.update(float(c), float(px), 1.0)[0] for c, px in zip(d["cos"][m], d["px"][m])]
+                bad += "jasper" in sts
+                good += "stranger" in sts
+        print(line + (f" | 남 {tot} 명: 잘못 jasper {bad}, 아님 도달 {good}" if tot else ""))
+
+
 def main():
     a = sys.argv[1:]
     if a[:1] == ["neg"] and len(a) > 1:
         neg(os.path.expanduser(a[1]), int(a[a.index("--max") + 1]) if "--max" in a else 4000)
     elif a[:1] == ["report"]:
         report()
+    elif a[:1] == ["replay"]:
+        replay()
     else:
         print(__doc__)
 
