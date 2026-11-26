@@ -46,7 +46,7 @@ def neg(folder, max_n=4000):
     mset = set(multi)
     single = [f for f in files if f not in mset]
     pick = multi[:max_n] if len(multi) >= max_n else multi + list(rng.choice(single, min(len(single), max_n - len(multi)), replace=False))
-    cos, who, px = [], [], []
+    cos, who, px, feats = [], [], [], []
     for i, f in enumerate(pick):
         bgr = cv2.imread(f)
         fs = lab.faces(bgr) if bgr is not None else []
@@ -55,12 +55,13 @@ def neg(folder, max_n=4000):
         face, p = max(fs, key=lambda x: x[0][2])         # 가장 큰 얼굴 (LFW 는 가운데 사람)
         _, feat = lab.embed(bgr, face)
         _, c = lab.who(feat)
-        cos.append(c), who.append(pid[os.path.basename(os.path.dirname(f))]), px.append(p)
+        cos.append(c), who.append(pid[os.path.basename(os.path.dirname(f))]), px.append(p), feats.append(feat[0])
         if i % 500 == 0:
             print(f"  {i}/{len(pick)} … 지금까지 최고 {max(cos):.3f}")
     name = os.path.basename(os.path.normpath(folder))
     os.makedirs(REC, mode=0o700, exist_ok=True)
-    np.savez(os.path.join(REC, f"neg_{name}.npz"), cos=np.array(cos), who=np.array(who), px=np.array(px))
+    np.savez(os.path.join(REC, f"neg_{name}.npz"), cos=np.array(cos), who=np.array(who), px=np.array(px),
+             feat=np.array(feats, np.float32))                  # 11-26 벡터도 → 등록을 바꿔도 다시 검출 안 하고 점수만 다시
     c = np.array(cos)
     print(f"음성 {len(c)} 장 ({len(set(who))} 명): 유사도 중간값 {np.median(c):.3f}, 99% {np.quantile(c, 0.99):.3f}, "
           f"최고 {c.max():.3f}, ≥{COS_OK} {np.sum(c >= COS_OK)} 장")
@@ -75,12 +76,38 @@ def vote_ok(seq, thr, k, n):
     return None
 
 
+def gallery():
+    """등록 (~/.scr_faces/*.npy) 을 단위 벡터로. SFace 코사인 = 단위 벡터 내적 (cv2 없이 다시 계산)"""
+    g = [np.load(p) for p in sorted(glob.glob(os.path.join(HOME, ".scr_faces", "*.npy")))]
+    if not g:
+        return None
+    g = np.vstack(g).astype(np.float32)
+    return g / np.linalg.norm(g, axis=1, keepdims=True)
+
+
+def rescore(d, G):
+    """저장된 벡터로 지금 등록 기준 유사도 (벡터 없으면 기록 때 값 그대로)"""
+    if G is None or "feat" not in d or not len(d["feat"]):
+        return d["cos"], False
+    f = d["feat"] / np.linalg.norm(d["feat"], axis=1, keepdims=True)
+    return (f @ G.T).max(1), True
+
+
 def report():
+    G = gallery()
+    print(f"지금 등록: {0 if G is None else len(G)} 장 (11-26: 점수는 저장된 벡터로 지금 등록 기준 다시 계산, '기록때' = 찍을 때 등록 기준)")
     pos = {os.path.basename(p)[:-4]: dict(np.load(p)) for p in sorted(glob.glob(os.path.join(REC, "*.npz")))
            if not os.path.basename(p).startswith("neg_")}
     negs = {os.path.basename(p)[4:-4]: dict(np.load(p)) for p in sorted(glob.glob(os.path.join(REC, "neg_*.npz")))}
+    for d in pos.values():
+        d["cos_rec"] = d["cos"]
+        d["cos"], _ = rescore(d, G)
+    for k, d in negs.items():
+        d["cos"], ok = rescore(d, G)
+        if not ok:
+            print(f"  ! 음성 {k}: 벡터 없음 → 찍을 때 등록 기준 점수 (등록을 바꿨으면 neg 다시 돌릴 것)")
     print("=== ① 나: 상황별 (한 장 기준, 문턱 0.363)")
-    print(f"{'상황':16s} {'영상':>5s} {'얼굴':>5s} {'잡힘%':>6s} {'크기px':>7s} {'cos 중간':>8s} {'≥문턱%':>7s} {'2명이상%':>8s}")
+    print(f"{'상황':16s} {'영상':>5s} {'얼굴':>5s} {'잡힘%':>6s} {'크기px':>7s} {'cos 중간':>8s} {'≥문턱%':>7s} {'기록때%':>7s} {'2명이상%':>8s}")
     allc, allpx = [], []
     for k, d in pos.items():
         one = d["nface"] == 1
@@ -88,7 +115,7 @@ def report():
         n_img = int(d["n_img"])
         seen = len(set(d["img"].astype(int)))
         print(f"{k:16s} {n_img:5d} {len(c):5d} {seen / max(n_img, 1) * 100:6.0f} {np.median(px):7.0f} {np.median(c):8.2f} "
-              f"{(c >= COS_OK).mean() * 100:7.0f} {(~one).mean() * 100:8.0f}")
+              f"{(c >= COS_OK).mean() * 100:7.0f} {(d['cos_rec'] >= COS_OK).mean() * 100:7.0f} {(~one).mean() * 100:8.0f}")
         allc.append(c), allpx.append(px)
     if allc:
         c, px = np.concatenate(allc), np.concatenate(allpx)

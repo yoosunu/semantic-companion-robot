@@ -11,6 +11,8 @@
     face_lab.py enroll jasper     15 s 동안 고개를 천천히 좌우·위아래로 → 벡터 여러 장 저장 + 잘린 얼굴 모음 사진
     face_lab.py watch             1 s 마다 화면의 얼굴마다 이름·유사도 → 그림 ~/face_lab/latest.jpg (3 s 마다 기록도)
     face_lab.py forget jasper     등록 지우기
+    face_lab.py enroll jasper --add stand1 [--min-px 10]   11-26 로봇 시점 추가 등록: 지금 등록에 덧붙임 (옛 등록은 ~/.scr_faces/backup/ 에)
+                                  서 있는 얼굴은 로봇에서 15 px 안팎 → --min-px 로 작은 얼굴도 받음. 한 번에 최대 10 장
     face_lab.py watch --stream    실시간 영상: Mac 브라우저로 http://scr-pi.local:8080 (집 Wi-Fi 안에서만, 시험할 때만 켜기)
     face_lab.py watch --stream --det-w 640 --min-px 0   멀리 실험: 검출도 원본 크기로, 작은 얼굴도 인식해 보기
                                   (검출 결과는 ~/face_lab/log.csv 에 계속 쌓임: 얼굴 크기 vs 유사도 그래프용)
@@ -142,19 +144,22 @@ def frames():
         yield a if m.encoding == "bgr8" else a[:, :, ::-1].copy()
 
 
-def enroll(lab, name, secs=15.0):
+def enroll(lab, name, secs=15.0, add=None, min_px=None):
+    """add = 추가 등록 이름표 (예: stand1). 있으면 지금 등록에 덧붙이고 옛 것은 backup/ 에 (11-26: 앉은 정면 등록만으론 서 있는 너를 못 알아봄)"""
     os.makedirs(DB, mode=0o700, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
-    print(f"등록 {name}: {secs:.0f} s 동안 카메라를 보면서 고개를 천천히 좌우·위아래로 (한 명만 화면에)")
+    need = (MIN_FACE + 10) if min_px is None else min_px
+    cap = 10 if add else 24
+    print(f"등록 {name}{' + ' + add if add else ''}: {secs:.0f} s 동안 카메라를 보면서 고개를 천천히 좌우·위아래로 (한 명만 화면에, 얼굴 ≥ {need}px)")
     feats, crops, last, end = [], [], 0.0, time.time() + secs
     for bgr in frames():
         now = time.time()
-        if now > end or len(feats) >= 24:
+        if now > end or len(feats) >= cap:
             break
         if now - last < 0.4:
             continue
         fs = lab.faces(bgr)
-        if len(fs) != 1 or fs[0][1] < MIN_FACE + 10 or fs[0][0][14] < 0.8:
+        if len(fs) != 1 or fs[0][1] < need or fs[0][0][14] < 0.8:
             print(f"  건너뜀 (얼굴 {len(fs)}개{', 작음/흐림' if len(fs) == 1 else ''})")
             continue
         crop, feat = lab.embed(bgr, fs[0][0])
@@ -167,13 +172,26 @@ def enroll(lab, name, secs=15.0):
         return
     g = np.array(feats, np.float32)
     path = os.path.join(DB, name + ".npy")
+    if add and os.path.exists(path):
+        old = np.load(path)
+        bk = os.path.join(DB, "backup")
+        os.makedirs(bk, mode=0o700, exist_ok=True)
+        bpath = os.path.join(bk, f"{name}_{time.strftime('%m%d_%H%M%S')}_{len(old)}.npy")
+        np.save(bpath, old)
+        os.chmod(bpath, 0o600)
+        tag = os.path.join(DB, name + ".tags.json")                    # 장마다 어디서 왔나 (처음 등록 = base)
+        tags = json.load(open(tag)) if os.path.exists(tag) else ["base"] * len(old)
+        json.dump(tags + [add] * len(g), open(tag, "w"))
+        os.chmod(tag, 0o600)
+        print(f"옛 등록 {len(old)} 장 → {bpath}")
+        g = np.vstack([old, g])
     np.save(path, g)
     os.chmod(path, 0o600)
     n = g / np.linalg.norm(g, axis=1, keepdims=True)
     sim = n @ n.T
     off = sim[~np.eye(len(g), dtype=bool)]
     rows = [np.hstack(crops[i:i + 8] + [np.zeros_like(crops[0])] * (8 - len(crops[i:i + 8]))) for i in range(0, len(crops), 8)]
-    cv2.imwrite(os.path.join(OUT, f"enroll_{name}.jpg"), np.vstack(rows))
+    cv2.imwrite(os.path.join(OUT, f"enroll_{name}{'_' + add if add else ''}.jpg"), np.vstack(rows))
     print(f"저장: {path} ({len(g)}장 × 128)  등록 사진끼리 유사도 평균 {off.mean():.2f} (최소 {off.min():.2f})")
     print(f"잘린 얼굴 모음: {OUT}/enroll_{name}.jpg")
 
@@ -314,7 +332,8 @@ def main():
     lab = Lab(models, arg("--det-w", DET_W), arg("--min-px", MIN_FACE))
     print(f"검출 폭 {lab.det_w}, 인식 최소 얼굴 {lab.min_px}px (320 기준)")
     if a[0] == "enroll":
-        enroll(lab, a[1])
+        enroll(lab, a[1], arg("--secs", 15.0), a[a.index("--add") + 1] if "--add" in a else None,
+               int(a[a.index("--min-px") + 1]) if "--min-px" in a else None)
     elif a[0] == "record":
         record(lab, a[1], arg("--secs", 20.0))
     else:
